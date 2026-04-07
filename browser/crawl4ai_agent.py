@@ -62,7 +62,13 @@ class Crawl4AIAgent:
             )
 
         logger.info("[Crawl4AI] 🕷️  Initialising Tier 3 crawler...")
-        self._crawler = AsyncWebCrawler(verbose=False)
+        
+        from crawl4ai import BrowserConfig, CrawlerRunConfig  # type: ignore
+        browser_cfg = BrowserConfig(
+            headless=True,
+            extra_args=["--no-sandbox"] if not config.BROWSER_USE_SANDBOX else []
+        )
+        self._crawler = AsyncWebCrawler(config=browser_cfg)
         await self._crawler.__aenter__()
         alert("INFO", "Crawl4AI session started")
         logger.info("[Crawl4AI] ✅ Ready.")
@@ -184,6 +190,14 @@ class Crawl4AIAgent:
         url = config.GOOGLE_AI_MODE_URL + urllib.parse.quote_plus(query)
         logger.info(f"[Crawl4AI] 🔍 Google AI Mode scrape: {query}")
         return await self.scrape(url)
+
+    async def search_google_ai_mode(self, query: str) -> Optional[str]:
+        """Alias for search_google_ai (scrape) to maintain HybridEngine compatibility."""
+        return await self.search_google_ai(query)
+
+    async def extract_aeo_data(self) -> list:
+        """Crawl4AI returns markdown, usually missing the raw JSON-LD blocks."""
+        return []
 
     # ─────────────────────────────────────────────────────────────────
     # HELPERS

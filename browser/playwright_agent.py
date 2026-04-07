@@ -103,13 +103,17 @@ class PlaywrightAgent:
         # ── Generate per-session fingerprint bundle (Task 2) ──────────────
         self._fingerprint = get_fingerprint_bundle()
         vp = self._fingerprint["viewport"]
+        launch_args = []
 
-        launch_args = [
-            "--no-sandbox",
+        if not config.BROWSER_USE_SANDBOX:
+            launch_args.append("--no-sandbox")
+            launch_args.append("--disable-setuid-sandbox")
+
+        launch_args.extend([
             "--disable-dev-shm-usage",
             f"--window-size={vp['width']},{vp['height']}",
             "--disable-blink-features=AutomationControlled",
-        ]
+        ])
 
         geolocation = None
         permissions = []

@@ -109,9 +109,14 @@ def save_results(rows: list, original_filepath: str) -> None:
             row_dict[f"AI_{k.upper()}"] = info.get("value", "")
 
         # Write ordered data based on actual worksheet headers
+        # Defensive check: ensure no lists/dicts are passed to openpyxl, convert to string if needed.
         ordered_data = []
         for h in existing_headers:
-            ordered_data.append(row_dict.get(h, ""))
+            val = row_dict.get(h, "")
+            # openpyxl cannot handle lists/dicts directly in ws.append()
+            if isinstance(val, (list, dict)):
+                val = str(val)
+            ordered_data.append(val)
             
         ws.append(ordered_data)
 
@@ -178,7 +183,10 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
             
         ordered_data = []
         for h in all_headers:
-            ordered_data.append(row_dict.get(h, ""))
+            val = row_dict.get(h, "")
+            if isinstance(val, (list, dict)):
+                val = str(val)
+            ordered_data.append(val)
             
         ws.append(ordered_data)
 

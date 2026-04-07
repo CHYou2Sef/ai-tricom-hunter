@@ -99,9 +99,15 @@ class NodriverAgent:
         self._browser = await nd.start(
             browser_args=browser_args,
             headless=False,               # Headed mode is more stealthy
+            no_sandbox=not config.BROWSER_USE_SANDBOX,  # Industrial stability
         )
+        
+        # Safety wait for CDP to stabilize
+        await asyncio.sleep(2)
 
-        self._page = await self._browser.get("about:blank")
+        # In nodriver 0.48+, the browser object itself can be used for navigation
+        # and evaluate calls as it manages the primary tab context.
+        self._page = self._browser
 
         # Inject fingerprint into every new document (CDP equivalent)
         await self._inject_fingerprint()
@@ -253,6 +259,39 @@ class NodriverAgent:
         except Exception as exc:
             logger.error(f"[Nodriver] search_google_ai error: {exc}")
             return None
+
+    async def search_google_ai_mode(self, query: str) -> Optional[str]:
+        """Alias for search_google_ai to maintain HybridEngine compatibility."""
+        return await self.search_google_ai(query)
+
+    async def extract_aeo_data(self) -> list:
+        """
+        CDP implementation of JSON-LD / Schema.org extraction.
+        Captures script[type="application/ld+json"] tags from the page.
+        """
+        if not self._page:
+            return []
+        try:
+            # Evaluate script to find all JSON-LD blocks
+            script = """
+            Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+                 .map(s => s.innerText)
+            """
+            raw_blocks = await self._page.evaluate(script)
+            extracted = []
+            if isinstance(raw_blocks, list):
+                for s in raw_blocks:
+                    if not s or not s.strip(): continue
+                    try:
+                        import json
+                        data = json.loads(s)
+                        if isinstance(data, dict): extracted.append(data)
+                        elif isinstance(data, list): extracted.extend(data)
+                    except: continue
+            return extracted
+        except Exception as exc:
+            logger.debug(f"[Nodriver] AEO extraction failed: {exc}")
+            return []
 
     async def search_gemini_ai(self, query: str) -> Optional[str]:
         """

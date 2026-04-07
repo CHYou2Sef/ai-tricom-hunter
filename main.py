@@ -102,7 +102,7 @@ class ExcelFileHandler(FileSystemEventHandler):
     def on_created(self, event: FileCreatedEvent) -> None:
         if event.is_directory: return
         filepath = event.src_path
-        if "_part_" in os.path.basename(filepath): return # Skip
+        if "_part_" in os.path.basename(filepath) or filepath.endswith(".meta.json"): return # Skip
         ext = os.path.splitext(filepath)[1].lower()
         if ext not in config.ACCEPTED_EXTENSIONS: return
         if filepath in self._seen: return
@@ -117,7 +117,7 @@ class ExcelFileHandler(FileSystemEventHandler):
     def on_modified(self, event) -> None:
         if event.is_directory: return
         filepath = event.src_path
-        if "_part_" in os.path.basename(filepath): return # Skip
+        if "_part_" in os.path.basename(filepath) or filepath.endswith(".meta.json"): return # Skip
         ext = os.path.splitext(filepath)[1].lower()
         if ext not in config.ACCEPTED_EXTENSIONS: return
 
@@ -143,7 +143,7 @@ def scan_existing_files(queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, s
         for filename in sorted(os.listdir(d)):
             ext = os.path.splitext(filename)[1].lower()
             if ext in config.ACCEPTED_EXTENSIONS:
-                if "_part_" in filename: continue # Skip chunks
+                if "_part_" in filename or filename.endswith(".meta.json"): continue # Skip chunks & meta
                 filepath = os.path.join(d, filename)
                 if filepath not in seen_files:
                     logger.info(f"[Setup] Prioritizing {filename} from {os.path.basename(d)}")

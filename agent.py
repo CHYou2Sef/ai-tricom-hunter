@@ -17,6 +17,7 @@ import time
 import asyncio
 import random
 import re
+import json
 from typing import List, Optional, Tuple
 
 from utils.metrics import PerformanceTracker
@@ -45,12 +46,12 @@ _agent_pool = asyncio.Queue()
 
 async def init_agent_pool(count: int):
     """Pre-initialize a pool of browser hybrid engines."""
-    logger.info(f"[AgentPool] Initializing {count} workers...")
+    logger.info(f"[AgentPool] Initializing {count} workers (Default Tier: {config.HYBRID_DEFAULT_TIER})...")
     for i in range(count):
         from browser.hybrid_engine import HybridAutomationEngine
         agent = HybridAutomationEngine(worker_id=i+1)
-        # Pre-warm Tier 1 for immediate speed, the engine will handle escalation if needed.
-        await agent.start_tier(1)
+        # Pre-warm the default tier for immediate speed
+        await agent.start_tier(config.HYBRID_DEFAULT_TIER)
         await _agent_pool.put(agent)
 
 async def close_agent_pool():
@@ -135,7 +136,9 @@ async def _search_and_extract_phone(row: ExcelRow, agent, query: str, source_tag
 async def process_row(row: ExcelRow, agent) -> None:
     global _captcha_streak
 
-    if row.status in ("SKIP", "DONE"):
+    # Skip only DONE rows. "SKIP" and "NO TEL" are re-evaluated if REPROCESS_FAILED_ROWS is True.
+    can_reprocess = config.REPROCESS_FAILED_ROWS and row.status in ("SKIP", "NO TEL")
+    if row.status == "DONE" or (row.status in ("SKIP", "NO TEL") and not config.REPROCESS_FAILED_ROWS):
         logger.info(f"[Agent] Row #{row.row_index} SKIPPED — status={row.status}.")
         return
 
@@ -299,9 +302,11 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
     for row_key, json_keys in field_map.items():
         for jk in json_keys:
             val = data.get(jk)
-            # Handle nested address dict
+            # Handle nested collections (dict or list)
             if isinstance(val, dict):
                 val = ", ".join(str(v) for v in val.values() if v)
+            elif isinstance(val, list):
+                val = ", ".join(str(v) for v in val if v)
             if val and str(val).upper() not in ("NOT_FOUND", "NONE", "", "NULL"):
                 clean_val = str(val).strip()
                 # 1. Fill the audit metadata
@@ -459,7 +464,12 @@ async def process_file_async(filepath: str) -> None:
         # Sync with JSON
         await asyncio.to_thread(sync_with_previous_results, rows, filepath)
 
-        rows_to_process = [r for r in rows if r.status not in ("DONE", "NO TEL", "SKIP")]
+        # Select rows to process: 
+        # Always PENDING/None, and conditionally NO TEL/SKIP based on config.
+        if config.REPROCESS_FAILED_ROWS:
+            rows_to_process = [r for r in rows if r.status != "DONE"]
+        else:
+            rows_to_process = [r for r in rows if r.status not in ("DONE", "NO TEL", "SKIP")]
 
         total = len(rows_to_process)
         if total > 0:

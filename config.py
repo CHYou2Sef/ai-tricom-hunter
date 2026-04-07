@@ -86,7 +86,9 @@ def get_output_dir(input_folder_name: str) -> Path:
     return path
 
 # ── Parallelism & Future Scope ──
+# 3 Workers = 3 simultaneous browser windows
 MAX_CONCURRENT_WORKERS = int(os.getenv("MAX_CONCURRENT_WORKERS", "1"))
+BROWSER_USE_SANDBOX    = os.getenv("BROWSER_USE_SANDBOX", "false").lower() == "true"
 LANGCHAIN_ENABLED      = os.getenv("LANGCHAIN_ENABLED", "false").lower() == "true"
 
 # Number of rows per RETRY chunk file sent back to incoming/.
@@ -97,10 +99,15 @@ RETRY_CHUNK_SIZE = int(os.getenv("RETRY_CHUNK_SIZE", "50"))
 # 500 is the standard for long-running reliability.
 DECOMPOSITION_CHUNK_SIZE = int(os.getenv("DECOMPOSITION_CHUNK_SIZE", "1000"))
 
+# ── Recovery & Second Chance ──
+# Set to True to re-process rows already marked as "NO TEL" or "SKIP".
+# Useful for recovering from previous browser crashes.
+REPROCESS_FAILED_ROWS = True
+
 # ── Proxy Rotation (Anti-Ban) ──
-PROXY_ENABLED                  = False  # Off initially. Turns ON automatically on CAPTCHA block
-PROXY_ROTATE_EVERY_N           = 0      # Optional: set to e.g. 15 to rotate aggressively
-PROXY_ROTATION_ACTIVATES_ON_BAN = True   # If True, a 5-captcha streak activates proxies automatically
+PROXY_ENABLED                  = True   # ON by default to solve CAPTCHA problems immediately
+PROXY_ROTATE_EVERY_N           = 5      # Rotate every 5 rows to stay fresh
+PROXY_ROTATION_ACTIVATES_ON_BAN = True   # Mandatory fallback
 
 # ── Proxy State Machine Thresholds ──
 PROXY_WARN_THRESHOLD  = int(os.getenv("PROXY_WARN_THRESHOLD", "10"))   # errors before WARN state
@@ -193,9 +200,8 @@ HYBRID_TIER3_DOMAINS = [
     "amazon.", "zalando.", "fnac.com", "cdiscount.com",
 ]
 # Engine to use when no explicit decision is made (fallback default)
-# Engine to use when no explicit decision is made (fallback default)
-# Tier 1 (Playwright) is the most robust and standard for general use.
-HYBRID_DEFAULT_TIER = int(os.getenv("HYBRID_DEFAULT_TIER", "1"))
+# Tier 2 (Nodriver) is prioritized to bypass CAPTCHA/Bot detection (Stealth-first).
+HYBRID_DEFAULT_TIER = int(os.getenv("HYBRID_DEFAULT_TIER", "2"))
 
 # ── Obsolete / Fail-safe (For backward compatibility) ──
 # This is no longer used by the Hybrid Waterfall engine but kept as a 

@@ -9,6 +9,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# ----
+/docs
+
 # ── Project Specific ──
 browser_profiles/
 .crawl4ai_cache/
@@ -46,6 +49,7 @@ htmlcov/
 .pytype/
 
 # ── IDEs ──
+.gemini
 .idea/
 .vscode/
 .project
