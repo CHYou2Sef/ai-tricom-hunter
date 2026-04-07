@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+    <rect width="100%" height="100%" fill="#0A192F" rx="10" ry="10"/>
+    <defs>
+        <style>
+            .t0 { fill: rgba(210, 32, 38, 0.5); stroke: #D22026; stroke-width: 2px; }
+            .t1 { fill: rgba(30, 66, 138, 0.6); stroke: #1E428A; stroke-width: 2px; }
+            .t2 { fill: rgba(79, 153, 214, 0.4); stroke: #4F99D6; stroke-width: 2px; }
+            .t3 { fill: rgba(128, 130, 133, 0.3); stroke: #808285; stroke-width: 2px; }
+            .title { fill: #4F99D6; font-family: 'Montserrat', sans-serif; font-size: 24px; font-weight: bold; text-anchor: middle; }
+            .label { fill: #FFF; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: bold; text-anchor: middle; }
+            .pct { fill: #D22026; font-family: 'Inter', sans-serif; font-size: 18px; font-weight: bold; text-anchor: middle; }
+            .desc { fill: #808285; font-family: 'Inter', sans-serif; font-size: 11px; text-anchor: middle; }
+        </style>
+    </defs>
+
+    <text class="title" x="400" y="50">🏆 EEAT Search Reliability Pyramid</text>
+    <text x="400" y="80" fill="#808285" font-family="Inter" font-size="14" text-anchor="middle">Mise en Cascade Hiérarchique</text>
+
+    <!-- Pyramid Layers -->
+    <!-- Tier 0 -->
+    <path class="t0" d="M 400 120 L 250 220 L 550 220 Z"/>
+    <text class="label" x="400" y="160">TIER 0</text>
+    <text class="label" x="400" y="175">Google SGE (AI)</text>
+    <text class="pct" x="400" y="200">95% Fiabilité</text>
+
+    <!-- Tier 1 -->
+    <path class="t1" d="M 250 220 L 150 320 L 650 320 L 550 220 Z"/>
+    <text class="label" x="400" y="250">TIER 1</text>
+    <text class="label" x="400" y="265">AEO (Schema.org / JSON-LD)</text>
+    <text class="pct" x="400" y="290">90% Fiabilité</text>
+
+    <!-- Tier 2 -->
+    <path class="t2" d="M 150 320 L 50 420 L 750 420 L 650 320 Z"/>
+    <text class="label" x="400" y="350">TIER 2</text>
+    <text class="label" x="400" y="365">SQO (Google Dorks / Snippets)</text>
+    <text class="pct" x="400" y="390">70% Fiabilité</text>
+
+    <!-- Tier 3 -->
+    <path class="t3" d="M 50 420 L 0 520 L 800 520 L 750 420 Z"/>
+    <text class="label" x="400" y="450">TIER 3</text>
+    <text class="label" x="400" y="465">GEO (Gemini RAG context)</text>
+    <text class="pct" x="400" y="490">85% Fiabilité (Synthèse)</text>
+
+    <!-- Side Labels: Authority vs Volume -->
+    <path d="M 50 120 L 50 520" stroke="#D22026" stroke-width="2" />
+    <text x="40" y="320" fill="#D22026" font-family="Inter" font-size="12" font-weight="bold" transform="rotate(-90 40 320)" text-anchor="middle">AUTORITÉ SOURCE</text>
+
+    <path d="M 750 520 L 750 120" stroke="#1E428A" stroke-width="2" />
+    <text x="765" y="320" fill="#1E428A" font-family="Inter" font-size="12" font-weight="bold" transform="rotate(90 765 320)" text-anchor="middle">PROFONDEUR CALCUL</text>
+
+</svg>

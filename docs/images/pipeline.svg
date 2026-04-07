@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1200" width="1000" height="1200">
+    <rect width="100%" height="100%" fill="#0B1F3A"/>
+    <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#00D1FF" />
+        </marker>
+        <style>
+            .box { fill: rgba(0, 209, 255, 0.05); stroke: #00D1FF; stroke-width: 2px; rx: 8; ry: 8; }
+            .tier { fill: rgba(30, 58, 95, 0.2); stroke: #00D1FF; stroke-width: 1.5px; stroke-dasharray: 4; rx: 8; ry: 8; }
+            .output { fill: rgba(0, 191, 165, 0.1); stroke: #00BFA5; stroke-width: 2px; rx: 8; ry: 8;}
+            .title { fill: #FFF; font-family: 'Segoe UI', Arial, sans-serif; font-size: 16px; font-weight: bold; text-anchor: middle; }
+            .desc { fill: #A0C0E0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; text-anchor: middle; }
+            .line { stroke: #00D1FF; stroke-width: 3px; fill: none; marker-end: url(#arrow); }
+            .dash-line { stroke: #00D1FF; stroke-width: 2px; fill: none; stroke-dasharray: 5,5; marker-end: url(#arrow); }
+        </style>
+    </defs>
+
+    <!-- Node 1: Input Excel -->
+    <rect class="box" x="380" y="50" width="240" height="70"/>
+    <text class="title" x="500" y="80">📥 1. Raw Excel File</text>
+    <text class="desc" x="500" y="100">input/incoming/raw_list.xlsx</text>
+
+    <!-- Edge 1 to 2 -->
+    <path class="line" d="M 500 120 L 500 180"/>
+
+    <!-- Node 2: pre_process.py -->
+    <rect class="box" x="380" y="180" width="240" height="70"/>
+    <text class="title" x="500" y="210">⚙️ 2. pre_process.py (Daemon)</text>
+    <text class="desc" x="500" y="230">Cleans &amp; Classifies Rows by Density</text>
+
+    <!-- Paths from 2 to Buckets -->
+    <path class="line" d="M 500 250 L 500 280 L 250 280 L 250 310"/>
+    <path class="line" d="M 500 250 L 500 310"/>
+    <path class="line" d="M 500 250 L 500 280 L 750 280 L 750 310"/>
+
+    <!-- Node 3a, 3b, 3c: Buckets -->
+    <rect class="box" x="150" y="310" width="200" height="60"/>
+    <text class="title" x="250" y="335">📁 std_input/</text>
+    <text class="desc" x="250" y="355">High Density Arrays</text>
+
+    <rect class="box" x="400" y="310" width="200" height="60"/>
+    <text class="title" x="500" y="335">📁 RS_input/</text>
+    <text class="desc" x="500" y="355">Sparse Company Names</text>
+
+    <rect class="box" x="650" y="310" width="200" height="60"/>
+    <text class="title" x="750" y="335">📁 sir_input/</text>
+    <text class="desc" x="750" y="355">SIREN/SIRET Fallbacks</text>
+
+    <!-- Paths from Buckets to main.py -->
+    <path class="line" d="M 250 370 L 250 400 L 500 400 L 500 430"/>
+    <path class="line" d="M 500 370 L 500 430"/>
+    <path class="line" d="M 750 370 L 750 400 L 500 400 L 500 430"/>
+
+    <!-- Node 4: main.py -->
+    <rect class="box" x="380" y="430" width="240" height="70"/>
+    <text class="title" x="500" y="460">🔄 3. main.py (Orchestrator)</text>
+    <text class="desc" x="500" y="480">Async Matrix (File Semaphores)</text>
+
+    <!-- Path from main.py to agent.py -->
+    <path class="line" d="M 500 500 L 500 560"/>
+
+    <!-- Node 5: agent.py container -->
+    <rect class="tier" x="80" y="560" width="840" height="260"/>
+    <text class="title" x="500" y="585">🧠 4. agent.py (The Brain: Generative Extraction Cascade)</text>
+
+    <!-- Tiers Boxes -->
+    <rect class="box" x="110" y="620" width="240" height="80"/>
+    <text class="title" x="230" y="650">⭐ Tier 0: SGE AI Mode</text>
+    <text class="desc" x="230" y="670">Force Google AI Overview</text>
+    <text class="desc" x="230" y="685">(Parses generated JSON Object)</text>
+
+    <rect class="box" x="380" y="620" width="240" height="80"/>
+    <text class="title" x="500" y="650">🔍 Tier 1: AEO Schema-LD</text>
+    <text class="desc" x="500" y="670">Inspects Knowledge Panel DOM</text>
+    <text class="desc" x="500" y="685">(Extracts structured contact info)</text>
+
+    <rect class="box" x="650" y="620" width="240" height="80"/>
+    <text class="title" x="770" y="650">🌐 Tier 2: Search &amp; RAG</text>
+    <text class="desc" x="770" y="670">Fallback to generic text strings</text>
+    <text class="desc" x="770" y="685">(Gemini extraction from fragments)</text>
+
+    <!-- Internal pathing within agent -->
+    <path class="dash-line" d="M 350 660 L 380 660"/>
+    <text x="365" y="655" font-family="Arial" font-size="10" fill="#00D1FF" text-anchor="middle">Fail</text>
+    
+    <path class="dash-line" d="M 620 660 L 650 660"/>
+    <text x="635" y="655" font-family="Arial" font-size="10" fill="#00D1FF" text-anchor="middle">Fail</text>
+
+    <!-- Paths from Tiers to Truth Engine -->
+    <path class="line" d="M 230 700 L 230 780 L 500 780 L 500 870"/>
+    <path class="line" d="M 500 700 L 500 870"/>
+    <path class="line" d="M 770 700 L 770 780 L 500 780 L 500 870"/>
+
+    <!-- Node 6: Truth Engine -->
+    <rect class="box" x="360" y="870" width="280" height="70"/>
+    <text class="title" x="500" y="900">🧬 5. confidence.py &amp; enricher</text>
+    <text class="desc" x="500" y="920">Validates Strings &amp; Weighs Sources</text>
+
+    <!-- Output split -->
+    <path class="line" d="M 500 940 L 500 980 L 320 980 L 320 1020"/>
+    <path class="line" d="M 500 940 L 500 980 L 680 980 L 680 1020"/>
+
+    <!-- Node 7a: Output Excel -->
+    <rect class="output" x="180" y="1020" width="280" height="70"/>
+    <text class="title" x="320" y="1050">📊 6a. Enriched Output File</text>
+    <text class="desc" x="320" y="1070">output/FINAL_results.xlsx</text>
+
+    <!-- Node 7b: Output JSON -->
+    <rect class="output" x="540" y="1020" width="280" height="70"/>
+    <text class="title" x="680" y="1050">🔐 6b. Compliance Ledger</text>
+    <text class="desc" x="680" y="1070">output/_AUDIT.json (EEAT Verifiability)</text>
+
+</svg>

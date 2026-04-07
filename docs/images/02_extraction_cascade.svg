@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600" width="900" height="600">
+    <rect width="100%" height="100%" fill="#0B1F3A"/>
+    <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#00D1FF" />
+        </marker>
+        <style>
+            .init { fill: rgba(0, 209, 255, 0.1); stroke: #00D1FF; stroke-width: 2px; rx: 8; ry: 8; }
+            .optimal { fill: rgba(2, 132, 199, 0.3); stroke: #38BDF8; stroke-width: 2px; rx: 8; ry: 8; }
+            .fallback { fill: rgba(71, 85, 105, 0.3); stroke: #94A3B8; stroke-width: 2px; stroke-dasharray: 4; rx: 8; ry: 8; }
+            .failure { fill: rgba(127, 29, 29, 0.4); stroke: #FCA5A5; stroke-width: 2px; rx: 8; ry: 8; }
+            .valid { fill: rgba(4, 120, 87, 0.4); stroke: #34D399; stroke-width: 2px; rx: 8; ry: 8; }
+            .txt-title { fill: #FFF; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: bold; text-anchor: middle; }
+            .txt-desc { fill: #CBD5E1; font-family: 'Inter', sans-serif; font-size: 11px; text-anchor: middle; }
+            .line { stroke: #00D1FF; stroke-width: 2px; fill: none; marker-end: url(#arrow); }
+            .label { fill: #00D1FF; font-family: 'Inter', sans-serif; font-size: 11px; font-weight: bold; }
+        </style>
+    </defs>
+
+    <!-- Source -->
+    <rect class="init" x="50" y="250" width="160" height="60"/>
+    <text class="txt-title" x="130" y="275">🎯 Target Entity</text>
+    <text class="txt-desc" x="130" y="295">Name + Geospatial Bound</text>
+
+    <!-- Tiers (Vertical list at x=300) -->
+    <rect class="optimal" x="300" y="80" width="200" height="60"/>
+    <text class="txt-title" x="400" y="105">⭐ Tier 0: SGE AI</text>
+    <text class="txt-desc" x="400" y="125">Force Google Overview</text>
+
+    <rect class="optimal" x="300" y="200" width="200" height="60"/>
+    <text class="txt-title" x="400" y="225">🔍 Tier 1: Schema-LD</text>
+    <text class="desc" x="400" y="245">Knowledge Panel JSON</text>
+
+    <rect class="fallback" x="300" y="320" width="200" height="60"/>
+    <text class="txt-title" x="400" y="345">🌐 Tier 2: DOM Scrape</text>
+    <text class="txt-desc" x="400" y="365">Text fallback search</text>
+
+    <rect class="fallback" x="300" y="440" width="200" height="60"/>
+    <text class="txt-title" x="400" y="465">🤖 Tier 3: Gemini RAG</text>
+    <text class="txt-desc" x="400" y="485">Contextual Inference</text>
+
+    <!-- Paths from Source to Tier 0 -->
+    <path class="line" d="M 210 280 L 250 280 L 250 110 L 300 110"/>
+
+    <!-- Paths cascading down -->
+    <path class="line" d="M 400 140 L 400 200"/>
+    <text class="label" x="410" y="175">SGE Null</text>
+
+    <path class="line" d="M 400 260 L 400 320"/>
+    <text class="label" x="410" y="295">No JSON-LD</text>
+
+    <path class="line" d="M 400 380 L 400 440"/>
+    <text class="label" x="410" y="415">No Tel in DOM</text>
+
+    <!-- Validators (x=650) -->
+    <rect class="valid" x="650" y="150" width="200" height="60"/>
+    <text class="txt-title" x="750" y="175">✅ Regex Validation</text>
+    <text class="txt-desc" x="750" y="195">Probability > 85%</text>
+
+    <rect class="failure" x="650" y="380" width="200" height="60"/>
+    <text class="txt-title" x="750" y="405">❌ NON_TROUVE</text>
+    <text class="txt-desc" x="750" y="425">Trigger Chunk Retry</text>
+
+    <rect class="init" x="650" y="50" width="200" height="50"/>
+    <text class="txt-title" x="750" y="80">💾 Commit Vector</text>
+
+    <path class="line" d="M 750 150 L 750 100"/>
+    <text class="label" x="760" y="130">Passes</text>
+
+    <!-- Success paths to Valid -->
+    <path class="line" d="M 500 110 L 580 110 L 580 180 L 650 180"/>
+    <path class="line" d="M 500 230 L 650 180"/>
+    <path class="line" d="M 500 350 L 580 350 L 580 180 L 650 180"/>
+    <path class="line" d="M 500 470 L 620 470 L 620 180 L 650 180"/>
+    
+    <!-- Fail paths to Failure from Validation -->
+    <path class="line" d="M 750 210 L 750 380"/>
+    <text class="label" x="760" y="295">Fails Logic</text>
+
+    <!-- Failure from RAG -->
+    <path class="line" d="M 500 470 L 650 410"/>
+
+    <!-- Title Header -->
+    <text class="txt-title" x="450" y="30" font-size="20">Generative Extraction Cascade</text>
+</svg>

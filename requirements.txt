@@ -1,0 +1,60 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  requirements.txt  —  All Python dependencies                    ║
+# ║                                                                  ║
+# ║  Install everything with one command:                            ║
+# ║      pip install -r requirements.txt                             ║
+# ║                                                                  ║
+# ║  After installing, also run:                                     ║
+# ║      playwright install chromium                                 ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+# ── Browser Automation (The Hybrid Engines) ───────────────────────────
+# Tier 1: Playwright (Modern, fast, async)
+playwright>=1.43.0
+
+# Tier 2: Nodriver (Stealth CDP-only agent, zero WebDriver fingerprints)
+nodriver>=0.34
+websockets>=13.0
+
+# Tier 3: Crawl4AI (Managed scraper, bypasses WAF, markdown support)
+crawl4ai>=0.4.0
+
+# commented in 06-04
+# Legacy: Selenium (Classic automation)
+#selenium>=4.18.0
+#webdriver-manager>=4.0.1
+
+
+# ── Data Extraction & Parsing ──────────────────────────────────────────
+# Fast HTML parsing
+selectolax>=0.3.21
+beautifulsoup4>=4.12.3
+lxml>=5.1.0
+
+# Excel File Handling
+openpyxl>=3.1.2
+pandas>=2.2.0
+
+
+# ── System & Utilities ────────────────────────────────────────────────
+# 24/7 Filesystem Monitoring
+watchdog>=4.0.0
+
+# Async HTTP/Network
+httpx>=0.27.0
+aiofiles>=23.2.1
+
+# Environment and Config
+python-dotenv>=1.0.0
+
+
+# ── Quality Assurance ─────────────────────────────────────────────────
+# Testing Framework
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+
+
+# ── Quick Setup Commands ──────────────────────────────────────────────
+# Step 1: pip install -r requirements.txt
+# Step 2: python3 -m playwright install chromium
+# ──────────────────────────────────────────────────────────────────────
