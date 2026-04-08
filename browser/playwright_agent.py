@@ -18,7 +18,7 @@ import re
 import json
 import urllib.parse
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from playwright.async_api import (
     async_playwright,
@@ -29,6 +29,7 @@ from playwright.async_api import (
 )
 
 import config
+from browser.base_agent import BaseBrowserAgent
 from utils.anti_bot import (
     get_random_user_agent,
     short_delay,

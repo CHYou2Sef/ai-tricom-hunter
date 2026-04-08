@@ -13,24 +13,25 @@
 """
 
 import os
+import sys
 import time
-import asyncio
 import random
+import asyncio
 import re
 import json
-from typing import List, Optional, Tuple
-
-from utils.metrics import PerformanceTracker
+import pandas as pd
+from typing import List, Dict, Any, Optional, Tuple
 
 import config
-from excel.cleaner import clean_and_classify
-from excel.reader import ExcelRow, read_excel
+from excel.reader import ExcelRow, read_excel, sync_with_previous_results
 from excel.writer import save_results, save_subset_to_excel
-from enrichment.row_enricher import enrich_row
-from search.phone_extractor import extract_phones, get_best_phone, normalize_phone
+from utils.logger import get_logger, alert
+from utils.metrics import PerformanceTracker
+from utils.anti_bot import action_delay_async, human_delay
 from utils.text_cleaner import clean_html_to_text
-
-from utils.logger import get_logger
+from search.phone_extractor import extract_phones, get_best_phone, normalize_phone
+from browser.hybrid_engine import HybridAutomationEngine
+from enrichment.row_enricher import enrich_row
 
 logger = get_logger(__name__)
 
@@ -142,102 +143,35 @@ async def process_row(row: ExcelRow, agent) -> None:
         logger.info(f"[Agent] Row #{row.row_index} SKIPPED — status={row.status}.")
         return
 
-    logger.info(
-        f"[Agent] Processing row #{row.row_index} | "
-        f"type={row.search_type} | nom='{row.get_search_name()}'"
-    )
-
+    logger.info(f"[Agent] Processing row #{row.row_index} | {row.get_search_name()}")
     row.processing_start_ts = time.perf_counter()
     best_phone = None
-    last_content = None
 
-    # ═════════════════════════════════════════════════════════════════
-    # ⭐ TIER 0 — Google AI Mode (PRIMARY, ALWAYS FIRST)
-    # Exactly what the user does manually: type name+address, get JSON.
-    # ═════════════════════════════════════════════════════════════════
-    nom   = row.nom or row.siren or ""
-    adr   = row.adresse or ""
-    ai_mode_prompt = config.AI_MODE_SEARCH_PROMPT.format(nom=nom, adresse=adr)
-    
-    logger.info(f"    ⭐ [Tier 0 — AI Mode] Prompt: {ai_mode_prompt[:100]}...")
-    row.search_queries_used.append(f"AI_MODE: {ai_mode_prompt}")
-    
-    ai_raw = await agent.search_google_ai_mode(ai_mode_prompt)
-    
-    if ai_raw:
-        row.raw_ai_responses.append({
-            "text":   ai_raw,
-            "source": "google_ai_mode",
-            "query":  ai_mode_prompt,
-        })
-        # Parse the JSON and fill ALL row fields in one shot
-        best_phone = _fill_row_from_ai_mode(ai_raw, row)
-        if best_phone:
-            logger.info(f"    ✨ [Tier 0] AI Mode SUCCESS: {best_phone}")
+    # --- 1. PRIMARY: AI Search (Waterfall) ---
+    nom, adr = (row.nom or row.siren or ""), (row.adresse or "")
+    for prompt_key, tag in [(config.AI_MODE_SEARCH_PROMPT, "ai_std"), (config.AI_MODE_EXPERT_PROMPT, "ai_expert")]:
+        prompt = prompt_key.format(nom=nom, adresse=adr)
+        ai_raw = await agent.search_google_ai_mode(prompt)
+        if ai_raw:
+            row.raw_ai_responses.append({"text": ai_raw, "source": tag, "query": prompt[:100]})
+            best_phone = _fill_row_from_ai_mode(ai_raw, row)
+            if best_phone: break
 
-    # ── TIER 0 - SECOND CHANCE (EXPERT MODE) ──
+    # --- 2. FALLBACK: Direct Scraping ---
     if not best_phone:
-        expert_prompt = config.AI_MODE_EXPERT_PROMPT.format(nom=nom, adresse=adr)
-        logger.info(f"    ⭐ [Tier 0 — Expert Mode] Retrying with Expert Prompt...")
-        row.search_queries_used.append(f"AI_EXPERT: {expert_prompt}")
-        
-        ai_expert_raw = await agent.search_google_ai_mode(expert_prompt)
-        if ai_expert_raw:
-            row.raw_ai_responses.append({
-                "text":   ai_expert_raw,
-                "source": "google_ai_expert",
-                "query":  expert_prompt,
-            })
-            best_phone = _fill_row_from_ai_mode(ai_expert_raw, row)
-            if best_phone:
-                logger.info(f"    ✨ [Tier 0 — Expert] SUCCESS: {best_phone}")
-
-    # ═════════════════════════════════════════════════════════════════
-    # FALLBACK — Google Standard Search (AI Mode tab always clicked by _navigate_and_search)
-    # Gemini deep scrape (Tier 3, 6) DISABLED — was sending raw HTML to chat box
-    # ═════════════════════════════════════════════════════════════════
-    if not best_phone:
-        # Tier 1: Knowledge Panel (Google search — AI Mode tab is always clicked)
+        # Knowledge Panel
         if row.nom:
-            kp_query = f"{row.nom} {row.adresse or ''}".strip()
-            best_phone = await _search_knowledge_panel_phone(row, agent, kp_query)
+            best_phone = await _search_knowledge_panel_phone(row, agent, f"{row.nom} {adr}")
+        
+        # Domain Search
+        if not best_phone:
+            q = build_search_query(row)
+            if q:
+                res, _ = await _search_and_extract_phone(row, agent, q, "google_scrap")
+                best_phone = res
 
-    if not best_phone:
-        # Tier 2: Broader Google Search with trusted domains
-        main_query = build_search_query(row)
-        if main_query:
-            source_tag = "google_name" if row.nom else "google_siren"
-            logger.info(f"    [Tier 2] Search query: {main_query}")
-            best_phone, last_content = await _search_and_extract_phone(row, agent, main_query, source_tag)
-
-    # DISABLED: Gemini deep scrape sends raw website HTML into Gemini chat (causes JS injection)
-    # if not best_phone: best_phone = await _deep_scrape_website(row, agent)
-    # if not best_phone and last_content: best_phone = await _extract_geo_phone(row, agent, last_content)
-
-    await _handle_captcha_streak_async(last_content, agent)
-
-    if last_content and not row.siren:
-        _fill_missing_siren(row, last_content)
-
-    # Agent-specific secondary phone search (Google — AI Mode tab auto-clicked)
-    agent_query = build_agent_query(row)
-    row.search_queries_used.append(agent_query)
-    await human_delay_async(1, 4)
-
-    agent_response = await agent.search_google_ai(agent_query)
-    if agent_response:
-        row.raw_ai_responses.append({
-            "text":   agent_response,
-            "source": "google_agent",
-            "query":  agent_query,
-        })
-
-    best_agent_phone = get_best_phone(extract_phones(agent_response) if agent_response else [])
-
-    row.phone       = best_phone
-    row.agent_phone = best_agent_phone
-    row.status      = "DONE" if best_phone else "NO TEL"
-
+    row.phone   = best_phone
+    row.status  = "DONE" if best_phone else "NO TEL"
     row.processing_end_ts = time.perf_counter()
 
 

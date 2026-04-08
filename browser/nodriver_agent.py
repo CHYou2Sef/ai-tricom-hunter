@@ -20,9 +20,10 @@
 
 import asyncio
 import re
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 import config
+from browser.base_agent import BaseBrowserAgent
 from utils.anti_bot import (
     get_fingerprint_bundle,
     build_cdp_injection_script,
@@ -35,7 +36,7 @@ from utils.captcha_solver import detect_captcha_type, solve_captcha_async
 logger = get_logger(__name__)
 
 
-class NodriverAgent:
+class NodriverAgent(BaseBrowserAgent):
     """
     Tier 2 stealth browser agent built on Nodriver (UC-Mode / CDP-only).
 
@@ -51,11 +52,11 @@ class NodriverAgent:
             await agent.close()
     """
 
-    def __init__(self, proxy: Optional[str] = None):
+    def __init__(self, worker_id: int = 0, proxy: Optional[str] = None):
+        super().__init__(worker_id)
         self._browser  = None
         self._page     = None
         self._proxy    = proxy
-        self._bundle   = None          # Fingerprint bundle for this session
         self._reconnect_count: int = 0
 
     # ─────────────────────────────────────────────────────────────────

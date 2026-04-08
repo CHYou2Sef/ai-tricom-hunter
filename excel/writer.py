@@ -59,28 +59,38 @@ def save_results(rows: list, original_filepath: str) -> None:
     all_headers = base_headers + ai_headers + enr_headers
 
     # ── Excel Workbook ──
-    if fusion_path.exists():
-        wb = openpyxl.load_workbook(fusion_path)
-        ws = wb.active
-        # Read existing headers to map correctly and not shift columns
-        existing_headers = [str(cell.value) for cell in ws[1] if cell.value is not None]
-        
-        # ⭐ BUG FIX: If new columns appear in the data that are NOT in the existing file,
-        # we must append them to the header row to prevent data loss.
-        new_cols_found = [h for h in all_headers if h not in existing_headers]
-        if new_cols_found:
-            next_col = len(existing_headers) + 1
-            for new_h in new_cols_found:
-                ws.cell(row=1, column=next_col).value = new_h
-                existing_headers.append(new_h)
-                next_col += 1
-            logger.info(f"[Writer] Expanded headers with: {new_cols_found}")
-    else:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Results"
-        ws.append(all_headers)
-        existing_headers = all_headers
+    try:
+        if fusion_path.exists():
+            wb = openpyxl.load_workbook(fusion_path)
+            ws = wb.active
+            # Read existing headers to map correctly and not shift columns
+            existing_headers = [str(cell.value) for cell in ws[1] if cell.value is not None]
+            
+            # Expanded headers logic
+            new_cols_found = [h for h in all_headers if h not in existing_headers]
+            if new_cols_found:
+                next_col = len(existing_headers) + 1
+                for new_h in new_cols_found:
+                    ws.cell(row=1, column=next_col).value = new_h
+                    existing_headers.append(new_h)
+                    next_col += 1
+                logger.info(f"[Writer] Expanded headers with: {new_cols_found}")
+        else:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Results"
+            ws.append(all_headers)
+            existing_headers = all_headers
+    except Exception as exc:
+        logger.error(f"[Writer] CRITICAL: File {fusion_path.name} is CORRUPTED. Skipping. Error: {exc}")
+        # Automatically move corrupted file to a safe subfolder
+        recovery_dir = fusion_path.parent / "CORRUPTED_FILES"
+        recovery_dir.mkdir(parents=True, exist_ok=True)
+        import os
+        try:
+            os.rename(fusion_path, recovery_dir / fusion_path.name)
+        except: pass
+        return
         
     for r in rows:
         # Determine Status accurately
