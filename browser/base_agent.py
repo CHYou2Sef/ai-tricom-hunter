@@ -40,6 +40,19 @@ class BaseBrowserAgent:
         """To be implemented by child classes."""
         raise NotImplementedError
 
+    async def extract_universal_data(self) -> dict:
+        """
+        New V6 Elite extraction pattern.
+        Gets the page source and delegates all parsing to the Universal Unified Extractor (UUE).
+        Ensures 100% parity across Nodriver, Patchright, Crawl4AI, and Camoufox.
+        """
+        source = await self.get_page_source()
+        if not source:
+            return {"aeo_data": [], "heuristic_phones": [], "heuristic_emails": []}
+            
+        from utils.universal_extractor import UniversalExtractor
+        return UniversalExtractor.extract_all(source)
+
     async def close(self):
         """Standardized close method."""
         if self._browser:

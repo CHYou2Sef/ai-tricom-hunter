@@ -103,16 +103,30 @@ async def _search_knowledge_panel_phone(row: ExcelRow, agent, query: str) -> Opt
 
     await asyncio.sleep(3)
     
-    phone = await agent.extract_knowledge_panel_phone()
-    if phone:
-        normalized = normalize_phone(phone)
+    # --- UUE: Passe Unique pour le Knowledge Panel ---
+    metadata = await agent.extract_universal_data()
+    best_phone = None
+    
+    # Check heuristic (panel) phones first
+    if metadata.get("heuristic_phones"):
+        best_phone = metadata["heuristic_phones"][0]
+    # Check semantic JSON-LD
+    elif metadata.get("aeo_data"):
+        for block in metadata["aeo_data"]:
+            tel = block.get("telephone") or block.get("contactPoint", {}).get("telephone")
+            if tel:
+                best_phone = tel
+                break
+                
+    if best_phone:
+        normalized = normalize_phone(best_phone)
         if normalized:
             row.raw_ai_responses.append({
-                "text":   f"Knowledge Panel Phone Found: {normalized}",
+                "text":   f"Knowledge Panel/UUE Phone Found: {normalized}",
                 "source": "google_kp",
                 "query":  query,
             })
-            logger.info(f"✨ [Tier 0] GEMINI.md method SUCCESS: {normalized}")
+            logger.info(f"✨ [Tier 0/UUE] Method SUCCESS: {normalized}")
             return normalized
     return None
 
@@ -127,8 +141,24 @@ async def _search_and_extract_phone(row: ExcelRow, agent, query: str, source_tag
             "query":  query,
         })
 
-    phone = await _extract_aeo_phone(agent)
+    # --- UUE: Extraction robuste du téléphone ---
+    metadata = await agent.extract_universal_data()
+    phone = None
+    
+    # 1. Privilégier le sémantique (schema.org)
+    for block in metadata.get("aeo_data", []):
+        tel = block.get("telephone") or block.get("contactPoint", {}).get("telephone")
+        if tel:
+            phone = tel
+            logger.info(f"    [UUE] Found telephone in structured data: {tel}")
+            break
+            
+    # 2. Heuristique (Attributs visuels / DOM)
+    if not phone and metadata.get("heuristic_phones"):
+        phone = metadata["heuristic_phones"][0]
+        logger.info(f"    [UUE] Found telephone via heuristics: {phone}")
 
+    # 3. Fallback: Regex sur le contenu brut texte (comme avant)
     if not phone and content:
         phones = extract_phones(content)
         phone = get_best_phone(phones)
@@ -257,17 +287,7 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
                 break
     return best
 
-async def _extract_aeo_phone(agent) -> Optional[str]:
-    aeo_data = await agent.extract_aeo_data()
-    if not aeo_data:
-        return None
-    logger.info(f"    [AEO] Scanning {len(aeo_data)} JSON-LD blocks for Schema.org data.")
-    for block in aeo_data:
-        tel = block.get("telephone") or block.get("contactPoint", {}).get("telephone")
-        if tel:
-            logger.info(f"    [AEO] Found telephone in structured data: {tel}")
-            return tel
-    return None
+# Legacy _extract_aeo_phone removed, now handled directly by UUE inline in _search_and_extract_phone
 
 async def _extract_geo_phone(row: ExcelRow, agent, page_content: str) -> Optional[str]:
     logger.info(f"    [GEO] No conclusive phone found. Initializing Gemini RAG fallback...")

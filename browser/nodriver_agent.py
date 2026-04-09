@@ -265,43 +265,7 @@ class NodriverAgent(BaseBrowserAgent):
         """Alias for search_google_ai to maintain HybridEngine compatibility."""
         return await self.search_google_ai(query)
 
-    async def extract_knowledge_panel_phone(self) -> Optional[str]:
-        """
-        Nodriver implementation of Google Knowledge Panel extraction.
-        """
-        if not await self._ensure_page_alive():
-            return None
-        
-        try:
-            # Note: nodriver.select() is async and returns the element or None if not found
-            # Strategy A: d3ph data attribute
-            element = await self._page.select("a[data-dtype='d3ph'], [data-dtype='d3ph']")
-            if element:
-                # element is first match. Let's try attributes.
-                aria_label = element.attributes.get("aria-label")
-                if aria_label and "Call phone number" in aria_label:
-                    return aria_label.replace("Call phone number ", "").strip()
-                text = element.text
-                if text:
-                    return text.strip()
-            
-            # Strategy B: Generic Call aria-label
-            element = await self._page.select("[aria-label*='Call phone number']")
-            if element:
-                label = element.attributes.get("aria-label")
-                if label:
-                    return label.replace("Call phone number ", "").strip()
-            
-            # Strategy C: Regex on RHS panel
-            panel = await self._page.select("#rhs")
-            if panel and panel.text:
-                match = re.search(r'(\+?[0-9\s\.]{8,20})', panel.text)
-                if match:
-                    return match.group(0).strip()
-        except Exception as e:
-            logger.debug(f"[Nodriver] KP extraction error: {e}")
-            
-        return None
+
 
     async def submit_google_search(self, query: str) -> bool:
         """
@@ -331,34 +295,6 @@ class NodriverAgent(BaseBrowserAgent):
             logger.error(f"[Nodriver] submit_google_search error: {exc}")
             return False
 
-    async def extract_aeo_data(self) -> list:
-        """
-        CDP implementation of JSON-LD / Schema.org extraction.
-        Captures script[type="application/ld+json"] tags from the page.
-        """
-        if not self._page:
-            return []
-        try:
-            # Evaluate script to find all JSON-LD blocks
-            script = """
-            Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
-                 .map(s => s.innerText)
-            """
-            raw_blocks = await self._page.evaluate(script)
-            extracted = []
-            if isinstance(raw_blocks, list):
-                for s in raw_blocks:
-                    if not s or not s.strip(): continue
-                    try:
-                        import json
-                        data = json.loads(s)
-                        if isinstance(data, dict): extracted.append(data)
-                        elif isinstance(data, list): extracted.extend(data)
-                    except: continue
-            return extracted
-        except Exception as exc:
-            logger.debug(f"[Nodriver] AEO extraction failed: {exc}")
-            return []
 
     async def search_gemini_ai(self, query: str) -> Optional[str]:
         """

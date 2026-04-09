@@ -30,7 +30,9 @@ from utils.logger import get_logger, alert
 logger = get_logger(__name__)
 
 
-class Crawl4AIAgent:
+from browser.base_agent import BaseBrowserAgent
+
+class Crawl4AIAgent(BaseBrowserAgent):
     """
     Tier 3 scraper built on Crawl4AI (https://github.com/unclecode/crawl4ai).
 
@@ -42,7 +44,12 @@ class Crawl4AIAgent:
     """
 
     def __init__(self):
+        super().__init__()
         self._crawler = None
+
+    async def get_page_source(self) -> str:
+        """Returns the last scraped markdown content for UUE parsing."""
+        return getattr(self, "_last_content", "")
 
     # ─────────────────────────────────────────────────────────────────
     # LIFECYCLE
@@ -211,22 +218,6 @@ class Crawl4AIAgent:
         logger.warning("[Crawl4AI] submit_google_search — empty or blocked response.")
         return False
 
-    async def extract_knowledge_panel_phone(self) -> Optional[str]:
-        """
-        Regex-based extraction from Crawl4AI markdown output.
-        """
-        content = getattr(self, "_last_content", None)
-        if not content:
-            return None
-            
-        # Common phone patterns in markdown (Google search results)
-        # Search for "Téléphone :" or "Phone:" or generic phone regex
-        match = re.search(r'(?:Téléphone|Phone)\s*:\s*(\+?[0-9\s\.]{8,20})', content, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-            
-        return None
-
     async def search_gemini_ai(self, query: str) -> Optional[str]:
         """
         Crawl4AI doesn't support interactive chat easily. 
@@ -235,9 +226,6 @@ class Crawl4AIAgent:
         logger.warning("[Crawl4AI] search_gemini_ai not supported in Managed Scraper mode. Escalating.")
         return None
 
-    async def extract_aeo_data(self) -> list:
-        """Crawl4AI returns markdown, usually missing the raw JSON-LD blocks."""
-        return []
 
     # ─────────────────────────────────────────────────────────────────
     # HELPERS

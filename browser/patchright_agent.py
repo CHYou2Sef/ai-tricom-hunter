@@ -1,8 +1,8 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  browser/playwright_agent.py                                             ║
+║  browser/patchright_agent.py                                             ║
 ║                                                                          ║
-║  Playwright browser agent. (ASYNC VERSION)                               ║
+║  Patchright browser agent. (ASYNC VERSION)                               ║
 ║                                                                          ║
 ║  Search strategy (no AI/LLM modes):                                     ║
 ║    1. Google search with raw identifiers (name + address + SIREN)        ║
@@ -78,7 +78,7 @@ GEMINI_RESPONSE_SELECTORS = [
 ]
 
 
-class PatchrightAgent:
+class PatchrightAgent(BaseBrowserAgent):
     def __init__(self, worker_id: int = 0):
         self.worker_id = worker_id
         self._playwright = None
@@ -99,7 +99,7 @@ class PatchrightAgent:
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        logger.info("[Playwright] Starting Chrome with your profile (Async)...")
+        logger.info("[Patchright] Starting Chrome with your profile (Async)...")
         self._playwright = await async_playwright().start()
 
         # ── Generate per-session fingerprint bundle (Task 2) ──────────────
@@ -148,12 +148,12 @@ class PatchrightAgent:
         await self.context.add_init_script(script=fp_script)
 
         self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
-        alert("INFO", "Playwright session started", {
+        alert("INFO", "Patchright session started", {
             "worker": self.worker_id,
             "viewport": f"{vp['width']}×{vp['height']}",
         })
         logger.info(
-            f"[Playwright] ✅ Ready — fingerprint injected "
+            f"[Patchright] ✅ Ready — fingerprint injected "
             f"({vp['width']}×{vp['height']}, "
             f"UA=...{self._fingerprint['user_agent'][-25:]})"
         )
@@ -169,97 +169,20 @@ class PatchrightAgent:
 
     async def rotate_proxy(self) -> None:
         """Fetch a new proxy and restart the browser context."""
-        logger.info(f"[Playwright-Worker-{self.worker_id}] ♻️ Rotating proxy...")
+        logger.info(f"[Patchright-Worker-{self.worker_id}] ♻️ Rotating proxy...")
         from utils.proxy_manager import get_next_proxy
         new_proxy = get_next_proxy()
         if new_proxy:
             self.current_proxy = new_proxy
-            logger.info(f"[Playwright-Worker-{self.worker_id}] New Proxy attached: {new_proxy}")
+            logger.info(f"[Patchright-Worker-{self.worker_id}] New Proxy attached: {new_proxy}")
             await self.close()
             await self.start()
         else:
-            logger.warning(f"[Playwright-Worker-{self.worker_id}] No free proxies left. Continuing direct.")
+            logger.warning(f"[Patchright-Worker-{self.worker_id}] No free proxies left. Continuing direct.")
 
     async def get_page_source(self) -> str:
         return await self.page.content() if self.page else ""
 
-    async def extract_aeo_data(self) -> list:
-        """
-        Capture script[type="application/ld+json"] tags.
-        'Zero-Click' method to extract Schema.org data.
-        """
-        if not self.page:
-            return []
-        try:
-            # We use locator.all_inner_texts() to get the content of all matching tags
-            scripts = await self.page.locator('script[type="application/ld+json"]').all_inner_texts()
-            extracted = []
-            for s in scripts:
-                if not s or not s.strip(): continue
-                try:
-                    data = json.loads(s)
-                    if isinstance(data, dict):
-                        extracted.append(data)
-                    elif isinstance(data, list):
-                        extracted.extend(data)
-                except:
-                    continue
-            return extracted
-        except Exception as e:
-            logger.debug(f"[Playwright] AEO extraction failed: {e}")
-            return []
-
-    async def extract_knowledge_panel_phone(self) -> Optional[str]:
-        """
-        Implementation of GEMINI.md logic for Playwright.
-        """
-        if not self.page:
-            return None
-
-        # Strategy A: 'd3ph' data attribute
-        try:
-            # We try both <a> and <span>
-            selector = "a[data-dtype='d3ph'], [data-dtype='d3ph']"
-            element = self.page.locator(selector).first
-            
-            # Check aria-label
-            aria_label = await element.get_attribute("aria-label")
-            if aria_label and "Call phone number" in aria_label:
-                logger.info(f"    [Playwright/GEMINI-A] Found phone in aria-label: {aria_label}")
-                return aria_label.replace("Call phone number ", "").strip()
-
-            # Fallback text
-            text = await element.text_content()
-            if text:
-                logger.info(f"    [Playwright/GEMINI-A] Found phone in text: {text}")
-                return text.strip()
-        except:
-            pass
-
-        # Strategy B: aria-label scan
-        try:
-            selector = "[aria-label*='Call phone number']"
-            element = self.page.locator(selector).first
-            label = await element.get_attribute("aria-label")
-            if label:
-                logger.info(f"    [Playwright/GEMINI-B] Found phone in generic aria-label.")
-                return label.replace("Call phone number ", "").strip()
-        except:
-            pass
-
-        # Strategy C: Regex on #rhs
-        try:
-            rhs_locator = self.page.locator("#rhs").first
-            rhs_text = await rhs_locator.text_content()
-            if rhs_text:
-                phone_match = re.search(r'(\+?[0-9\s\.]{8,20})', rhs_text)
-                if phone_match:
-                    logger.info(f"    [Playwright/GEMINI-C] Found phone in RHS panel text.")
-                    return phone_match.group(0).strip()
-        except:
-            pass
-
-        return None
 
     # ── Main Search Method (phone-focused, NO AI/LLM) ─────────────────────
 
@@ -382,7 +305,7 @@ class PatchrightAgent:
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 return True
             except Exception as e:
-                logger.debug(f"[Playwright] Failed to visit {url}: {e}")
+                logger.debug(f"[Patchright] Failed to visit {url}: {e}")
                 return False
 
     async def crawl_website(self, url: str) -> str:
@@ -434,7 +357,7 @@ class PatchrightAgent:
                 return "\n".join(all_text)
 
             except Exception as e:
-                logger.error(f"[Playwright] Crawl error for {url}: {e}")
+                logger.error(f"[Patchright] Crawl error for {url}: {e}")
                 return ""
 
     # ── OLD: _activate_ia_mode (kept as comment for reference) ──
@@ -579,7 +502,7 @@ class PatchrightAgent:
                 btn = self.page.locator(s)
                 if await btn.count() > 0 and await btn.is_visible():
                     await btn.click()
-                    logger.info("[Playwright] Cookie consent accepted.")
+                    logger.info("[Patchright] Cookie consent accepted.")
                     await asyncio.sleep(1)
                     break
         except:

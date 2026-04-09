@@ -28,6 +28,7 @@ Ce script traite les listes triées en utilisant un pool de navigateurs parallè
 
 ### Phase 3 : Moteur Hybride 4-Tiers & Anti-Détection (`hybrid_engine.py`)
 Architecture de pointe pour l'industrialisation B2B :
+- **Extraction UUE Centrale (Universal Unified Extractor)** : Analyse structurelle (Sémantique Schema.org, Heuristique attrid, Visuelle href) découplée du navigateur pour une fiabilité 100% garantie "Zero Token".
 - **Moteur Multi-Tier (Waterfall)** : Bascule automatique en cascade pour maximiser le succès :
   - **Tier 1 : Patchright** (Chromium patché, furtivité native, 100% stable).
   - **Tier 2 : Nodriver** (CDP-only, zéro signal WebDriver, idéal Google/LinkedIn).

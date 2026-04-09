@@ -286,7 +286,7 @@ SIREN_SEARCH_TEMPLATE = (
 
 # Specific prompt for agent phone number (Experience-focused)
 AGENT_PHONE_PROMPT_TEMPLATE = (
-    "Identifiez le numéro de téléphone direct d'un agent commercial ou responsable pour '{nom}' à '{adresse}'. Utilisez des sources d'expérience (LinkedIn, pages contact) pour garantir la fiabilité EEAT.  Output  in json format."
+    "Identifiez le numéro de téléphone direct d'un agent commercial ou responsable pour '{nom}' à '{adresse}'. Utilisez des sources d'expérience (LinkedIn,facebook, pages contact) pour garantir la fiabilité EEAT.  Output  in json format."
 )
 
 # ── SQO (Search Query Optimization) ──
@@ -300,7 +300,7 @@ SQO_CONTACT_KEYWORDS = '("téléphone" OR "contact" OR "siège social")'
 # This is the EXACT prompt sent to Google AI Mode as the FIRST action.
 # It mirrors what the user manually typed and got perfect JSON back.
 AI_MODE_SEARCH_PROMPT = (
-    "Search and show me all available data and info of {nom}, {adresse} in JSON format output. The most important fields are: phone_numbers, email, siren, siret, legal_form, address, linkedin, website. OUTPUT ONLY A JSON OBJECT. No text before or after the JSON block."
+    "Search and show me all available data and info of {nom}, {adresse} in JSON format output. The most important fields are: phone_numbers, email, siren/siret, legal_form, reponsable_person,  address, linkedin, facebook, website. OUTPUT ONLY A JSON OBJECT. No text before or after the JSON block."
 )
 
 # ── SECOND CHANCE: EXPERT RESEARCHER PROMPT ──

@@ -334,14 +334,11 @@ class HybridAutomationEngine:
     async def submit_google_search(self, query: str) -> bool:
         return await self._execute_with_waterfall("submit_google_search", query)
         
-    async def extract_knowledge_panel_phone(self) -> Optional[str]:
-        return await self._execute_with_waterfall("extract_knowledge_panel_phone")
+    async def extract_universal_data(self) -> dict:
+        return await self._execute_with_waterfall("extract_universal_data")
 
     async def search_google_ai(self, query: str) -> Optional[str]:
         return await self._execute_with_waterfall("search_google_ai", query)
-
-    async def extract_aeo_data(self) -> Optional[List[Dict[str, Any]]]:
-        return await self._execute_with_waterfall("extract_aeo_data")
 
     async def search_gemini_ai(self, prompt: str) -> Optional[str]:
         return await self._execute_with_waterfall("search_gemini_ai", prompt)

@@ -38,7 +38,9 @@ from utils.captcha_solver import detect_captcha_type, solve_captcha_async
 logger = get_logger(__name__)
 
 
-class CamoufoxAgent:
+from browser.base_agent import BaseBrowserAgent
+
+class CamoufoxAgent(BaseBrowserAgent):
     """
     Tier 4 — Firefox-based anti-detect browser using Camoufox.
 
@@ -223,58 +225,6 @@ class CamoufoxAgent:
             logger.error(f"[Camoufox] submit_google_search error: {exc}")
             return False
 
-    async def extract_knowledge_panel_phone(self) -> Optional[str]:
-        """
-        Extract phone from Google Knowledge Panel using Firefox/Playwright selectors.
-        """
-        if not self._page:
-            return None
-        try:
-            # Reusing selectors from PatchrightAgent as Camoufox is wrapper
-            selector = "a[data-dtype='d3ph'], [data-dtype='d3ph']"
-            element = self._page.locator(selector).first
-            
-            # Check aria-label
-            aria_label = await element.get_attribute("aria-label")
-            if aria_label and "Call phone number" in aria_label:
-                return aria_label.replace("Call phone number ", "").strip()
-
-            # Fallback text
-            text = await element.text_content()
-            if text:
-                return text.strip()
-        except:
-            pass
-        return None
-
-    async def extract_aeo_data(self) -> list:
-        """
-        Extract JSON-LD / Schema.org blocks from the current page.
-        Uses Playwright evaluate API (Camoufox is Playwright-compatible).
-        """
-        if not self._page:
-            return []
-        try:
-            import json
-            scripts = await self._page.locator(
-                'script[type="application/ld+json"]'
-            ).all_inner_texts()
-            extracted = []
-            for s in scripts:
-                if not s or not s.strip():
-                    continue
-                try:
-                    data = json.loads(s)
-                    if isinstance(data, dict):
-                        extracted.append(data)
-                    elif isinstance(data, list):
-                        extracted.extend(data)
-                except Exception:
-                    continue
-            return extracted
-        except Exception as exc:
-            logger.debug(f"[Camoufox] AEO extraction failed: {exc}")
-            return []
 
     async def crawl_website(self, url: str) -> str:
         """
