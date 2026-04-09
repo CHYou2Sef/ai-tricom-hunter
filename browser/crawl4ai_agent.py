@@ -153,7 +153,7 @@ class Crawl4AIAgent:
     async def crawl_website(self, base_url: str, max_pages: int = 3) -> str:
         """
         Deep-crawl a website: homepage + up to max_pages sub-pages.
-        Follows contact/about links just like the PlaywrightAgent.
+        Follows contact/about links just like the PatchrightAgent.
 
         Args:
             base_url  : Root URL of the target website
@@ -194,6 +194,46 @@ class Crawl4AIAgent:
     async def search_google_ai_mode(self, query: str) -> Optional[str]:
         """Alias for search_google_ai (scrape) to maintain HybridEngine compatibility."""
         return await self.search_google_ai(query)
+
+    async def submit_google_search(self, query: str) -> bool:
+        """
+        Crawl4AI implementation of submit_google_search.
+        """
+        import urllib.parse
+        url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
+        logger.info(f"[Crawl4AI] 🔍 Google Search (submit): {query}")
+        content = await self.scrape(url)
+        # Store for extraction
+        self._last_content = content
+        if content and len(content) > 200:
+            logger.info(f"[Crawl4AI] ✅ submit_google_search — {len(content)} chars.")
+            return True
+        logger.warning("[Crawl4AI] submit_google_search — empty or blocked response.")
+        return False
+
+    async def extract_knowledge_panel_phone(self) -> Optional[str]:
+        """
+        Regex-based extraction from Crawl4AI markdown output.
+        """
+        content = getattr(self, "_last_content", None)
+        if not content:
+            return None
+            
+        # Common phone patterns in markdown (Google search results)
+        # Search for "Téléphone :" or "Phone:" or generic phone regex
+        match = re.search(r'(?:Téléphone|Phone)\s*:\s*(\+?[0-9\s\.]{8,20})', content, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+            
+        return None
+
+    async def search_gemini_ai(self, query: str) -> Optional[str]:
+        """
+        Crawl4AI doesn't support interactive chat easily. 
+        Escalating to next tier if Tier 3 cannot perform this.
+        """
+        logger.warning("[Crawl4AI] search_gemini_ai not supported in Managed Scraper mode. Escalating.")
+        return None
 
     async def extract_aeo_data(self) -> list:
         """Crawl4AI returns markdown, usually missing the raw JSON-LD blocks."""

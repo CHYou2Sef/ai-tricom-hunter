@@ -9,7 +9,7 @@ ENV/
 env.bak/
 venv.bak/
 
-# ----
+# __My_own_search__
 /docs
 
 # ── Project Specific ──
@@ -49,6 +49,7 @@ htmlcov/
 .pytype/
 
 # ── IDEs ──
+/.gemini
 .gemini
 .idea/
 .vscode/

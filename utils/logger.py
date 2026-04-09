@@ -21,6 +21,8 @@ import contextlib
 from logging.handlers import TimedRotatingFileHandler, RotatingFileHandler
 
 import config
+import gzip
+import shutil
 
 # Ensure the log directory exists
 os.makedirs(config.LOG_DIR, exist_ok=True)
@@ -77,6 +79,22 @@ class ColorFormatter(logging.Formatter):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# LOG ROTATION HELPERS (Compression)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _log_namer(name: str) -> str:
+    """Append .gz to the rotated log file name."""
+    return name + ".gz"
+
+def _log_rotator(source: str, dest: str) -> None:
+    """Compress the log file using gzip after rotation."""
+    with open(source, "rb") as f_in:
+        with gzip.open(dest, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+    os.remove(source)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SINGLETON PATTERN
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -120,9 +138,11 @@ def _setup_root_logger() -> None:
     archive_handler = RotatingFileHandler(
         archive_file,
         maxBytes=10 * 1024 * 1024,  # 10 MB
-        backupCount=5,
+        backupCount=10,             # Keep more archives since they are compressed
         encoding="utf-8"
     )
+    archive_handler.namer   = _log_namer
+    archive_handler.rotator = _log_rotator
     archive_handler.setLevel(logging.WARNING)  # User requested only errors/warns
     archive_handler.setFormatter(
         logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT)

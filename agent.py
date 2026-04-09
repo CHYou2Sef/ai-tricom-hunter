@@ -23,7 +23,7 @@ import pandas as pd
 from typing import List, Dict, Any, Optional, Tuple
 
 import config
-from excel.reader import ExcelRow, read_excel, sync_with_previous_results
+from excel.reader import ExcelRow, read_excel
 from excel.writer import save_results, save_subset_to_excel
 from utils.logger import get_logger, alert
 from utils.metrics import PerformanceTracker
@@ -32,6 +32,7 @@ from utils.text_cleaner import clean_html_to_text
 from search.phone_extractor import extract_phones, get_best_phone, normalize_phone
 from browser.hybrid_engine import HybridAutomationEngine
 from enrichment.row_enricher import enrich_row
+from utils.json_parser import parse_ai_mode_json
 
 logger = get_logger(__name__)
 
@@ -181,8 +182,7 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
     phone, email, linkedin, siren, siret, legal_form, address, website.
     Returns the best phone found, or None.
     """
-    from browser.playwright_agent import PlaywrightAgent
-    data = PlaywrightAgent.parse_ai_mode_json(raw_text)
+    data = parse_ai_mode_json(raw_text)
     if not data:
         logger.debug("[AI Mode Parser] No JSON found in response.")
         return None

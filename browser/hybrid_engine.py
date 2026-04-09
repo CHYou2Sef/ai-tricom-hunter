@@ -1,6 +1,6 @@
 """
-╔══════════════════════════════════════════════════════════════════════════╗
-║  browser/hybrid_engine.py                                                ║
+╔════════════════════════════════════════════════════════════════════════╗
+║  browser/hybrid_engine.py                                                  ║
 ║                                                                          ║
 ║  TASK 1 from GEMINI.md — Hybrid Automation Engine                        ║
 ║                                                                          ║
@@ -11,14 +11,19 @@
 ║  ┌──────────────────────────────────────┬────────────────────────────┐  ║
 ║  │ Target Type                          │ Agent                      │  ║
 ║  ├──────────────────────────────────────┼────────────────────────────┤  ║
-║  │ Internal / no protection             │ Tier 1: PlaywrightAgent    │  ║
+║  │ Internal / no protection             │ Tier 1: PatchrightAgent    │  ║
 ║  │ Cloudflare / LinkedIn / Facebook     │ Tier 2: NodriverAgent      │  ║
 ║  │ Amazon / Fnac / hardened e-commerce  │ Tier 3: Crawl4AIAgent      │  ║
+║  │ ALL Chrome tiers exhausted           │ Tier 4: CamoufoxAgent 🦊   │  ║
 ║  └──────────────────────────────────────┴────────────────────────────┘  ║
 ║                                                                          ║
-║  Escalation waterfall:                                                   ║
-║    Tier 1 fails → Tier 2 → Tier 3 → CRITICAL alert + return None        ║
-╚══════════════════════════════════════════════════════════════════════════╝
+║  Escalation waterfall (DEFAULT_TIER=1):                                  ║
+║    Tier 1 (Patchright/Chrome) fails                                      ║
+║      → Tier 2 (Nodriver/Chrome CDP) fails                               ║
+║        → Tier 3 (Crawl4AI/Chrome headless) fails                        ║
+║          → Tier 4 (Camoufox/Firefox) — last resort, diff engine        ║
+║            → ALL FAIL: Circuit Breaker OPEN → pause 300s              ║
+╚════════════════════════════════════════════════════════════════════════╝
 """
 
 import asyncio
@@ -74,24 +79,34 @@ class HybridAutomationEngine:
     """
     The main orchestrator. Manages all three tier agents as a pool
     and routes each task to the appropriate one.
-
-    Usage (as drop-in replacement):
-        engine = HybridAutomationEngine(worker_id=1)
-        # Automatically starts Tier 1, escalates to Tier 2 if it fails, closing Tier 1 first.
-        content = await engine.search_google_ai_mode("Prompt")
     """
-
+    # ── Configuration & Resource Locks ─────────────────────────────────────
+    _CB_THRESHOLD = 5      # Consecutive failures before opening circuit
+    _CB_PAUSE_SEC  = 300   # 5 minutes pause
+    
+    # Tier 4 (Camoufox/Firefox) is extremely heavy. We limit it to 
+    # a single concurrent instance across ALL workers to save RAM.
+    _tier4_global_lock = asyncio.Lock()
+    
     def __init__(self, worker_id: int = 0):
         self._worker_id = worker_id
-        self._tier1: Optional[object] = None   # PlaywrightAgent
-        self._tier2: Optional[object] = None   # NodriverAgent
-        self._tier3: Optional[object] = None   # Crawl4AIAgent
+        self._tier1: Optional[object] = None   # PatchrightAgent (Chrome stealth)
+        self._tier2: Optional[object] = None   # NodriverAgent   (Chrome CDP)
+        self._tier3: Optional[object] = None   # Crawl4AIAgent   (Chrome managed)
+        self._tier4: Optional[object] = None   # CamoufoxAgent   (Firefox anti-detect)
         self._current_tier = 1
-        
+
+        # ── Circuit Breaker state (Bug #2 fix) ───────────────────────────────
+        # Prevents infinite retry storms when ALL tiers fail due to IP banning.
+        self._consecutive_failures: int = 0
+        self._circuit_breaker_open: bool = False
+        self._circuit_breaker_until: float = 0.0
+
         self._stats: Dict[int, Dict[str, Any]] = {
             1: {"attempts": 0, "successes": 0, "total_ms": 0},
             2: {"attempts": 0, "successes": 0, "total_ms": 0},
             3: {"attempts": 0, "successes": 0, "total_ms": 0},
+            4: {"attempts": 0, "successes": 0, "total_ms": 0},  # Camoufox / Firefox
         }
 
     @property
@@ -111,22 +126,32 @@ class HybridAutomationEngine:
     async def start_tier(self, tier: int) -> bool:
         try:
             if tier == 1 and not self._tier1:
-                from browser.playwright_agent import PlaywrightAgent
-                self._tier1 = PlaywrightAgent(worker_id=self._worker_id)
+                from browser.patchright_agent import PatchrightAgent
+                self._tier1 = PatchrightAgent(worker_id=self._worker_id)
                 await self._tier1.start()
-                logger.info(f"[HybridEngine] ✅ Tier 1 (Playwright) started for worker {self.worker_id}.")
+                logger.info(f"[HybridEngine] ✅ Tier 1 (Patchright/Chrome) started for worker {self.worker_id}.")
 
             elif tier == 2 and not self._tier2:
                 from browser.nodriver_agent import NodriverAgent
                 self._tier2 = NodriverAgent()
                 await self._tier2.start()
-                logger.info(f"[HybridEngine] ✅ Tier 2 (Nodriver) started for worker {self.worker_id}.")
+                logger.info(f"[HybridEngine] ✅ Tier 2 (Nodriver/Chrome CDP) started for worker {self.worker_id}.")
 
             elif tier == 3 and not self._tier3:
                 from browser.crawl4ai_agent import Crawl4AIAgent
                 self._tier3 = Crawl4AIAgent()
                 await self._tier3.start()
-                logger.info(f"[HybridEngine] ✅ Tier 3 (Crawl4AI) started for worker {self.worker_id}.")
+                logger.info(f"[HybridEngine] ✅ Tier 3 (Crawl4AI/Chrome) started for worker {self.worker_id}.")
+
+            elif tier == 4 and not self._tier4:
+                # Tier 4 (Camoufox) is extremely heavy. We limit it to a global instance.
+                async with self._tier4_global_lock:
+                    from browser.camoufox_agent import CamoufoxAgent
+                    self._tier4 = CamoufoxAgent(worker_id=self._worker_id)
+                    await self._tier4.start()
+                    logger.info(
+                        f"[HybridEngine] ✅ Tier 4 🦊 (Camoufox) started for worker {self.worker_id} (Global Lock Acquired)."
+                    )
 
             return True
         except ImportError as ie:
@@ -139,22 +164,23 @@ class HybridAutomationEngine:
 
     async def stop_tier(self, tier: int) -> None:
         """Explicitly close a specific tier to free resources before escalation."""
-        agent = {1: self._tier1, 2: self._tier2, 3: self._tier3}.get(tier)
+        agent = {1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}.get(tier)
         if agent:
             try:
                 await agent.close()
                 logger.info(f"[HybridEngine] 🛑 Tier {tier} explicitly CLOSED to free resources.")
             except Exception as exc:
                 logger.warning(f"[HybridEngine] Tier {tier} close error: {exc}")
-                
-        if tier == 1: self._tier1 = None
+
+        if tier == 1:   self._tier1 = None
         elif tier == 2: self._tier2 = None
         elif tier == 3: self._tier3 = None
+        elif tier == 4: self._tier4 = None
 
     async def stop_all(self) -> None:
-        for tier in [1, 2, 3]:
+        for tier in [1, 2, 3, 4]:
             await self.stop_tier(tier)
-            
+
     async def close(self) -> None:
         await self.stop_all()
 
@@ -170,28 +196,61 @@ class HybridAutomationEngine:
         """
         Executes a method on the active tier. If it fails (returns None or raises),
         closes the active tier and escalates to the next one.
-        """
-        # CRITICAL FIX: Always start new requests from Tier 1 (or default)
-        # to prevent getting 'stuck' in a failed escalated tier from a previous row.
-        self._current_tier = config.HYBRID_DEFAULT_TIER
-        
-        logger.debug(f"[HybridEngine] Starting waterfall from Tier {self._current_tier} for '{method_name}'")
 
-        for tier in range(self._current_tier, 4):
+        Adaptive Circuit Breaker (Bug #2 fix):
+          - Tracks consecutive total failures across all tiers.
+          - After _CB_THRESHOLD failures → opens circuit for _CB_PAUSE_SEC seconds.
+          - A SUCCESS anywhere in the waterfall resets the failure counter.
+          - Rationale: if the IP is banned by Google, retrying different engines
+            is pointless — they ALL share the same IP.
+        """
+        # ── 0. DISK SPACE GUARD (Bug #5 — proactive auto-cleanup) ────────────
+        try:
+            from utils.disk_cleanup import check_and_cleanup
+            check_and_cleanup(threshold_pct=85)
+        except Exception:
+            pass  # Disk cleanup is best-effort — never block execution
+
+        # ── 1. CIRCUIT BREAKER CHECK ──────────────────────────────────────────
+        if self._circuit_breaker_open:
+            if time.time() < self._circuit_breaker_until:
+                remaining = int(self._circuit_breaker_until - time.time())
+                logger.warning(
+                    f"[HybridEngine] ⚡ Circuit breaker OPEN — "
+                    f"IP likely banned. Skipping for {remaining}s."
+                )
+                return None
+            else:
+                # Cooling period over — reset and try again
+                self._circuit_breaker_open = False
+                self._consecutive_failures = 0
+                logger.info("[HybridEngine] ⚡ Circuit breaker CLOSED — resuming operations.")
+
+        # ── 2. ALWAYS restart waterfall from the configured default tier ──────
+        self._current_tier = config.HYBRID_DEFAULT_TIER
+
+        logger.debug(
+            f"[HybridEngine] Starting waterfall from Tier {self._current_tier} "
+            f"for '{method_name}' "
+            f"(consecutive_failures={self._consecutive_failures})"
+        )
+
+        for tier in range(self._current_tier, 5):  # Tiers 1→2→3→4
             self._current_tier = tier
             started = await self.start_tier(tier)
             if not started:
-                # If the tier can't start (missing dependency), continue to the next one
-                # OR fallback to Tier 1 if we're not already there.
-                logger.info(f"    ⚠️  [HybridEngine] Falling back from Tier {tier}...")
-                if tier == 3: break
+                logger.info(f"    ⚠️  [HybridEngine] Tier {tier} unavailable. Falling back...")
+                if tier == 4:
+                    break
                 continue
 
-            agent = {1: self._tier1, 2: self._tier2, 3: self._tier3}[tier]
+            agent = {1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}[tier]
             method = getattr(agent, method_name, None)
-            
+
             if not method:
-                logger.warning(f"[HybridEngine] Tier {tier} does not support '{method_name}'. Escalating...")
+                logger.warning(
+                    f"[HybridEngine] Tier {tier} does not support '{method_name}'. Escalating..."
+                )
                 await self.stop_tier(tier)
                 continue
 
@@ -208,36 +267,66 @@ class HybridAutomationEngine:
 
                 if result:
                     self._stats[tier]["successes"] += 1
-                    # Success! We don't reset _current_tier here yet, 
-                    # but the next CALL to this engine will reset it.
+                    # ✅ Success — reset circuit breaker failure counter
+                    self._consecutive_failures = 0
                     return result
-                
-                logger.warning(f"[HybridEngine] Tier {tier} method '{method_name}' returned empty. Assuming failure.")
+
+                logger.warning(
+                    f"[HybridEngine] Tier {tier} method '{method_name}' returned empty. Assuming failure."
+                )
             except Exception as exc:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms
                 logger.error(f"[HybridEngine] Tier {tier} exception in '{method_name}': {exc}")
 
             # Waterfall Escalate
-            logger.warning(f"[HybridEngine] Escalating from Tier {tier} to Tier {tier+1}...")
-            await self.stop_tier(tier) 
-            
-            # --- PERFORMANCE COOL-DOWN ---
-            # Wait 5 seconds between tiers to let WAF sessions reset
-            # and to clear the OS-level socket cache.
+            next_tier = tier + 1
+            if next_tier > 4:
+                break
+            logger.warning(f"[HybridEngine] Escalating Tier {tier} → Tier {next_tier}...")
+            await self.stop_tier(tier)
+
+            # Cool-down between tiers to let WAF sessions partially reset
             logger.info(f"[HybridEngine] 🕒 Cool-down delay: 5s...")
             await asyncio.sleep(5)
-            
-            # Reset pointer for the absolute final failure/exit
+
             self._current_tier = tier + 1
-        
-        # Reset pointer for the next call
+
+        # ── 3. ALL TIERS EXHAUSTED — update circuit breaker ──────────────────
         self._current_tier = config.HYBRID_DEFAULT_TIER
-        alert("CRITICAL", "HybridEngine: all tiers exhausted during operation", {"method": method_name})
+        self._consecutive_failures += 1
+
+        alert(
+            "CRITICAL",
+            "HybridEngine: all tiers exhausted during operation",
+            {"method": method_name, "consecutive_failures": self._consecutive_failures},
+        )
+
+        # Open circuit breaker if failure threshold reached
+        if self._consecutive_failures >= self._CB_THRESHOLD:
+            self._circuit_breaker_open = True
+            self._circuit_breaker_until = time.time() + self._CB_PAUSE_SEC
+            alert(
+                "CRITICAL",
+                f"Circuit Breaker OPENED — IP likely rate-limited by Google. "
+                f"Pausing all requests for {self._CB_PAUSE_SEC}s.",
+                {
+                    "failures": self._consecutive_failures,
+                    "resume_in_seconds": self._CB_PAUSE_SEC,
+                },
+            )
+            # Attempt proxy rotation if available
+            # Attempt proxy rotation via engine's logic
+            try:
+                await self.rotate_proxy()
+                logger.info("[HybridEngine] ♻️ Proxy rotation requested after circuit breaker opened.")
+            except Exception as proxy_err:
+                logger.warning(f"[HybridEngine] Proxy rotation failed: {proxy_err}")
+
         return None
 
     # ── Delegated Browser Methods ───────────────────────────────────────────
-    # These act as drop-in replacements for PlaywrightAgent methods.
+    # These act as drop-in replacements for PatchrightAgent methods.
     
     async def search_google_ai_mode(self, prompt: str) -> Optional[str]:
         return await self._execute_with_waterfall("search_google_ai_mode", prompt)
@@ -277,15 +366,26 @@ class HybridAutomationEngine:
         return result
 
     def print_engine_report(self) -> None:
-        print("\n" + "═" * 60)
-        print("📊  Hybrid Engine Performance Report")
-        print("═" * 60)
+        tier_names = {
+            1: "Patchright 🟦",
+            2: "Nodriver   🟢",
+            3: "Crawl4AI   🟡",
+            4: "Camoufox 🦊",
+        }
+        print("\n" + "═" * 64)
+        print("📊  Hybrid Engine Performance Report (4-Tier)")
+        print("═" * 64)
         for tier, data in self.get_engine_stats().items():
-            tier_name = {1: "Playwright", 2: "Nodriver", 3: "Crawl4AI"}[tier]
+            name = tier_names.get(tier, f"Tier {tier}")
+            bar_filled = int(data["success_rate"] / 5)  # 20 chars = 100%
+            bar = ("█" * bar_filled).ljust(20)
             print(
-                f"  Tier {tier} [{tier_name:10s}] — "
-                f"{data['successes']}/{data['attempts']} success "
-                f"({data['success_rate']}%) | "
-                f"avg {data['avg_ms']}ms"
+                f"  Tier {tier} [{name:14s}] [{bar}] "
+                f"{data['successes']:>3}/{data['attempts']:<3} "
+                f"({data['success_rate']:5.1f}%) | "
+                f"avg {data['avg_ms']:>5}ms"
             )
-        print("═" * 60 + "\n")
+        cb_status = "OPEN 🔴" if self._circuit_breaker_open else "CLOSED 🟢"
+        print(f"  Circuit Breaker: {cb_status} | "
+              f"Consecutive failures: {self._consecutive_failures}/{self._CB_THRESHOLD}")
+        print("═" * 64 + "\n")

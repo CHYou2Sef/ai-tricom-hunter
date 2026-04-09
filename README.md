@@ -26,12 +26,16 @@ Ce script traite les listes triées en utilisant un pool de navigateurs parallè
 - **Google AI Expert Mode (Tier 0)** : Technologie "Double Check". Si le premier scan échoue, un expert virtuel prend le relais avec une stratégie de recherche agressive pour capturer les détails cachés (LinkedIn, CEOS, etc.).
 - **Immunité au Décalage (Atomic Mapping)** : Les colonnes Excel sont bindées par clé unique, empêchant tout glissement de données, même sur des fichiers fusionnés.
 
-### Phase 3 : Moteur Hybride & Anti-Détection (`hybrid_engine.py`)
-Nouveauté majeure pour l'industrialisation B2B :
-- **Moteur Multi-Tier** : Bascule automatique entre **Playwright** (T1 - Vitesse), **Nodriver** (T2 - furtivité CDP pure), et **Crawl4AI** (T3 - Scraper managé open-source) selon la protection du site cible (Cloudflare, etc.).
-- **Fingerprinting CDP (10 points)** : Injection dynamique de WebGL, Canvas, et signatures Navigator avant le chargement des scripts de détection.
-- **Machine à États de Proxy** : Système auto-réparateur `HEALTHY -> WARN -> BAN` avec backoff exponentiel.
-- **Gestionnaire de CAPTCHA** : Arbre de décision intelligent (Turnstile / hCaptcha / reCAPTCHA) avec pause manuelle non-bloquante.
+### Phase 3 : Moteur Hybride 4-Tiers & Anti-Détection (`hybrid_engine.py`)
+Architecture de pointe pour l'industrialisation B2B :
+- **Moteur Multi-Tier (Waterfall)** : Bascule automatique en cascade pour maximiser le succès :
+  - **Tier 1 : Patchright** (Chromium patché, furtivité native, 100% stable).
+  - **Tier 2 : Nodriver** (CDP-only, zéro signal WebDriver, idéal Google/LinkedIn).
+  - **Tier 3 : Crawl4AI** (Scraper managé pour sites E-commerce complexes).
+  - **Tier 4 : Camoufox** (Firefox Anti-Detect, empreinte Gecko radicalement différente, ultime recours).
+- **Adaptive Circuit Breaker** : Système intelligent détectant les bans IP globaux pour stopper les requêtes et déclencher une pause de 300s + rotation de proxy.
+- **Fingerprinting CDP & Gecko** : Injection de signatures hardware et logiciel uniques à chaque session.
+- **Gestionnaire de CAPTCHA Actif** : Intégration API (2Captcha/Capsolver) pour une résolution 100% autonome.
 
 ---
 
@@ -39,25 +43,24 @@ Nouveauté majeure pour l'industrialisation B2B :
 
 ### 1. Prérequis
 - Python 3.10+
-- Navigateur Google Chrome (installé localement sur Linux, Windows ou Mac).
+- Google Chrome & Firefox installés localement.
 
 ### 2. Installation
 ```bash
 # 1. Installer les dépendances Python
 pip install -r requirements.txt
 
-# 2. Installer les nouveaux moteurs anti-détection
-pip install nodriver crawl4ai
-crawl4ai-setup  # Télécharge les binaires Chromium pour le moteur T3
-
-# 3. Installer les binaires Playwright Chromium
-playwright install chromium
+# 2. Installer les moteurs anti-détection & binaires
+patchright install chromium
+python -m camoufox fetch
+crawl4ai-setup
 ```
 
 ### 3. Fichier de Configuration (`.env`)
-Toutes les données sensibles et chemins systèmes sont à configurer ici :
-- Copiez `.env.example` en un fichier `.env`.
-- Configurez `CHROMIUM_PROFILE_PATH` avec le chemin de votre dossier local Chrome (pour bénéficier de votre session de confiance Google).
+Configurez vos clés et chemins dans `.env` :
+- `HYBRID_DEFAULT_TIER=1` (Recommandé pour Patchright)
+- `CAPTCHA_API_KEY=...` (Pour le mode autonome)
+- `CHROMIUM_PROFILE_PATH=...` (Votre profil Chrome habituel)
 
 ---
 

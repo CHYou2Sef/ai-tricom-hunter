@@ -3,7 +3,7 @@
 ║  browser/base_agent.py                                                   ║
 ║                                                                          ║
 ║  Abstract base class for browser agents.                                 ║
-║  Both SeleniumAgent and PlaywrightAgent inherit from this class.         ║
+║  Both NodriverAgent and PatchrightAgent inherit from this class.          ║
 ║                                                                          ║
 ║  BEGINNER NOTE:                                                          ║
 ║    An "abstract base class" (ABC) is a template that forces all          ║

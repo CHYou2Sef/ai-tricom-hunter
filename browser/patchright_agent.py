@@ -20,13 +20,14 @@ import urllib.parse
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from playwright.async_api import (
+from patchright.async_api import (
     async_playwright,
     Browser,
     BrowserContext,
     Page,
     TimeoutError as PlaywrightTimeout,
 )
+
 
 import config
 from browser.base_agent import BaseBrowserAgent
@@ -77,7 +78,7 @@ GEMINI_RESPONSE_SELECTORS = [
 ]
 
 
-class PlaywrightAgent:
+class PatchrightAgent:
     def __init__(self, worker_id: int = 0):
         self.worker_id = worker_id
         self._playwright = None
@@ -113,7 +114,10 @@ class PlaywrightAgent:
         launch_args.extend([
             "--disable-dev-shm-usage",
             f"--window-size={vp['width']},{vp['height']}",
-            "--disable-blink-features=AutomationControlled",
+            # NOTE: --disable-blink-features=AutomationControlled is intentionally
+            # OMITTED here. Patchright adds it automatically at the binary level.
+            # Adding it manually can paradoxically signal that a stealth patch
+            # was applied (detectable by advanced WAFs).
         ])
 
         geolocation = None
@@ -556,43 +560,11 @@ class PlaywrightAgent:
     def parse_ai_mode_json(raw_text: str) -> dict:
         """
         Extracts and parses the JSON block from Google AI Mode's response.
-        Handles cases where JSON is wrapped in a code block or has leading text.
-        Returns a dict with all extracted fields, or an empty dict.
+        Wrapper around the shared utility for backward compatibility.
         """
-        if not raw_text:
-            return {}
-        
-        # Strategy A: find a ```json ... ``` code block
-        code_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw_text, re.DOTALL)
-        if code_match:
-            try:
-                return json.loads(code_match.group(1))
-            except:
-                pass
-        
-        # Strategy B: find the outermost { } JSON object
-        brace_match = re.search(r'\{[\s\S]*\}', raw_text)
-        if brace_match:
-            try:
-                return json.loads(brace_match.group(0))
-            except:
-                pass
-        
-        # Strategy C: parse line by line for key: value patterns
-        result = {}
-        phone_match = re.findall(r'(?:phone|tél[^:]*)[:\s]+([\+0-9][\d\s\.\-]{7,18})', raw_text, re.IGNORECASE)
-        if phone_match:
-            result["phone_numbers"] = [p.strip() for p in phone_match]
-        
-        email_match = re.search(r'[\w.\-]+@[\w.\-]+\.\w+', raw_text)
-        if email_match:
-            result["email"] = email_match.group(0)
-        
-        siren_match = re.search(r'\b(\d{9})\b', raw_text)
-        if siren_match:
-            result["siren"] = siren_match.group(1)
-        
-        return result
+        from utils.json_parser import parse_ai_mode_json as parse_utils
+        res = parse_utils(raw_text)
+        return res if res is not None else {}
 
     async def _handle_google_cookies(self) -> None:
         """Handle 'Accept all' cookie buttons if present."""
@@ -613,11 +585,59 @@ class PlaywrightAgent:
         except:
             pass
 
-    async def _handle_captcha_if_present(self) -> None:
-        if is_captcha_page(await self.page.content()):
-            logger.warning("[Google] CAPTCHA detected.")
-            logger.info(f"Waiting for CAPTCHA to be manually resolved ({config.CAPTCHA_WAIT_SECONDS}s)...")
-            await asyncio.sleep(config.CAPTCHA_WAIT_SECONDS)
+    async def _handle_captcha_if_present(self) -> bool:
+        """
+        Detect CAPTCHA and attempt resolution (Bug #4 fix).
+
+        Decision tree:
+          1. Not a CAPTCHA page  →  return True immediately (fast path).
+          2. CAPTCHA_SOLVER configured as '2captcha' / 'capsolver'
+             → call captcha_solver.py's async API solver.
+          3. No API key available
+             → log a warning and wait a SHORT delay (10s, not 180s!)
+             so the waterfall can escalate rather than hanging forever.
+
+        Returns:
+            True  if the page is (or became) usable.
+            False if CAPTCHA is confirmed and could not be resolved.
+        """
+        try:
+            content = await self.page.content()
+        except Exception:
+            return False
+
+        if not is_captcha_page(content):
+            return True  # Fast path — no CAPTCHA
+
+        logger.warning("[Google] CAPTCHA detected.")
+
+        # Try API-based solver first (requires CAPTCHA_API_KEY in .env)
+        try:
+            from utils.captcha_solver import detect_captcha_type, solve_captcha_async
+            captcha_type = detect_captcha_type(content)
+            if captcha_type and getattr(config, "CAPTCHA_API_KEY", ""):
+                logger.info(
+                    f"[Google] Routing to auto CAPTCHA solver "
+                    f"(type={captcha_type}, solver={config.CAPTCHA_SOLVER})..."
+                )
+                solved = await solve_captcha_async(self.page, captcha_type)
+                if solved:
+                    logger.info("[Google] ✅ CAPTCHA auto-solved.")
+                    return True
+                logger.warning("[Google] Auto-solver failed — escalating tier.")
+                return False
+        except Exception as exc:
+            logger.debug(f"[Google] Captcha solver error: {exc}")
+
+        # No API key — short non-blocking pause so waterfall can escalate
+        short_wait = 10  # seconds — enough for a human to intervene manually
+        logger.warning(
+            f"[Google] No CAPTCHA_API_KEY configured. "
+            f"Waiting {short_wait}s then escalating to next tier. "
+            f"Set CAPTCHA_API_KEY in .env for autonomous resolution."
+        )
+        await asyncio.sleep(short_wait)
+        return False
 
     async def search_gemini_ai(self, query: str) -> Optional[str]:
         """

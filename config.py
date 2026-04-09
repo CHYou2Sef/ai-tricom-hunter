@@ -189,9 +189,10 @@ CAPTCHA_API_KEY = os.getenv("CAPTCHA_API_KEY", "")        # Leave blank to use m
 # ═══════════════════════════════════════════════════════════════════
 # URLs containing these domain fragments are automatically routed to
 # the specified tier. Unknown URLs default to Tier 1.
-#   Tier 1 → PlaywrightAgent   (fast, suits unprotected sites)
+#   Tier 1 → PatchrightAgent   (fast, chromium patched, stealth)
 #   Tier 2 → NodriverAgent     (stealth CDP, suits Cloudflare sites)
-#   Tier 3 → Crawl4AIAgent     (managed JS rendering, suits hardened sites)
+#   Tier 3 → Crawl4AIAgent     (managed JS rendering, suits hardened e-commerce)
+#   Tier 4 → CamoufoxAgent     (Firefox anti-detect, absolute last resort)
 HYBRID_TIER2_DOMAINS = [
     "cloudflare", "linkedin.com", "facebook.com",
     "instagram.com", "leboncoin.fr",
@@ -200,8 +201,8 @@ HYBRID_TIER3_DOMAINS = [
     "amazon.", "zalando.", "fnac.com", "cdiscount.com",
 ]
 # Engine to use when no explicit decision is made (fallback default)
-# Tier 2 (Nodriver) is prioritized to bypass CAPTCHA/Bot detection (Stealth-first).
-HYBRID_DEFAULT_TIER = int(os.getenv("HYBRID_DEFAULT_TIER", "2"))
+# Tier 1 (Patchright) is prioritized for speed and baseline stealth.
+HYBRID_DEFAULT_TIER = int(os.getenv("HYBRID_DEFAULT_TIER", "1"))
 
 # ── Obsolete / Fail-safe (For backward compatibility) ──
 # This is no longer used by the Hybrid Waterfall engine but kept as a 

@@ -5,12 +5,15 @@
 # ║      pip install -r requirements.txt                             ║
 # ║                                                                  ║
 # ║  After installing, also run:                                     ║
-# ║      playwright install chromium                                 ║
+# ║      patchright install chromium   (Tier 1 — Chrome patché)     ║
+# ║      python -m camoufox fetch      (Tier 4 — Firefox custom)    ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 # ── Browser Automation (The Hybrid Engines) ───────────────────────────
-# Tier 1: Playwright (Modern, fast, async)
-playwright>=1.43.0
+# Tier 1: Patchright — Drop-in replacement for Playwright, patched for stealth.
+#   Passes: Cloudflare, Kasada, Akamai, Datadome, Fingerprint.com, Sannysoft.
+#   API: 100% identical to Playwright — only the import line changed.
+patchright
 
 # Tier 2: Nodriver (Stealth CDP-only agent, zero WebDriver fingerprints)
 nodriver>=0.34
@@ -19,10 +22,10 @@ websockets>=13.0
 # Tier 3: Crawl4AI (Managed scraper, bypasses WAF, markdown support)
 crawl4ai>=0.4.0
 
-# commented in 06-04
-# Legacy: Selenium (Classic automation)
-#selenium>=4.18.0
-#webdriver-manager>=4.0.1
+# Tier 4: Camoufox — Patched Firefox anti-detect browser (last resort, Firefox engine)
+#   Uses Gecko instead of Chromium — completely different TLS/JS/network fingerprint.
+#   After install: python -m camoufox fetch  (downloads the custom Firefox binary ~200MB)
+camoufox
 
 
 # ── Data Extraction & Parsing ──────────────────────────────────────────
@@ -56,5 +59,10 @@ pytest-asyncio>=0.24.0
 
 # ── Quick Setup Commands ──────────────────────────────────────────────
 # Step 1: pip install -r requirements.txt
-# Step 2: python3 -m playwright install chromium
+# Step 2: patchright install chromium       ← Tier 1 (Chrome stealth)
+# Step 3: python -m camoufox fetch          ← Tier 4 (Firefox anti-detect)
 # ──────────────────────────────────────────────────────────────────────
+
+# Legacy: Selenium (removed 2026-04-06 — too detectable)
+#selenium>=4.18.0
+#webdriver-manager>=4.0.1
