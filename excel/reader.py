@@ -16,6 +16,7 @@ import csv
 import io
 import os
 import json
+import re
 from typing import List, Optional, Tuple
 
 import openpyxl
@@ -49,50 +50,73 @@ class ExcelRow:
         self.row_index = row_index
 
         # ── Extract key fields using the column mapping ──
-        # mapping["raison_sociale"] = the actual column name in the Excel,
-        # e.g. "Dénomination / Nom".  We use it to look up the value.
         def get(concept: str) -> Optional[str]:
             col = mapping.get(concept)
             if col and col in raw:
                 val = raw[col]
-                # Convert to string, strip whitespace, return None if empty
                 s = str(val).strip() if val is not None else ""
                 return s if s and s.lower() not in ("none", "nan", "") else None
             return None
 
         self.nom     = get("raison_sociale")
         self.adresse = get("adresse")
-        self.siren   = get("siren") or get("siret")   # Accept either
+        self.siren   = get("siren") or get("siret")
 
-        # ── Determine search strategy ──
+        # ── 3. Fallback: Pattern-based detection for SIREN/SIRET or Nom ──
+        # This is critical for CSV files that lack clean headers.
+        if not self.siren:
+            for val in raw.values():
+                s = str(val).strip() if val is not None else ""
+                # Look for 9 digits (standard SIREN) or 9 digits with spaces
+                if re.fullmatch(r'\d{9}|\d{3}\s\d{3}\s\d{3}', s):
+                    self.siren = s.replace(" ", "")
+                    break
+
+        # If we have SIREN but no name, and it's a headless CSV, the first column is often the name
+        if not self.nom and raw:
+            first_key = list(raw.keys())[0]
+            val = str(raw[first_key]).strip()
+            # If it's a longish string and not a date/number, treat it as a potential name
+            if len(val) > 2 and not val.replace(" ", "").isdigit() and "/" not in val:
+                self.nom = val
+
         if self.nom and self.adresse:
             self.search_type = "RS_ADR"
         elif self.siren and self.adresse:
             self.search_type = "SIREN_ADR"
+        elif self.nom:
+             # If we only have name, we can still try to search
+             self.search_type = "RS_ADR"
+        elif self.siren:
+             self.search_type = "SIREN_ADR"
         else:
-            self.search_type = "SKIP"   # Not enough info to search
+            self.search_type = "SKIP"
 
-        # ── Processing status ──
         self.status = "PENDING" if self.search_type != "SKIP" else "SKIP"
         etat_val = get("Etat") or get("stat")
         if etat_val and etat_val.upper() == "DONE":
             self.status = "DONE"
         
-        # Read existing phone if available
         self.phone = get("telephone") or get("phone") or get("téléphone") or get("__phone")
-        if self.phone and self.status == "PENDING":
-             # If we already have a phone, we might consider it DONE
-             pass
-
         self.agent_phone = get("agent_phone") or get("__agent_phone")
 
-        # --- Enrichment metadata ---
         self.enriched_fields: dict = {}
         self.raw_ai_responses: list = []
         self.search_queries_used: list = []
         self.processing_start_ts: float = 0.0
         self.processing_end_ts: float = 0.0
         self.captcha_hits: int = 0
+
+    def get_fingerprint(self) -> str:
+        """Create a unique string key for this row to track progress."""
+        if self.siren and len(self.siren) >= 9:
+            return f"SIREN:{self.siren}"
+        
+        n = str(self.nom or "").strip().lower()
+        a = str(self.adresse or "").strip().lower()
+        n = re.sub(r'[^a-z0-9]', '', n)
+        a = re.sub(r'[^a-z0-9]', '', a)
+        return f"NA:{n}|{a}"
 
     def get_search_name(self) -> str:
         """Return the best identifier for searching (nom or SIREN)."""
@@ -238,9 +262,9 @@ def read_excel(filepath: str) -> Tuple[List[ExcelRow], dict]:
 
         excel_row = ExcelRow(raw=raw, row_index=row_idx, mapping=mapping)
         
-        # ── Normalisation SIREN (pad with zeros, remove .0) ──
+        # ── Normalisation SIREN (pad with zeros, remove .0, remove spaces) ──
         if excel_row.siren:
-            excel_row.siren = excel_row.siren.replace(".0", "").zfill(9)
+            excel_row.siren = str(excel_row.siren).replace(".0", "").replace(" ", "").zfill(9)
 
         rows.append(excel_row)
 
@@ -293,8 +317,28 @@ def _read_csv(filepath: str) -> Tuple[List[ExcelRow], dict]:
     # 3. Read data
     rows_raw: List[dict] = []
     with open(filepath, "r", encoding=best_encoding, errors="replace") as f:
-        reader = csv.DictReader(f, delimiter=delimiter)
-        raw_headers = list(reader.fieldnames or [])
+        # --- 3. Header Detection (Bug Fix for Headless CSVs) ---
+        sample_reader = csv.reader(io.StringIO(sample), delimiter=delimiter)
+        first_row = next(sample_reader, [])
+        
+        # Heuristic: if first row contains SIREN pattern or many digits, it's DATA
+        is_data = any(re.fullmatch(r'\d{9}|\d{3}\s\d{3}\s\d{3}', str(v).strip()) for v in first_row)
+        
+        # Count keywords
+        keywords = ["nom", "siren", "siret", "adresse", "date", "status", "etat", "denomination", "rs"]
+        header_score = sum(1 for v in first_row if any(kw in str(v).lower() for kw in keywords))
+        
+        if is_data or header_score == 0:
+            # Headless file! Use positional headers and DON'T skip first row
+            f.seek(0)
+            raw_headers = [f"col_{i+1}" for i in range(len(first_row))]
+            reader = csv.DictReader(f, fieldnames=raw_headers, delimiter=delimiter)
+            # We don't need to skip any row here because DictReader(fieldnames=...) treats first row as data
+        else:
+            # Normal file with headers
+            f.seek(0)
+            reader = csv.DictReader(f, delimiter=delimiter)
+            raw_headers = list(reader.fieldnames or [])
         for row in reader:
             if all(not str(v).strip() for v in row.values()):
                 continue
@@ -330,7 +374,7 @@ def _read_csv(filepath: str) -> Tuple[List[ExcelRow], dict]:
         excel_row = ExcelRow(raw=raw, row_index=row_idx, mapping=mapping)
 
         if excel_row.siren:
-            excel_row.siren = excel_row.siren.replace(".0", "").zfill(9)
+            excel_row.siren = str(excel_row.siren).replace(".0", "").replace(" ", "").zfill(9)
 
         rows.append(excel_row)
 

@@ -102,7 +102,7 @@ class ExcelFileHandler(FileSystemEventHandler):
     def on_created(self, event: FileCreatedEvent) -> None:
         if event.is_directory: return
         filepath = event.src_path
-        if "_part_" in os.path.basename(filepath) or filepath.endswith(".meta.json"): return # Skip
+        if filepath.endswith(".meta.json"): return # Skip
         ext = os.path.splitext(filepath)[1].lower()
         if ext not in config.ACCEPTED_EXTENSIONS: return
         if filepath in self._seen: return
@@ -117,7 +117,7 @@ class ExcelFileHandler(FileSystemEventHandler):
     def on_modified(self, event) -> None:
         if event.is_directory: return
         filepath = event.src_path
-        if "_part_" in os.path.basename(filepath) or filepath.endswith(".meta.json"): return # Skip
+        if filepath.endswith(".meta.json"): return # Skip
         ext = os.path.splitext(filepath)[1].lower()
         if ext not in config.ACCEPTED_EXTENSIONS: return
 
@@ -143,7 +143,7 @@ def scan_existing_files(queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, s
         for filename in sorted(os.listdir(d)):
             ext = os.path.splitext(filename)[1].lower()
             if ext in config.ACCEPTED_EXTENSIONS:
-                if "_part_" in filename or filename.endswith(".meta.json"): continue # Skip chunks & meta
+                if filename.endswith(".meta.json"): continue # Skip meta
                 filepath = os.path.join(d, filename)
                 if filepath not in seen_files:
                     logger.info(f"[Setup] Prioritizing {filename} from {os.path.basename(d)}")
@@ -161,8 +161,8 @@ async def main_async() -> None:
     """Asynchronous entry point for the AI agent."""
     print("\n" + "═" * 60)
     print("  🤖  AI Tricom Hunter Agent (V4 INDUSTRIAL)")
-    print(f"  📂  Queue Source: {config.READY_DIR}")
-    print(f"  🔍  Engine:       HYBRID WATERFALL (Tier {config.HYBRID_DEFAULT_TIER} Default)")
+    print(f"  📂  Queue Sources: {os.path.basename(config.INPUT_DIR)}/* (std, rs, sir, ready)")
+    print(f"  🔍  Engine:        HYBRID WATERFALL (Tier {config.HYBRID_DEFAULT_TIER} Default)")
     print("═" * 60 + "\n")
 
     ensure_directories()

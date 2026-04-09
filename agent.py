@@ -21,6 +21,7 @@ import re
 import json
 import pandas as pd
 from typing import List, Dict, Any, Optional, Tuple
+from pathlib import Path
 
 import config
 from excel.reader import ExcelRow, read_excel
@@ -33,8 +34,12 @@ from search.phone_extractor import extract_phones, get_best_phone, normalize_pho
 from browser.hybrid_engine import HybridAutomationEngine
 from enrichment.row_enricher import enrich_row
 from utils.json_parser import parse_ai_mode_json
+from utils.progress_tracker import ProgressTracker
 
 logger = get_logger(__name__)
+
+# Initialize global progress tracker
+progress = ProgressTracker(config.BASE_DIR / "output" / "active_processing.json")
 
 # Counter for consecutive CAPTCHA blocks
 _captcha_streak = 0
@@ -76,8 +81,109 @@ async def human_delay_async(min_sec: float = config.MIN_DELAY_SECONDS, max_sec: 
     await asyncio.sleep(delay)
 
 def sync_with_previous_results(rows: List[ExcelRow], filepath: str) -> int:
-    """JSON audit synchronization is disabled. Returns 0."""
-    return 0
+    """
+    Checks the daily fusion file for rows that have already been processed 
+    and updates the current rows with their results to avoid re-scraping.
+    """
+    from pathlib import Path
+    import openpyxl
+    import datetime
+    
+    orig_path = Path(filepath)
+    input_folder = orig_path.parent.name
+    out_dir = config.get_output_dir(input_folder)
+    date_str = datetime.date.today().strftime("%Y-%m-%d")
+    fusion_path = out_dir / f"{input_folder}_{date_str}.xlsx"
+    
+    # Check JSON progress first
+    file_key = f"{input_folder}/{orig_path.name}"
+    completed_rows = progress.get_completed_rows(file_key)
+    if completed_rows:
+        logger.info(f"🔄 [Sync] Checking JSON progress: {len(completed_rows)} rows already processed.")
+        for r in rows:
+            if r.row_index in completed_rows:
+                # We mark as DONE to skip, but we might not have the actual phone here 
+                # if we only rely on JSON row indices. 
+                # To be safer, we still try to sync from Excel if available for the data.
+                r.status = "DONE" # Placeholder to ensure it's skipped
+    
+    if not fusion_path.exists():
+        return 0
+
+    sync_count = 0
+    try:
+        wb = openpyxl.load_workbook(fusion_path, data_only=True)
+        ws = wb.active
+        
+        # 1. Identify headers and crucial column indexes
+        headers = [str(cell.value) for cell in ws[1] if cell.value is not None]
+        col_map = {name: i for i, name in enumerate(headers)}
+        
+        # We need to detect which columns in the output correspond to our concepts
+        # to build fingerprints from the output file.
+        from utils.column_detector import detect_columns
+        out_mapping = detect_columns(headers)
+        
+        # 2. Build a lookup table from the existing output
+        lookup = {} # fingerprint -> {status, phone, agent_phone}
+        
+        # Helper to get value safely
+        def get_val(row_data, concept):
+            col_name = out_mapping.get(concept)
+            if col_name and col_name in col_map:
+                val = row_data[col_map[col_name]].value
+                return str(val).strip() if val is not None else None
+            return None
+
+        for row_data in ws.iter_rows(min_row=2):
+            if all(c.value is None for c in row_data): continue
+            
+            # Reconstruct fingerprint of the existing result
+            out_nom = get_val(row_data, "raison_sociale")
+            out_adr = get_val(row_data, "adresse")
+            out_siren = get_val(row_data, "siren") or get_val(row_data, "siret")
+            
+            # Temporary mock-up of ExcelRow just to use its fingerprint logic
+            # This ensures consistency between search and sync
+            from excel.reader import ExcelRow
+            dummy = ExcelRow(raw={}, row_index=0, mapping={})
+            dummy.nom = out_nom
+            dummy.adresse = out_adr
+            dummy.siren = out_siren
+            
+            fp = dummy.get_fingerprint()
+            
+            # Extract basic results
+            status = get_val(row_data, "Etat") or "DONE" # Default to DONE if entry exists
+            phone = get_val(row_data, "AI_Phone") or get_val(row_data, "telephone")
+            agent_phone = get_val(row_data, "AI_Agent_Phone")
+            
+            lookup[fp] = {
+                "status": status.upper(),
+                "phone": phone,
+                "agent_phone": agent_phone
+            }
+        
+        # 3. Synchronize current rows
+        for r in rows:
+            fp = r.get_fingerprint()
+            if fp in lookup:
+                entry = lookup[fp]
+                # Only sync if the status looks finished
+                if entry["status"] in ("DONE", "NO TEL", "SKIP"):
+                    r.status = entry["status"]
+                    r.phone = entry["phone"]
+                    r.agent_phone = entry["agent_phone"]
+                    sync_count += 1
+        
+        wb.close()
+        if sync_count > 0:
+            logger.info(f"🔄 [Sync] Synchronized {sync_count} rows from today's previous session.")
+            
+    except Exception as e:
+        logger.warning(f"⚠️ [Sync] Could not synchronize with {fusion_path.name}: {e}")
+        
+    return sync_count
 
 def build_search_query(row: ExcelRow) -> str:
     if row.nom:
@@ -104,7 +210,7 @@ async def _search_knowledge_panel_phone(row: ExcelRow, agent, query: str) -> Opt
     await asyncio.sleep(3)
     
     # --- UUE: Passe Unique pour le Knowledge Panel ---
-    metadata = await agent.extract_universal_data()
+    metadata = await agent.extract_universal_data() or {}
     best_phone = None
     
     # Check heuristic (panel) phones first
@@ -142,7 +248,7 @@ async def _search_and_extract_phone(row: ExcelRow, agent, query: str, source_tag
         })
 
     # --- UUE: Extraction robuste du téléphone ---
-    metadata = await agent.extract_universal_data()
+    metadata = await agent.extract_universal_data() or {}
     phone = None
     
     # 1. Privilégier le sémantique (schema.org)
@@ -364,6 +470,11 @@ async def _worker_process_row(row: ExcelRow, sem: asyncio.Semaphore, save_lock: 
             if row.status != "SKIP":
                 await asyncio.to_thread(enrich_row, row)
 
+            # Mark as done in JSON tracker
+            input_folder = Path(filepath).parent.name
+            file_key = f"{input_folder}/{Path(filepath).name}"
+            progress.mark_row_done(file_key, row.row_index)
+
             if row.status not in ("DONE", "NO TEL", "SKIP"):
                 await human_delay_async()
         except Exception as e:
@@ -520,28 +631,31 @@ async def finalize_file_processing(rows: List[ExcelRow], original_filepath: str)
     # ── 1. ARCHIVE DONE ROWS ──
     if success_rows:
         destination_dir.mkdir(parents=True, exist_ok=True)
-        archive_path = destination_dir / f"{clean_stem}{suffix}"
+        archive_path = destination_dir / f"{orig_path.name}"
         if archive_path.exists():
             ts = time.strftime("%H%M%S")
-            archive_path = config.OUTPUT_ARCHIVE_DIR / f"{clean_stem}_{ts}{suffix}"
+            archive_path = destination_dir / f"{orig_path.stem}_{ts}{suffix}"
         logger.info(f"[Post-Process] 📦 Archiving DONE → {archive_path.name}")
         await asyncio.to_thread(save_subset_to_excel, success_rows, archive_path)
 
-    # ── 2. ARCHIVE FAILED ROWS (No automatic recycling) ──
+    # ── 2. ARCHIVE FAILED ROWS (No Tel) ──
     if retry_rows:
         config.OUTPUT_FAILED_DIR.mkdir(parents=True, exist_ok=True)
-        failed_path = config.OUTPUT_FAILED_DIR / f"{clean_stem}_FAILED{suffix}"
+        failed_path = config.OUTPUT_FAILED_DIR / f"{orig_path.name}"
         if failed_path.exists():
             ts = time.strftime("%H%M%S")
-            failed_path = config.OUTPUT_FAILED_DIR / f"{clean_stem}_FAILED_{ts}{suffix}"
-        logger.info(f"[Post-Process] 📦 Archiving FAILED → {failed_path.name}")
+            failed_path = config.OUTPUT_FAILED_DIR / f"{orig_path.stem}_{ts}{suffix}"
+        logger.info(f"[Post-Process] 📦 Archiving NO TEL → {failed_path.name}")
         await asyncio.to_thread(save_subset_to_excel, retry_rows, failed_path)
 
-    # ── 3. DELETE ORIGINAL ──
-    # OLD: retry saved in same directory → orig_path.parent / "RETRY_{filename}"
+    # ── 3. CLEANUP ──
+    input_folder = orig_path.parent.name
+    file_key = f"{input_folder}/{orig_path.name}"
+    progress.clear_file(file_key)
+
     try:
         os.remove(original_filepath)
-        logger.info(f"[Post-Process] 🗑️ Cleaned up original: {orig_path.name}")
+        logger.info(f"[Post-Process] 🗑️ Cleaned up original and tracker for: {orig_path.name}")
     except Exception as e:
         logger.warning(f"[Post-Process] Could not delete {orig_path.name}: {e}")
 

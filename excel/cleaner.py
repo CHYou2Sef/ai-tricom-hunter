@@ -212,10 +212,11 @@ def _write_category_file(
     header_fill = _HEADER_FILLS.get(category, PatternFill("solid", fgColor="444444"))
     header_font = Font(bold=True, color="FFFFFF")
 
-    # ── Update headers with "Etat" ──
+    # ── Update headers with Agent Status ──
     out_headers = list(original_headers)
-    if "Etat" not in out_headers and "stat" not in out_headers and "Etat_IA" not in out_headers:
-        out_headers.append("Etat")
+    status_col = config.STATUS_COLUMN_NAME
+    if status_col not in out_headers:
+        out_headers.append(status_col)
     
     # ── Write header row ──
     # ws.append(out_headers)
@@ -235,8 +236,9 @@ def _write_category_file(
         
         # ⭐ BUG FIX: Map data row using out_headers to avoid column shift
         data_row = []
+        status_col = config.STATUS_COLUMN_NAME
         for h in out_headers:
-            if h == "Etat":
+            if h == status_col:
                 data_row.append(etat)
             else:
                 data_row.append(row.raw.get(h, ""))

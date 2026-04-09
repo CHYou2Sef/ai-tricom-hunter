@@ -48,10 +48,16 @@ class BaseBrowserAgent:
         """
         source = await self.get_page_source()
         if not source:
-            return {"aeo_data": [], "heuristic_phones": [], "heuristic_emails": []}
+            return None
             
         from utils.universal_extractor import UniversalExtractor
-        return UniversalExtractor.extract_all(source)
+        metadata = UniversalExtractor.extract_all(source)
+        
+        # If the Universal Extractor found NO data, return None so the HybridEngine properly escalates
+        if not metadata.get("aeo_data") and not metadata.get("heuristic_phones") and not metadata.get("heuristic_emails"):
+            return None
+            
+        return metadata
 
     async def close(self):
         """Standardized close method."""

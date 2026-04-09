@@ -68,8 +68,12 @@ class ProxyRecord:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FREE PROXY SOURCES (public lists, no API key required)
+# PROXY SOURCES (Residential / Free Fallbacks)
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Optional: List your premium residential proxies in your .env file
+# Format: RESIDENTIAL_PROXIES=http://user:pass@ip:port,http://user:pass@ip2:port
+RESIDENTIAL_PROXIES_ENV = os.getenv("RESIDENTIAL_PROXIES", "")
 
 FREE_PROXY_SOURCES = [
     # 1. Proxyscrape
@@ -232,31 +236,41 @@ class ProxyManager:
 
     def _refill_pool(self) -> None:
         """Fetch fresh proxies from all public sources and reset the pool."""
-        logger.info("🔄 [ProxyManager] Fetching fresh free proxies...")
+        logger.info("🔄 [ProxyManager] Loading proxy pool...")
         fetched: set = set()
 
-        for url in FREE_PROXY_SOURCES:
-            try:
-                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    content = resp.read().decode("utf-8")
+        # 1. 🌟 PREMIUM RESIDENTIAL PROXIES (Highest Priority)
+        if RESIDENTIAL_PROXIES_ENV:
+            logger.info("💎 [ProxyManager] Loading Premium Residential Proxies from .env...")
+            for proxy_url in RESIDENTIAL_PROXIES_ENV.split(","):
+                clean_url = proxy_url.strip()
+                if clean_url:
+                    fetched.add(clean_url)
+        else:
+            # 2. 🏴‍☠️ FREE PROXIES (Fallback if no Premium setup)
+            logger.info("⚠️ [ProxyManager] No RESIDENTIAL_PROXIES found in .env. Falling back to free public proxies (Unstable)...")
+            for url in FREE_PROXY_SOURCES:
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        content = resp.read().decode("utf-8")
 
-                    if "geonode.com" in url:
-                        data = json.loads(content)
-                        for item in data.get("data", []):
-                            ip   = item.get("ip")
-                            port = item.get("port")
-                            if ip and port:
-                                fetched.add(f"http://{ip}:{port}")
+                        if "geonode.com" in url:
+                            data = json.loads(content)
+                            for item in data.get("data", []):
+                                ip   = item.get("ip")
+                                port = item.get("port")
+                                if ip and port:
+                                    fetched.add(f"http://{ip}:{port}")
 
-                    else:  # proxyscrape or GitHub plain text
-                        for line in content.splitlines():
-                            line = line.strip()
-                            if line and ":" in line:
-                                fetched.add(f"http://{line}" if "http" not in line else line)
+                        else:  # proxyscrape or GitHub plain text
+                            for line in content.splitlines():
+                                line = line.strip()
+                                if line and ":" in line:
+                                    fetched.add(f"http://{line}" if "http" not in line else line)
 
-            except Exception as exc:
-                logger.debug(f"[ProxyManager] Source failed ({url}): {exc}")
+                except Exception as exc:
+                    logger.debug(f"[ProxyManager] Source failed ({url}): {exc}")
 
         # Register new proxies (don't overwrite known ones that are just WARN)
         for addr in fetched:

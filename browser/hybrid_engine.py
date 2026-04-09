@@ -98,9 +98,8 @@ class HybridAutomationEngine:
 
         # ── Circuit Breaker state (Bug #2 fix) ───────────────────────────────
         # Prevents infinite retry storms when ALL tiers fail due to IP banning.
-        self._consecutive_failures: int = 0
-        self._circuit_breaker_open: bool = False
-        self._circuit_breaker_until: float = 0.0
+        self._current_tier = config.HYBRID_DEFAULT_TIER
+        self._last_successful_tier: Optional[int] = None
 
         self._stats: Dict[int, Dict[str, Any]] = {
             1: {"attempts": 0, "successes": 0, "total_ms": 0},
@@ -125,6 +124,17 @@ class HybridAutomationEngine:
 
     async def start_tier(self, tier: int) -> bool:
         try:
+            # 1. Check if existing agent is alive (Bug #6 fix)
+            agent = {1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}.get(tier)
+            if agent:
+                 # Standard health check: can we get page source?
+                 try:
+                     await asyncio.wait_for(agent.get_page_source(), timeout=2)
+                 except Exception:
+                     logger.warning(f"[HybridEngine] Tier {tier} appears STALE. Restarting...")
+                     await self.stop_tier(tier)
+                     agent = None
+
             if tier == 1 and not self._tier1:
                 from browser.patchright_agent import PatchrightAgent
                 self._tier1 = PatchrightAgent(worker_id=self._worker_id)
@@ -133,7 +143,7 @@ class HybridAutomationEngine:
 
             elif tier == 2 and not self._tier2:
                 from browser.nodriver_agent import NodriverAgent
-                self._tier2 = NodriverAgent()
+                self._tier2 = NodriverAgent(worker_id=self._worker_id)
                 await self._tier2.start()
                 logger.info(f"[HybridEngine] ✅ Tier 2 (Nodriver/Chrome CDP) started for worker {self.worker_id}.")
 
@@ -144,7 +154,7 @@ class HybridAutomationEngine:
                 logger.info(f"[HybridEngine] ✅ Tier 3 (Crawl4AI/Chrome) started for worker {self.worker_id}.")
 
             elif tier == 4 and not self._tier4:
-                # Tier 4 (Camoufox) is extremely heavy. We limit it to a global instance.
+                # Tier 4 (Camoufox) is heavy. Lock it globally.
                 async with self._tier4_global_lock:
                     from browser.camoufox_agent import CamoufoxAgent
                     self._tier4 = CamoufoxAgent(worker_id=self._worker_id)
@@ -226,16 +236,22 @@ class HybridAutomationEngine:
                 self._consecutive_failures = 0
                 logger.info("[HybridEngine] ⚡ Circuit breaker CLOSED — resuming operations.")
 
-        # ── 2. ALWAYS restart waterfall from the configured default tier ──────
-        self._current_tier = config.HYBRID_DEFAULT_TIER
+        # ── 2. SMART TIER SELECTION ───────────────────────────────────────────
+        # If we have a 'last_successful_tier' that is still alive, try it FIRST.
+        # This is CRITICAL for search -> extraction continuity.
+        tier_sequence = list(range(config.HYBRID_DEFAULT_TIER, 5))
+        if self._last_successful_tier and self._last_successful_tier in tier_sequence:
+            # Move it to the front of the list
+            tier_sequence.remove(self._last_successful_tier)
+            tier_sequence.insert(0, self._last_successful_tier)
 
         logger.debug(
-            f"[HybridEngine] Starting waterfall from Tier {self._current_tier} "
+            f"[HybridEngine] Waterfall sequence: {tier_sequence} "
             f"for '{method_name}' "
             f"(consecutive_failures={self._consecutive_failures})"
         )
 
-        for tier in range(self._current_tier, 5):  # Tiers 1→2→3→4
+        for tier in tier_sequence:
             self._current_tier = tier
             started = await self.start_tier(tier)
             if not started:
@@ -267,8 +283,9 @@ class HybridAutomationEngine:
 
                 if result:
                     self._stats[tier]["successes"] += 1
-                    # ✅ Success — reset circuit breaker failure counter
+                    # ✅ Success — reset circuit breaker and SET sticky tier
                     self._consecutive_failures = 0
+                    self._last_successful_tier = tier
                     return result
 
                 logger.warning(

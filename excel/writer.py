@@ -37,7 +37,7 @@ def save_results(rows: list, original_filepath: str) -> None:
     out_dir = config.get_output_dir(input_folder)
     
     date_str = datetime.date.today().strftime("%Y-%m-%d")
-    fusion_path = out_dir / f"Extraction_{input_folder}_{date_str}.xlsx"
+    fusion_path = out_dir / f"{input_folder}_{date_str}.xlsx"
     
     # ── Discover Enriched Headers ──
     enriched_keys = set()
@@ -46,7 +46,7 @@ def save_results(rows: list, original_filepath: str) -> None:
     enriched_keys = sorted(enriched_keys)
     
     base_headers = list(rows[0].raw.keys()) if rows else []
-    ai_status_header = "Etat"
+    ai_status_header = config.STATUS_COLUMN_NAME
     
     # AI Results columns (only add if not in base headers to avoid duplicates)
     candidate_ai_headers = ["AI_Phone", "AI_Agent_Phone", ai_status_header]
@@ -59,6 +59,7 @@ def save_results(rows: list, original_filepath: str) -> None:
     all_headers = base_headers + ai_headers + enr_headers
 
     # ── Excel Workbook ──
+    existing_fps = set()
     try:
         if fusion_path.exists():
             wb = openpyxl.load_workbook(fusion_path)
@@ -66,6 +67,35 @@ def save_results(rows: list, original_filepath: str) -> None:
             # Read existing headers to map correctly and not shift columns
             existing_headers = [str(cell.value) for cell in ws[1] if cell.value is not None]
             
+            # --- Progress Optimization: Pre-scan for duplicates ---
+            from utils.column_detector import detect_columns
+            out_mapping = detect_columns(existing_headers)
+            col_map = {name: i for i, name in enumerate(existing_headers)}
+            
+            def get_cell_val(row_cells, concept):
+                col_name = out_mapping.get(concept)
+                if col_name and col_name in col_map:
+                    val = row_cells[col_map[col_name]].value
+                    return str(val).strip() if val is not None else None
+                return None
+
+            for row_cells in ws.iter_rows(min_row=2):
+                o_nom = get_cell_val(row_cells, "raison_sociale")
+                o_adr = get_cell_val(row_cells, "adresse")
+                o_siren = get_cell_val(row_cells, "siren") or get_cell_val(row_cells, "siret")
+                
+                # Fingerprint reconstruction
+                import re
+                n = str(o_nom or "").strip().lower()
+                a = str(o_adr or "").strip().lower()
+                n = re.sub(r'[^a-z0-9]', '', n)
+                a = re.sub(r'[^a-z0-9]', '', a)
+                if o_siren and len(o_siren) >= 9:
+                    fp = f"SIREN:{o_siren}"
+                else:
+                    fp = f"NA:{n}|{a}"
+                existing_fps.add(fp)
+
             # Expanded headers logic
             new_cols_found = [h for h in all_headers if h not in existing_headers]
             if new_cols_found:
@@ -92,13 +122,18 @@ def save_results(rows: list, original_filepath: str) -> None:
         except: pass
         return
         
+    rows_added = 0
     for r in rows:
+        # Check if row is already in the daily fusion file
+        if r.get_fingerprint() in existing_fps:
+            continue
+
         # Determine Status accurately
         status_to_write = "Pending"
         if r.phone:
             status_to_write = "Done"
         elif r.status == "SKIP":
-            status_to_write = "Skip"
+            status_to_write = "No Tel"
         elif r.status == "NO TEL":
             status_to_write = "No Tel"
         elif r.status == "DONE":
@@ -119,19 +154,21 @@ def save_results(rows: list, original_filepath: str) -> None:
             row_dict[f"AI_{k.upper()}"] = info.get("value", "")
 
         # Write ordered data based on actual worksheet headers
-        # Defensive check: ensure no lists/dicts are passed to openpyxl, convert to string if needed.
         ordered_data = []
         for h in existing_headers:
             val = row_dict.get(h, "")
-            # openpyxl cannot handle lists/dicts directly in ws.append()
             if isinstance(val, (list, dict)):
                 val = str(val)
             ordered_data.append(val)
             
         ws.append(ordered_data)
+        rows_added += 1
 
-    wb.save(fusion_path)
-    logger.info(f"[Writer] Results fused/saved: {fusion_path}")
+    if rows_added > 0:
+        wb.save(fusion_path)
+        logger.info(f"[Writer] Results fused/saved: {fusion_path} (+{rows_added} new rows)")
+    else:
+        logger.info(f"[Writer] All rows already exist in the fusion file. No changes saved.")
 
 
 def save_subset_to_excel(rows: list, target_path: Path) -> None:
@@ -150,7 +187,7 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
     enriched_keys = sorted(enriched_keys)
 
     base_headers = list(rows[0].raw.keys())
-    ai_status_header = "Etat"
+    ai_status_header = config.STATUS_COLUMN_NAME
     
     # AI Results columns
     candidate_ai_headers = ["AI_Phone", "AI_Agent_Phone", ai_status_header]
@@ -172,7 +209,7 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
         if r.phone:
             status_to_write = "Done"
         elif r.status == "SKIP":
-            status_to_write = "Skip"
+            status_to_write = "No Tel"
         elif r.status == "NO TEL":
             status_to_write = "No Tel"
         elif r.status == "DONE":

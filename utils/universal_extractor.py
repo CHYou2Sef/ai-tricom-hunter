@@ -99,8 +99,7 @@ class UniversalExtractor:
             # Logging if something was found
             found_aeo = len(result["aeo_data"])
             found_phones = len(result["heuristic_phones"])
-            if found_aeo > 0 or found_phones > 0:
-                logger.debug(f"[UUE] Extracted {found_aeo} JSON-LD blocks and {found_phones} heuristic phones.")
+            logger.info(f"🧠 [UniversalExtractor] Analyzing DOM... Found {found_aeo} JSON-LD blocks & {found_phones} heuristic phones.")
                 
         except Exception as e:
             logger.error(f"[UUE] Parsing error: {e}")

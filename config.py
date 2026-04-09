@@ -70,6 +70,11 @@ INPUT_STD_DIR   = INPUT_DIR / "std_input"    # SIREN + RS + Adresse
 INPUT_RS_DIR    = INPUT_DIR / "RS_input"     # RS + Adresse (no SIREN)
 INPUT_SIR_DIR   = INPUT_DIR / "sir_input"    # SIREN/SIRET + Adresse (no RS)
 
+# ── OUTPUT SETTINGS ────────────────────────────────────────────────
+# The column name for the agent's processing result (Done, No Tel, etc.)
+# We use 'Etat_IA' to avoid confusion with original 'Statut' (Active/Inactive) columns.
+STATUS_COLUMN_NAME = "Etat_IA"
+
 # ── The FINAL queue for the Agent ──
 # Move your files here AFTER you have reviewed or modified them.
 READY_DIR       = INPUT_DIR / "ready_to_process"
@@ -80,10 +85,11 @@ ARCHIVE_DIR     = INPUT_DIR / "archived"     # original files after split
 
 
 def get_output_dir(input_folder_name: str) -> Path:
-    """Returns output/Extraction_{input_folder_name}"""
-    path = BASE_DIR / "output" / f"Extraction_{input_folder_name}"
+    """Returns output/{input_folder_name}"""
+    path = BASE_DIR / "output" / input_folder_name
     path.mkdir(parents=True, exist_ok=True)
     return path
+
 
 # ── Parallelism & Future Scope ──
 # 3 Workers = 3 simultaneous browser windows
