@@ -39,11 +39,11 @@ logger = get_logger(__name__)
 # CATEGORY CONSTANTS
 # ──────────────────────────────────────────────────────────────────────────────
 
-CAT_STD    = "std_input"    # SIREN + RS + Adresse  (complete)
-CAT_RS     = "RS_input"     # RS + Adresse  (no SIREN)
-CAT_SIR    = "sir_input"    # SIREN/SIRET + Adresse  (no RS)
-CAT_OTHER  = "other_input"  # partial / unclassified
-CAT_DISCARD = "DISCARD"     # no useful data → row dropped
+CAT_STD    = "STD"     # SIREN + RS + Adresse  (complete)
+CAT_RS     = "RS"      # RS + Adresse  (no SIREN)
+CAT_SIR    = "SIREN"   # SIREN/SIRET + Adresse  (no RS)
+CAT_OTHER  = "OTHERS"  # partial / unclassified
+CAT_DISCARD = "DISCARD" # no useful data → row dropped
 
 def get_category_dir(category: str) -> str:
     """Return the output directory for a given category (from config)."""
@@ -212,37 +212,18 @@ def _write_category_file(
     header_fill = _HEADER_FILLS.get(category, PatternFill("solid", fgColor="444444"))
     header_font = Font(bold=True, color="FFFFFF")
 
-    # ── Update headers with Agent Status ──
     out_headers = list(original_headers)
-    status_col = config.STATUS_COLUMN_NAME
-    if status_col not in out_headers:
-        out_headers.append(status_col)
     
     # ── Write header row ──
-    # ws.append(out_headers)
+    ws.append(out_headers)
     for cell in ws[1]:
         cell.fill = header_fill
         cell.font = header_font
 
     # ── Write data rows ──
     for row in rows:
-        # Determine "Etat" value
-        has_tel = _has_telephone(row)
-        has_nom = _has_nom(row)
-        has_adr = _has_adresse(row)
-        has_sir = _has_siren(row)
-        
-        etat = "DONE" if (has_tel and (has_nom or has_adr or has_sir)) else "PENDING"
-        
-        # ⭐ BUG FIX: Map data row using out_headers to avoid column shift
-        data_row = []
-        status_col = config.STATUS_COLUMN_NAME
-        for h in out_headers:
-            if h == status_col:
-                data_row.append(etat)
-            else:
-                data_row.append(row.raw.get(h, ""))
-
+        # Map data row to original headers only
+        data_row = [row.raw.get(h, "") for h in out_headers]
         ws.append(data_row)
 
     wb.save(dest_path)
@@ -317,10 +298,10 @@ def clean_and_classify(
     # ── Summary log ──
     logger.info(
         f"[Cleaner] ━━━ Classification done for '{filename}' ━━━\n"
-        f"         📦 std_input   : {stats[CAT_STD]}\n"
-        f"         📋 RS_input    : {stats[CAT_RS]}\n"
-        f"         🔢 sir_input   : {stats[CAT_SIR]}\n"
-        f"         📁 other_input : {stats[CAT_OTHER]}\n"
+        f"         📦 {CAT_STD}   : {stats[CAT_STD]}\n"
+        f"         📋 {CAT_RS}    : {stats[CAT_RS]}\n"
+        f"         🔢 {CAT_SIR}   : {stats[CAT_SIR]}\n"
+        f"         📁 {CAT_OTHER} : {stats[CAT_OTHER]}\n"
         f"         🗑️  discarded   : {discarded}"
     )
 

@@ -14,11 +14,11 @@ Bienvenue dans **AI Phone Hunter**, un robot asynchrone haute performance automa
 
 Le projet est divisé en deux phases distinctes pour maximiser le taux de succès et la vitesse de traitement.
 
-### Phase 1 : Le Pré-processeur (`pre_process.py`)
-Ce script ("Watchdog") surveille en continu le dossier `input/incoming/`.
+### Phase 1: Le Pré-processeur (`pre_process.py`)
+Ce script ("Watchdog") surveille en continu le dossier `WORK/INCOMING/`.
 - **Support CSV & Excel** : Détection automatique des formats et délimiteurs (virgule, point-virgule, etc.).
 - **Nettoyage Dynamique** : Exclusion automatique des entreprises marquées comme "Radiées".
-- **Classification** : Ventile les leads selon leur richesse initiale de données (`std_input`, `RS_input`, `sir_input`).
+- **Classification Stratégique** : Ventile les leads selon leur richesse initiale de données dans les buckets `WORK/STD/`, `WORK/RS/` et `WORK/SIREN/`.
 
 ### Phase 2 : L'Agent IA Asynchrone (`main.py`)
 Ce script traite les listes triées en utilisant un pool de navigateurs parallèles (Multi-Worker).
@@ -71,7 +71,7 @@ Configurez vos clés et chemins dans `.env` :
 ```bash
 python pre_process.py
 ```
-> *Déposez vos fichiers sources (Excel ou CSV) dans le dossier `input/incoming/`.*
+> *Déposez vos fichiers sources (Excel ou CSV) dans le dossier `WORK/INCOMING/`.*
 
 ### Terminal 2 : Intelligence Artificielle (Runner)
 ```bash

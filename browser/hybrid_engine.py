@@ -100,6 +100,10 @@ class HybridAutomationEngine:
         # Prevents infinite retry storms when ALL tiers fail due to IP banning.
         self._current_tier = config.HYBRID_DEFAULT_TIER
         self._last_successful_tier: Optional[int] = None
+        self._circuit_breaker_open = False
+        self._circuit_breaker_until = 0.0
+        self._consecutive_failures = 0
+        self._last_target_url: Optional[str] = None # For re-navigation catch-up
 
         self._stats: Dict[int, Dict[str, Any]] = {
             1: {"attempts": 0, "successes": 0, "total_ms": 0},
@@ -261,6 +265,16 @@ class HybridAutomationEngine:
                 continue
 
             agent = {1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}[tier]
+
+            # ── 2.1 RE-NAVIGATION CATCH-UP ───────────────────────────────────
+            # If we just started a NEW tier (not Tier 1 or the sticky one), 
+            # and we have a last_target_url, we must navigate to it before 
+            # calling an extraction method.
+            if tier != tier_sequence[0] and self._last_target_url and method_name != "goto_url":
+                if "search" not in method_name and method_name == "extract_universal_data":
+                    logger.info(f"[HybridEngine] 🌐 Catching up Tier {tier} to URL: {self._last_target_url}")
+                    await getattr(agent, "goto_url")(self._last_target_url)
+
             method = getattr(agent, method_name, None)
 
             if not method:
@@ -286,6 +300,21 @@ class HybridAutomationEngine:
                     # ✅ Success — reset circuit breaker and SET sticky tier
                     self._consecutive_failures = 0
                     self._last_successful_tier = tier
+                    
+                    # Track last URL if this was a navigation
+                    if method_name in ["goto_url", "submit_google_search", "search_google_ai_mode"]:
+                        try:
+                            if tier == 1 and hasattr(agent, "_page") and agent._page:
+                                self._last_target_url = agent._page.url
+                            elif tier == 2 and hasattr(agent, "_page") and agent._page:
+                                self._last_target_url = agent._page.url # Nodriver tab.url
+                            elif tier == 3 and "query" in locals():
+                                import urllib.parse
+                                self._last_target_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(locals()['query'])}"
+                            elif tier == 4 and hasattr(agent, "_page") and agent._page:
+                                self._last_target_url = agent._page.url
+                        except: pass
+
                     return result
 
                 logger.warning(
@@ -299,6 +328,8 @@ class HybridAutomationEngine:
             # Waterfall Escalate
             next_tier = tier + 1
             if next_tier > 4:
+                # 🔴 IMPORTANT: Close the last tier if we are about to return None
+                await self.stop_tier(tier)
                 break
             logger.warning(f"[HybridEngine] Escalating Tier {tier} → Tier {next_tier}...")
             await self.stop_tier(tier)

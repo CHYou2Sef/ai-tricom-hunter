@@ -63,5 +63,6 @@ def simulate_data_collection(file_path: str):
     logger.info("Task completed successfully. All components operational.")
 
 if __name__ == "__main__":
-    os.makedirs("input", exist_ok=True)
-    simulate_data_collection("input/raw_bulk_data.json")
+    import config
+    os.makedirs(config.INCOMING_DIR, exist_ok=True)
+    simulate_data_collection(str(config.INCOMING_DIR / "raw_bulk_data.json"))

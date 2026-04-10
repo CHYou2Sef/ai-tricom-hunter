@@ -39,7 +39,7 @@ from utils.progress_tracker import ProgressTracker
 logger = get_logger(__name__)
 
 # Initialize global progress tracker
-progress = ProgressTracker(config.BASE_DIR / "output" / "active_processing.json")
+progress = ProgressTracker(config.WORK_DIR / "active_processing.json")
 
 # Counter for consecutive CAPTCHA blocks
 _captcha_streak = 0
@@ -613,28 +613,15 @@ async def finalize_file_processing(rows: List[ExcelRow], original_filepath: str)
         f"❌ {len(retry_rows)} FAILED (Skipped/No Tel)"
     )
 
-    # ── ROUTING LOGIC ──
-    # Determine the destination folder based on where the source file lived.
-    # Note: If it's a chunk, its grandparent is the bucket.
-    parent_dir = orig_path.parent.name
-    if parent_dir == "chunks_processing":
-        parent_dir = orig_path.parent.parent.name
-    
-    destination_dir = config.OUTPUT_ARCHIVE_DIR
-    if "RS" in parent_dir:
-        destination_dir = config.OUTPUT_RS_ADR
-    elif "sir" in parent_dir or "SIR" in parent_dir:
-        destination_dir = config.OUTPUT_SIR_ADR
-    elif "std" in parent_dir or "STD" in parent_dir:
-        destination_dir = config.OUTPUT_RS_ADR # Standard contains RS
+    # ── ROUTING LOGIC (SUCCEED/FAILED) ──
     
     # ── 1. ARCHIVE DONE ROWS ──
     if success_rows:
-        destination_dir.mkdir(parents=True, exist_ok=True)
-        archive_path = destination_dir / f"{orig_path.name}"
+        config.OUTPUT_SUCCEED_DIR.mkdir(parents=True, exist_ok=True)
+        archive_path = config.OUTPUT_SUCCEED_DIR / f"{orig_path.name}"
         if archive_path.exists():
             ts = time.strftime("%H%M%S")
-            archive_path = destination_dir / f"{orig_path.stem}_{ts}{suffix}"
+            archive_path = config.OUTPUT_SUCCEED_DIR / f"{orig_path.stem}_{ts}{suffix}"
         logger.info(f"[Post-Process] 📦 Archiving DONE → {archive_path.name}")
         await asyncio.to_thread(save_subset_to_excel, success_rows, archive_path)
 

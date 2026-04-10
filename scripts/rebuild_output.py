@@ -1,16 +1,18 @@
-import os
-import json
-from pathlib import Path
-# Ensure imports work
-OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
-OUTPUT_ARCHIVE_DIR = OUTPUT_DIR / "Archived_Results"
-OUTPUT_FAILED_DIR = OUTPUT_DIR / "Archived_Failed"
+import sys
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import config
+
+# Use new config paths
+OUTPUT_ROOT = config.OUTPUT_ROOT
+OUTPUT_SUCCEED_DIR = config.OUTPUT_SUCCEED_DIR
+OUTPUT_FAILED_DIR = config.OUTPUT_FAILED_DIR
 
 def reconstruct_from_json(json_file_path: Path):
     """
     Parses an _AUDIT.json file, reconstructs the correct Excel mapping,
-    and drops the data into output/Archived_Results or output/Archived_Failed.
-    Because the JSON has structured dictionaries, it is immune to the column slide bug.
+    and drops the data into WORK/ARCHIVE/SUCCEED or WORK/ARCHIVE/FAILED.
     """
     print(f"🔄 Processing {json_file_path.name}...")
     try:
@@ -104,21 +106,21 @@ def reconstruct_from_json(json_file_path: Path):
         print(f"  ✅ Saved {len(rows)} rows to {out_path.parent.name}/{out_path.name}")
 
     if success_rows:
-        save_rows(success_rows, OUTPUT_ARCHIVE_DIR, "")
+        save_rows(success_rows, OUTPUT_SUCCEED_DIR, "")
         
     if failed_rows:
         save_rows(failed_rows, OUTPUT_FAILED_DIR, "_FAILED")
 
     # Move json to backup instead of deleting completely just in case
-    backup_dir = OUTPUT_DIR / "_json_backup"
+    backup_dir = OUTPUT_ROOT / "_json_backup"
     backup_dir.mkdir(exist_ok=True)
     json_file_path.rename(backup_dir / json_file_path.name)
     
 def main():
-    print(f"🚀 Starting JSON to XLSX reconstruction in {OUTPUT_DIR}")
+    print(f"🚀 Starting JSON to XLSX reconstruction in {config.WORK_DIR}")
     
     found_any = False
-    for root, dirs, files in os.walk(OUTPUT_DIR):
+    for root, dirs, files in os.walk(config.WORK_DIR):
         if "_json_backup" in root:
             continue
         for file in files:

@@ -26,8 +26,8 @@ class FileChunker:
     and tracks progress using a sidecar metadata file.
     """
 
-    def __init__(self, work_dir: str = "input/chunks_processing"):
-        self.work_dir = Path(work_dir)
+    def __init__(self, work_dir: Optional[str] = None):
+        self.work_dir = Path(work_dir) if work_dir else config.WORK_DIR / "CHUNKS"
         self.work_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_metadata_path(self, original_file: Path) -> Path:

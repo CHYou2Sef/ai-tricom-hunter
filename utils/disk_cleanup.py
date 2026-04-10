@@ -101,7 +101,13 @@ def cleanup_browser_caches() -> int:
             total_freed += freed
 
     # --- Crawl4AI persistent cache ---
-    crawl4ai_cache = Path.home() / ".crawl4ai_cache"
+    # Try the project-local one first as defined in config
+    try:
+        import config
+        crawl4ai_cache = config.CRAWL4AI_HOME
+    except (ImportError, AttributeError):
+        crawl4ai_cache = Path.home() / ".crawl4ai_cache"
+
     if crawl4ai_cache.exists():
         freed = _safe_remove(crawl4ai_cache)
         if freed > 0:

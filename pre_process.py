@@ -98,12 +98,13 @@ class RawFileHandler(FileSystemEventHandler):
 def ensure_dirs():
     """Ensure all required directories exist before starting."""
     dirs = [
+        config.WORK_DIR,
         config.INCOMING_DIR,
         config.INPUT_STD_DIR,
         config.INPUT_RS_DIR,
         config.INPUT_SIR_DIR,
         config.INPUT_OTHER_DIR,
-        config.ARCHIVE_DIR,
+        config.ARCHIVE_BACKUP_DIR,
         config.LOG_DIR,
     ]
     for d in dirs:

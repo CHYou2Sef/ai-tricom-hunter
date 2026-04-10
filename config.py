@@ -35,58 +35,61 @@ load_dotenv()
 # Absolute path to the folder where THIS file (config.py) lives.
 BASE_DIR = Path(__file__).resolve().parent
 
+# ── NEW CENTRALIZED WORK DIRECTORY ──
+# Everything operational (watching, outputs, archives) happens here.
+WORK_DIR = BASE_DIR / "WORK"
+
 # ── Force Crawl4AI to use a writable workspace directory ──
 CRAWL4AI_HOME = BASE_DIR / ".crawl4ai_cache"
 os.environ["CRAWL4AI_HOME"] = str(CRAWL4AI_HOME)
 CRAWL4AI_HOME.mkdir(parents=True, exist_ok=True)
 
 # The entry point for ALL raw files. Place your dirty/new Excel files here.
-INCOMING_DIR = BASE_DIR / "input" / "incoming"
+INCOMING_DIR = WORK_DIR / "INCOMING"
 
-# The internal processing folder. The agent watches sub-folders here.
-INPUT_DIR    = BASE_DIR / "input"
+# The internal processing folders. The agent watches these buckets.
+INPUT_DIR      = WORK_DIR
+INPUT_STD_DIR  = WORK_DIR / "STD"   # SIREN + RS + Adresse
+INPUT_SIR_DIR  = WORK_DIR / "SIREN" # SIREN + Adresse only
+INPUT_RS_DIR   = WORK_DIR / "RS"    # RS + Adresse only
+INPUT_OTHER_DIR = WORK_DIR / "OTHERS" # partial data (Not to processed)
 
-# Results for rows that had  →  Raison Sociale + Adresse
-OUTPUT_RS_ADR    = BASE_DIR / "output" / "RS_Adr"
+# ── LIVE OUTPUTS ───────────────────────────────────────────────
+# These subfolders inside WORK/output/ hold results based on the input bucket.
+# We also use them for the "daily fusion" files.
+OUTPUT_ROOT    = WORK_DIR / "output"
+OUTPUT_RS_ADR  = OUTPUT_ROOT / "RS_Adr"
+OUTPUT_SIR_ADR = OUTPUT_ROOT / "Sir_Adr"
+OUTPUT_DEFAULT = OUTPUT_ROOT / "Results"
 
-# Results for rows that only had  →  SIREN/SIRET + Adresse
-OUTPUT_SIR_ADR = BASE_DIR / "output" / "Sir_Adr"
+# ── FINAL ARCHIVES ─────────────────────────────────────────────
+# Original files go here after they are split/moved from INCOMING.
+ARCHIVE_BACKUP_DIR = WORK_DIR / "ARCHIVE" / "BACKUP"
 
-# Default results folder for non-categorized
-OUTPUT_DEFAULT = BASE_DIR / "output" / "Results"
+# Final results for the day.
+OUTPUT_SUCCEED_DIR = WORK_DIR / "ARCHIVE" / "SUCCEED"
+OUTPUT_FAILED_DIR  = WORK_DIR / "ARCHIVE" / "FAILED"
 
-# Archive for successful results (DONE)
-OUTPUT_ARCHIVE_DIR = BASE_DIR / "output" / "Archived_Results"
-
-# Archive for failed results (NO TEL, SKIP)
-OUTPUT_FAILED_DIR = BASE_DIR / "output" / "Archived_Failed"
+# Compatibility aliases (legacy names pointing to new structure)
+ARCHIVE_DIR        = ARCHIVE_BACKUP_DIR
+OUTPUT_ARCHIVE_DIR = OUTPUT_SUCCEED_DIR
 
 # Log files go here (one log file per day)
 LOG_DIR = BASE_DIR / "logs"
-
-# ── Processing Queues (Pre-processed files go here) ──
-# The agent will search files found in these three folders.
-INPUT_STD_DIR   = INPUT_DIR / "std_input"    # SIREN + RS + Adresse
-INPUT_RS_DIR    = INPUT_DIR / "RS_input"     # RS + Adresse (no SIREN)
-INPUT_SIR_DIR   = INPUT_DIR / "sir_input"    # SIREN/SIRET + Adresse (no RS)
 
 # ── OUTPUT SETTINGS ────────────────────────────────────────────────
 # The column name for the agent's processing result (Done, No Tel, etc.)
 # We use 'Etat_IA' to avoid confusion with original 'Statut' (Active/Inactive) columns.
 STATUS_COLUMN_NAME = "Etat_IA"
 
-# ── The FINAL queue for the Agent ──
-# Move your files here AFTER you have reviewed or modified them.
-READY_DIR       = INPUT_DIR / "ready_to_process"
-
-# These folders are NOT processed by the AI agent automatically
-INPUT_OTHER_DIR = INPUT_DIR / "other_input"  # dirty data
-ARCHIVE_DIR     = INPUT_DIR / "archived"     # original files after split
+# ── The FINAL queue for the Agent (Manual Override) ──
+# If you want to jump the queue, move files here.
+READY_DIR       = WORK_DIR / "READY"
 
 
 def get_output_dir(input_folder_name: str) -> Path:
-    """Returns output/{input_folder_name}"""
-    path = BASE_DIR / "output" / input_folder_name
+    """Returns {WORK_DIR}/output/{input_folder_name}"""
+    path = OUTPUT_ROOT / input_folder_name
     path.mkdir(parents=True, exist_ok=True)
     return path
 

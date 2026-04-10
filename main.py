@@ -48,29 +48,32 @@ logger = get_logger(__name__)
 def ensure_directories() -> None:
     """Create all required directories if they don't already exist."""
     dirs = [
+        config.WORK_DIR,
         config.INCOMING_DIR,
+        config.INPUT_STD_DIR,
+        config.INPUT_SIR_DIR,
+        config.INPUT_RS_DIR,
+        config.INPUT_OTHER_DIR,
         config.READY_DIR,
+        config.OUTPUT_ROOT,
         config.OUTPUT_RS_ADR,
         config.OUTPUT_SIR_ADR,
+        config.OUTPUT_DEFAULT,
+        config.ARCHIVE_BACKUP_DIR,
+        config.OUTPUT_SUCCEED_DIR,
+        config.OUTPUT_FAILED_DIR,
         config.LOG_DIR,
-        # ── Buckets for pre-processing ──
-        config.INPUT_STD_DIR,
-        config.INPUT_RS_DIR,
-        config.INPUT_SIR_DIR,
-        config.INPUT_OTHER_DIR,
-        config.ARCHIVE_DIR,
     ]
     for d in dirs:
         os.makedirs(d, exist_ok=True)
+        logger.debug(f"[Setup] Verified directory: {d}")
 
 def cleanup_input_folders() -> None:
     """Safely cleans up temporary processing folders in input/."""
     import shutil
     # List of folder basenames we must NEVER delete
     keep_dirs = [
-        os.path.basename(config.INCOMING_DIR),
-        os.path.basename(config.ARCHIVE_DIR),
-        "std_input", "RS_input", "sir_input", "ready_to_process", "other_input"
+        "INCOMING", "STD", "SIREN", "RS", "OTHERS", "READY", "output", "ARCHIVE"
     ]
     
     input_root = config.INPUT_DIR
@@ -161,7 +164,7 @@ async def main_async() -> None:
     """Asynchronous entry point for the AI agent."""
     print("\n" + "═" * 60)
     print("  🤖  AI Tricom Hunter Agent (V4 INDUSTRIAL)")
-    print(f"  📂  Queue Sources: {os.path.basename(config.INPUT_DIR)}/* (std, rs, sir, ready)")
+    print(f"  📂  Queue Source:  {config.WORK_DIR.name}/ (Watching buckets: STD, RS, SIREN, READY)")
     print(f"  🔍  Engine:        HYBRID WATERFALL (Tier {config.HYBRID_DEFAULT_TIER} Default)")
     print("═" * 60 + "\n")
 

@@ -24,11 +24,17 @@ from utils.logger import get_logger
 logger = get_logger("Consolidator")
 
 def consolidate():
-    output_dir = Path("output")
-    json_files = glob.glob(str(output_dir / "**" / "*_AUDIT.json"), recursive=True)
+    output_dir = config.WORK_DIR.glob("**/output") # Find all outputs under WORK
+    # More specifically, we check ARCHIVE and output folders
+    search_dirs = [config.OUTPUT_ROOT, config.WORK_DIR / "ARCHIVE"]
+    
+    json_files = []
+    for d in search_dirs:
+        if d.exists():
+            json_files.extend(glob.glob(str(d / "**" / "*.json"), recursive=True))
     
     if not json_files:
-        logger.warning("No _AUDIT.json files found in output/.")
+        logger.warning(f"No .json files found in {config.WORK_DIR}.")
         return
 
     logger.info(f"🔍 Found {len(json_files)} audit files. Merging...")
@@ -83,7 +89,7 @@ def consolidate():
 
     logger.info(f"✅ Collected {len(all_rows)} successful leads.")
     
-    master_path = output_dir / f"MASTER_CONSOLIDATED_{len(all_rows)}_LEADS.xlsx"
+    master_path = config.OUTPUT_ROOT / f"MASTER_CONSOLIDATED_{len(all_rows)}_LEADS.xlsx"
     save_subset_to_excel(all_rows, master_path)
     
     logger.info(f"🏆 Master Consolidated Excel created: {master_path}")
