@@ -38,7 +38,7 @@ from utils.captcha_solver import detect_captcha_type, solve_captcha_async
 logger = get_logger(__name__)
 
 
-from browser.base_agent import BaseBrowserAgent
+from agents.base_agent import BaseBrowserAgent
 
 class CamoufoxAgent(BaseBrowserAgent):
     """

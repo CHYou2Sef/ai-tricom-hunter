@@ -1,0 +1,29 @@
+import logging
+import config
+from llm.ollama_client import ollama_client
+# Optional: import gemini client if needed, or use the one from agent/hybrid_engine
+
+logger = logging.getLogger("LLMRouter")
+
+async def route_completion(prompt: str, provider: str = "auto") -> str:
+    """
+    Routes a prompt completion request to the appropriate provider.
+    - auto: try Ollama first, fallback to Gemini
+    - ollama: force local
+    - gemini: force cloud
+    """
+    if provider == "ollama" or (provider == "auto" and config.OLLAMA_ENABLED):
+        logger.info("[Router] Attempting local completion via Ollama...")
+        response = await ollama_client.complete(prompt)
+        if response:
+            return response
+        logger.warning("[Router] Local completion failed or empty.")
+
+    if provider == "gemini" or provider == "auto":
+        logger.info("[Router] Falling back to Gemini cloud completion...")
+        # Note: In our architecture, Gemini calls might still go through the agent's browser
+        # but here we provide a centralized hook if we ever use a direct API client.
+        # For now, we return empty so the agent can handle its own fallback if router fails.
+        pass
+
+    return ""

@@ -126,7 +126,14 @@ def _setup_root_logger() -> None:
     # ── 2. "Clean" error log file (Only ERRORS and CRITICAL) ──
     # This prevents disk fill-up with trivial infologs
     error_file = os.path.join(config.LOG_DIR, "agent.log")
-    error_handler = logging.FileHandler(error_file)
+    error_handler = RotatingFileHandler(
+        error_file,
+        maxBytes=10 * 1024 * 1024,  # 10 MB
+        backupCount=5,              # Keep 5 error archives
+        encoding="utf-8"
+    )
+    error_handler.namer   = _log_namer
+    error_handler.rotator = _log_rotator
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(
         logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT)

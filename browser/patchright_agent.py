@@ -30,7 +30,7 @@ from patchright.async_api import (
 
 
 import config
-from browser.base_agent import BaseBrowserAgent
+from agents.base_agent import BaseBrowserAgent
 from utils.anti_bot import (
     get_random_user_agent,
     short_delay,

@@ -264,6 +264,12 @@ FALLBACK_ENGINE = "gemini"               # Google Gemini (Deep Search)
 GOOGLE_URL        = "https://www.google.com"
 GEMINI_URL        = "https://gemini.google.com"
 
+# ── LOCAL LLM (OLLAMA) — Vector-less RAG Fallback
+OLLAMA_ENABLED  = os.getenv("OLLAMA_ENABLED", "true").lower() == "true"
+OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "60"))
+
 # ── AI Mode — direct URL that activates the 'AI Mode' tab in Google ──
 # The `aep=42` + `udm=50` parameters bypass standard results and go straight
 # to the AI conversational interface (as seen in the user's screenshot).
@@ -280,22 +286,35 @@ AI_RESPONSE_TIMEOUT = 30   # seconds
 # 💬  SEARCH PROMPT TEMPLATE
 # ═══════════════════════════════════════════════════════════════════
 
+# PROMPT STYLE: 'caveman' (75% token saving) | 'verbose' (Standard)
+PROMPT_STYLE = os.getenv("PROMPT_STYLE", "caveman").lower()
+
+def _opt(prompt: str) -> str:
+    """Helper to optimize if style is caveman."""
+    if PROMPT_STYLE == "caveman":
+        from llm.prompt_optimizer import caveman_optimize
+        return caveman_optimize(prompt)
+    return prompt
+
 # {nom}     → replaced by company name (Raison Sociale) or SIREN
 # {adresse} → replaced by the company address
-#
-# Optimized for EEAT: Expertise, Experience, Authoritativeness, Trustworthiness
-SEARCH_PROMPT_TEMPLATE = (
-    "En tant qu'expert en recherche B2B, identifiez les informations de contact les plus fiables et récentes pour l'entreprise '{nom}' à '{adresse}'. Suivez les principes EEAT : priorisez les sources officielles (site web, Infogreffe, LinkedIn). Trouvez le numéro de téléphone exact, l'adresse postale complète et le SIREN/SIRET. Si plusieurs numéros existent, donnez le plus crédible. Output  in json format."
+SEARCH_PROMPT_TEMPLATE = _opt(
+    "En tant qu'expert en recherche B2B, identifiez les informations de contact les plus fiables et récentes pour l'entreprise '{nom}' à '{adresse}'. "
+    "Suivez les principes EEAT : priorisez les sources officielles (site web, Infogreffe, LinkedIn). "
+    "Trouvez le numéro de téléphone exact, l'adresse postale complète et le SIREN/SIRET. "
+    "Si plusieurs numéros existent, donnez le plus crédible. Output in json format."
 )
 
 # Template for SIREN-based search (Expertise-focused)
-SIREN_SEARCH_TEMPLATE = (
-    "En tant qu'expert B2B, identifiez la Raison Sociale, l'adresse complète et le téléphone officiel pour le SIREN {siren}. Priorisez les bases de données d'autorité (INSEE, Infogreffe, Pappers).  Output  in json format."
+SIREN_SEARCH_TEMPLATE = _opt(
+    "En tant qu'expert B2B, identifiez la Raison Sociale, l'adresse complète et le téléphone officiel pour le SIREN {siren}. "
+    "Priorisez les bases de données d'autorité (INSEE, Infogreffe, Pappers). Output in json format."
 )
 
 # Specific prompt for agent phone number (Experience-focused)
-AGENT_PHONE_PROMPT_TEMPLATE = (
-    "Identifiez le numéro de téléphone direct d'un agent commercial ou responsable pour '{nom}' à '{adresse}'. Utilisez des sources d'expérience (LinkedIn,facebook, pages contact) pour garantir la fiabilité EEAT.  Output  in json format."
+AGENT_PHONE_PROMPT_TEMPLATE = _opt(
+    "Identifiez le numéro de téléphone direct d'un agent commercial ou responsable pour '{nom}' à '{adresse}'. "
+    "Utilisez des sources d'expérience (LinkedIn, facebook, pages contact) pour garantir la fiabilité EEAT. Output in json format."
 )
 
 # ── SQO (Search Query Optimization) ──
@@ -306,43 +325,44 @@ SQO_CONTACT_KEYWORDS = '("téléphone" OR "contact" OR "siège social")'
 # ══════════════════════════════════════════════════════════════════
 # 🤖  TIER 0: GOOGLE AI MODE — PRIMARY PROMPT (JSON STRICT)
 # ══════════════════════════════════════════════════════════════════
-# This is the EXACT prompt sent to Google AI Mode as the FIRST action.
-# It mirrors what the user manually typed and got perfect JSON back.
-AI_MODE_SEARCH_PROMPT = (
-    "Search and show me all available data and info of {nom}, {adresse} in JSON format output. The most important fields are: phone_numbers, email, siren/siret, legal_form, reponsable_person,  address, linkedin, facebook, website. OUTPUT ONLY A JSON OBJECT. No text before or after the JSON block."
+
+AI_MODE_SEARCH_PROMPT = _opt(
+    "Search and show me all available data and info of {nom}, {adresse} in JSON format output. "
+    "The most important fields are: phone_numbers, email, siren/siret, legal_form, reponsable_person, address, linkedin, facebook, website. "
+    "OUTPUT ONLY A JSON OBJECT. No text before or after the JSON block."
 )
 
 # ── SECOND CHANCE: EXPERT RESEARCHER PROMPT ──
-AI_MODE_EXPERT_PROMPT = (
-    """En tant qu'expert chercheur en renseignement industriel B2B avec 20 ans d'expérience, 
-    votre mission est de localiser les informations critiques pour '{nom}' à '{adresse}'. 
-    Fouillez les registres officiels, les annuaires et les profils professionnels. 
-    Récupérez impérativement : téléphone (standard ou dirigeant), email, SIREN/SIRET, forme juridique, adresse exacte, LinkedIn, facebook et site web.
-    RÉPONDEZ UNIQUEMENT PAR UN OBJET JSON complet. Si une donnée est introuvable, indiquez 'NOT_FOUND'. 
-    Pas d'introduction, pas de conclusion, juste le JSON."""
+AI_MODE_EXPERT_PROMPT = _opt(
+    "En tant qu'expert chercheur en renseignement industriel B2B avec 20 ans d'expérience, "
+    "votre mission est de localiser les informations critiques pour '{nom}' à '{adresse}'. "
+    "Fouillez les registres officiels, les annuaires et les profils professionnels. "
+    "Récupérez impérativement : téléphone (standard ou dirigeant), email, SIREN/SIRET, forme juridique, adresse exacte, LinkedIn, facebook et site web. "
+    "RÉPONDEZ UNIQUEMENT PAR UN OBJET JSON complet. Si une donnée est introuvable, indiquez 'NOT_FOUND'. "
+    "Pas d'introduction, pas de conclusion, juste le JSON."
 )
 
 # ── GEO (Generative Engine Optimization) — RAG PROMPT ──
-GEO_FALLBACK_PROMPT = """
+GEO_FALLBACK_PROMPT = _opt("""
 Rôle : Expert en extraction de données B2B (EEAT).
 Analyse le CONTEXTE suivant issu des pages officielles pour l'entreprise : {nom} à {adresse}.
 ### CONTEXTE : {raw_web_context}
 ### INSTRUCTIONS :
 1. Extrais uniquement le numéro de téléphone direct ou du siège social de l'entreprise citée.
 2. Formate le numéro au standard local français (0X XX XX XX XX) ou international (+33...).
-3. Si l'information n'est pas présente dans le texte fourni, réponds strictement "NOT_FOUND".
+3. Si l'information n'est pas présente dans le texte fournise, réponds strictement "NOT_FOUND".
 4. RÉPONDS UNIQUEMENT AVEC UN OBJET JSON. PAS DE TEXTE AVANT OU APRÈS.
 ### FORMAT JSON ATTENDU (STRICT) :
-{{
+{
   "telephone": "01XXXXXXXX",
   "source": "URL ou Nom du Site",
   "confiance": 0.95,
   "raisonnement": "Indiquez brièvement où vous avez trouvé l'info"
-}}
-"""
+}
+""")
 
 # ── IA MODE: WEBSITE DEEP SCRAPE PROMPT ──
-DEEP_SCRAPE_PROMPT = """
+DEEP_SCRAPE_PROMPT = _opt("""
 Rôle : Expert en renseignement B2B et extraction de données industrielles.
 Objectif : Extraire TOUTES les informations de contact de l'entreprise à partir du contenu web fourni.
 
@@ -354,7 +374,7 @@ Objectif : Extraire TOUTES les informations de contact de l'entreprise à partir
 3. INTERDICTION : NE FAITES PAS DE PHRASES. NE DITES PAS "ENCHANTÉ". NE DONNEZ PAS D'EXPLICATION.
 4. SI VIDE : Si une donnée manque, mettez "NOT_FOUND".
 ### FORMAT JSON ATTENDU (NE RÉPONDEZ QUE PAR CECI) :
-{{
+{
   "telephone": "0XXXXXXXXX",
   "email": "contact@entreprise.com",
   "linkedin": "url",
@@ -365,8 +385,8 @@ Objectif : Extraire TOUTES les informations de contact de l'entreprise à partir
   "nom_officiel": "raison sociale trouvée",
   "confiance": 0.98,
   "sources_utilisees": ["Accueil", "Contact"]
-}}
-"""
+}
+""")
 
 # Keywords to find contact/legal pages
 CONTACT_KEYWORDS = ["contact", "propos", "mentions", "legal", "qui-sommes-nous", "about"]

@@ -1,14 +1,9 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  agent.py  —  Core Processing Engine (ASYNC VERSION)                     ║
+║  agent.py  —  Core Orchestration Engine (Canonical Layout)               ║
 ║                                                                          ║
-║  This is the BRAIN of the system. It takes a list of ExcelRow objects,   ║
-║  runs the AI search for each one, extracts phone numbers, updates the    ║
-║  status, and triggers the save to JSON + Excel.                          ║
-║                                                                          ║
-║  BEGINNER NOTE:                                                          ║
-║    This file connects all the other modules together.                    ║
-║    Think of it as the "manager" that calls each "worker" module.         ║
+║  This file acts as the ORCHESTRATOR. It manages the pool of agents       ║
+║  and routes logic to Specialized Agents (PhoneHunter, Enricher).         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -17,24 +12,19 @@ import sys
 import time
 import random
 import asyncio
-import re
-import json
-import pandas as pd
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Optional
 from pathlib import Path
 
 import config
 from excel.reader import ExcelRow, read_excel
 from excel.writer import save_results, save_subset_to_excel
-from utils.logger import get_logger, alert
+from utils.logger import get_logger
 from utils.metrics import PerformanceTracker
-from utils.anti_bot import action_delay_async, human_delay
-from utils.text_cleaner import clean_html_to_text
-from search.phone_extractor import extract_phones, get_best_phone, normalize_phone
-from browser.hybrid_engine import HybridAutomationEngine
-from enrichment.row_enricher import enrich_row
-from utils.json_parser import parse_ai_mode_json
 from utils.progress_tracker import ProgressTracker
+
+# Canonical Agent Imports
+from agents.phone_hunter import process_row
+from agents.enricher import enrich_row
 
 logger = get_logger(__name__)
 
@@ -45,19 +35,15 @@ progress = ProgressTracker(config.WORK_DIR / "active_processing.json")
 _captcha_streak = 0
 _captcha_lock = asyncio.Lock()
 
-# Cache the winner of the benchmark to avoid running it for every file
-_cached_engine = None
-
 # Agent Pool for parallel workers
 _agent_pool = asyncio.Queue()
 
 async def init_agent_pool(count: int):
     """Pre-initialize a pool of browser hybrid engines."""
-    logger.info(f"[AgentPool] Initializing {count} workers (Default Tier: {config.HYBRID_DEFAULT_TIER})...")
+    logger.info(f"[AgentPool] Initializing {count} workers...")
     for i in range(count):
         from browser.hybrid_engine import HybridAutomationEngine
         agent = HybridAutomationEngine(worker_id=i+1)
-        # Pre-warm the default tier for immediate speed
         await agent.start_tier(config.HYBRID_DEFAULT_TIER)
         await _agent_pool.put(agent)
 
@@ -67,67 +53,40 @@ async def close_agent_pool():
         agent = await _agent_pool.get()
         await agent.close()
 
-def get_browser_agent(worker_id: int = 0):
-    """
-    Create and return the appropriate browser engine.
-    Now defaults to the HybridAutomationEngine which handles tier switching.
-    """
-    from browser.hybrid_engine import HybridAutomationEngine
-    return HybridAutomationEngine(worker_id=worker_id)
-
 async def human_delay_async(min_sec: float = config.MIN_DELAY_SECONDS, max_sec: float = config.MAX_DELAY_SECONDS):
     delay = random.uniform(min_sec, max_sec)
-    logger.debug(f"[AntiBot] Sleeping {delay:.2f}s (human delay)")
     await asyncio.sleep(delay)
 
 def sync_with_previous_results(rows: List[ExcelRow], filepath: str) -> int:
-    """
-    Checks the daily fusion file for rows that have already been processed 
-    and updates the current rows with their results to avoid re-scraping.
-    """
+    """Synchronize with today's previous results to avoid redundant scraping."""
     from pathlib import Path
     import openpyxl
     import datetime
-    
+    from utils.column_detector import detect_columns
+
     orig_path = Path(filepath)
     input_folder = orig_path.parent.name
     out_dir = config.get_output_dir(input_folder)
     date_str = datetime.date.today().strftime("%Y-%m-%d")
     fusion_path = out_dir / f"{input_folder}_{date_str}.xlsx"
     
-    # Check JSON progress first
     file_key = f"{input_folder}/{orig_path.name}"
     completed_rows = progress.get_completed_rows(file_key)
     if completed_rows:
-        logger.info(f"🔄 [Sync] Checking JSON progress: {len(completed_rows)} rows already processed.")
         for r in rows:
             if r.row_index in completed_rows:
-                # We mark as DONE to skip, but we might not have the actual phone here 
-                # if we only rely on JSON row indices. 
-                # To be safer, we still try to sync from Excel if available for the data.
-                r.status = "DONE" # Placeholder to ensure it's skipped
+                r.status = "DONE"
     
-    if not fusion_path.exists():
-        return 0
-
+    if not fusion_path.exists(): return 0
     sync_count = 0
     try:
         wb = openpyxl.load_workbook(fusion_path, data_only=True)
         ws = wb.active
-        
-        # 1. Identify headers and crucial column indexes
         headers = [str(cell.value) for cell in ws[1] if cell.value is not None]
         col_map = {name: i for i, name in enumerate(headers)}
-        
-        # We need to detect which columns in the output correspond to our concepts
-        # to build fingerprints from the output file.
-        from utils.column_detector import detect_columns
         out_mapping = detect_columns(headers)
         
-        # 2. Build a lookup table from the existing output
-        lookup = {} # fingerprint -> {status, phone, agent_phone}
-        
-        # Helper to get value safely
+        lookup = {}
         def get_val(row_data, concept):
             col_name = out_mapping.get(concept)
             if col_name and col_name in col_map:
@@ -137,605 +96,96 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str) -> int:
 
         for row_data in ws.iter_rows(min_row=2):
             if all(c.value is None for c in row_data): continue
-            
-            # Reconstruct fingerprint of the existing result
-            out_nom = get_val(row_data, "raison_sociale")
-            out_adr = get_val(row_data, "adresse")
-            out_siren = get_val(row_data, "siren") or get_val(row_data, "siret")
-            
-            # Temporary mock-up of ExcelRow just to use its fingerprint logic
-            # This ensures consistency between search and sync
-            from excel.reader import ExcelRow
             dummy = ExcelRow(raw={}, row_index=0, mapping={})
-            dummy.nom = out_nom
-            dummy.adresse = out_adr
-            dummy.siren = out_siren
+            dummy.nom = get_val(row_data, "raison_sociale")
+            dummy.adresse = get_val(row_data, "adresse")
+            dummy.siren = get_val(row_data, "siren") or get_val(row_data, "siret")
             
             fp = dummy.get_fingerprint()
-            
-            # Extract basic results
-            status = get_val(row_data, "Etat") or "DONE" # Default to DONE if entry exists
-            phone = get_val(row_data, "AI_Phone") or get_val(row_data, "telephone")
-            agent_phone = get_val(row_data, "AI_Agent_Phone")
-            
             lookup[fp] = {
-                "status": status.upper(),
-                "phone": phone,
-                "agent_phone": agent_phone
+                "status": (get_val(row_data, "Etat") or "DONE").upper(),
+                "phone": get_val(row_data, "AI_Phone") or get_val(row_data, "telephone"),
+                "agent_phone": get_val(row_data, "AI_Agent_Phone")
             }
         
-        # 3. Synchronize current rows
         for r in rows:
             fp = r.get_fingerprint()
             if fp in lookup:
                 entry = lookup[fp]
-                # Only sync if the status looks finished
                 if entry["status"] in ("DONE", "NO TEL", "SKIP"):
-                    r.status = entry["status"]
-                    r.phone = entry["phone"]
-                    r.agent_phone = entry["agent_phone"]
+                    r.status, r.phone, r.agent_phone = entry["status"], entry["phone"], entry["agent_phone"]
                     sync_count += 1
-        
         wb.close()
-        if sync_count > 0:
-            logger.info(f"🔄 [Sync] Synchronized {sync_count} rows from today's previous session.")
-            
     except Exception as e:
-        logger.warning(f"⚠️ [Sync] Could not synchronize with {fusion_path.name}: {e}")
-        
+        logger.warning(f"⚠️ [Sync] Link failed: {e}")
     return sync_count
-
-def build_search_query(row: ExcelRow) -> str:
-    if row.nom:
-        keywords = config.SQO_CONTACT_KEYWORDS
-        trusted  = config.SQO_TRUSTED_DOMAINS
-        return f'"{row.nom}" "{row.adresse or ""}" {keywords} {trusted}'
-    elif row.siren:
-        return config.SIREN_SEARCH_TEMPLATE.format(siren=row.siren)
-    return ""
-
-def build_agent_query(row: ExcelRow) -> str:
-    nom     = row.get_search_name()
-    adresse = row.adresse or ""
-    return config.AGENT_PHONE_PROMPT_TEMPLATE.format(nom=nom, adresse=adresse)
-
-async def _search_knowledge_panel_phone(row: ExcelRow, agent, query: str) -> Optional[str]:
-    row.search_queries_used.append(f"KP: {query}")
-    logger.info(f"    [Tier 0] Knowledge Panel Search: {query}")
-
-    success = await agent.submit_google_search(query)
-    if not success:
-        return None
-
-    await asyncio.sleep(3)
-    
-    # --- UUE: Passe Unique pour le Knowledge Panel ---
-    metadata = await agent.extract_universal_data() or {}
-    best_phone = None
-    
-    # Check heuristic (panel) phones first
-    if metadata.get("heuristic_phones"):
-        best_phone = metadata["heuristic_phones"][0]
-    # Check semantic JSON-LD
-    elif metadata.get("aeo_data"):
-        for block in metadata["aeo_data"]:
-            tel = block.get("telephone") or block.get("contactPoint", {}).get("telephone")
-            if tel:
-                best_phone = tel
-                break
-                
-    if best_phone:
-        normalized = normalize_phone(best_phone)
-        if normalized:
-            row.raw_ai_responses.append({
-                "text":   f"Knowledge Panel/UUE Phone Found: {normalized}",
-                "source": "google_kp",
-                "query":  query,
-            })
-            logger.info(f"✨ [Tier 0/UUE] Method SUCCESS: {normalized}")
-            return normalized
-    return None
-
-async def _search_and_extract_phone(row: ExcelRow, agent, query: str, source_tag: str) -> Tuple[Optional[str], Optional[str]]:
-    row.search_queries_used.append(query)
-    content = await agent.search_google_ai(query)
-
-    if content:
-        row.raw_ai_responses.append({
-            "text":   content,
-            "source": source_tag,
-            "query":  query,
-        })
-
-    # --- UUE: Extraction robuste du téléphone ---
-    metadata = await agent.extract_universal_data() or {}
-    phone = None
-    
-    # 1. Privilégier le sémantique (schema.org)
-    for block in metadata.get("aeo_data", []):
-        tel = block.get("telephone") or block.get("contactPoint", {}).get("telephone")
-        if tel:
-            phone = tel
-            logger.info(f"    [UUE] Found telephone in structured data: {tel}")
-            break
-            
-    # 2. Heuristique (Attributs visuels / DOM)
-    if not phone and metadata.get("heuristic_phones"):
-        phone = metadata["heuristic_phones"][0]
-        logger.info(f"    [UUE] Found telephone via heuristics: {phone}")
-
-    # 3. Fallback: Regex sur le contenu brut texte (comme avant)
-    if not phone and content:
-        phones = extract_phones(content)
-        phone = get_best_phone(phones)
-
-    return phone, content
-
-async def process_row(row: ExcelRow, agent) -> None:
-    global _captcha_streak
-
-    # Skip only DONE rows. "SKIP" and "NO TEL" are re-evaluated if REPROCESS_FAILED_ROWS is True.
-    can_reprocess = config.REPROCESS_FAILED_ROWS and row.status in ("SKIP", "NO TEL")
-    if row.status == "DONE" or (row.status in ("SKIP", "NO TEL") and not config.REPROCESS_FAILED_ROWS):
-        logger.info(f"[Agent] Row #{row.row_index} SKIPPED — status={row.status}.")
-        return
-
-    logger.info(f"[Agent] Processing row #{row.row_index} | {row.get_search_name()}")
-    row.processing_start_ts = time.perf_counter()
-    best_phone = None
-
-    # --- 1. PRIMARY: AI Search (Waterfall) ---
-    nom, adr = (row.nom or row.siren or ""), (row.adresse or "")
-    for prompt_key, tag in [(config.AI_MODE_SEARCH_PROMPT, "ai_std"), (config.AI_MODE_EXPERT_PROMPT, "ai_expert")]:
-        prompt = prompt_key.format(nom=nom, adresse=adr)
-        ai_raw = await agent.search_google_ai_mode(prompt)
-        if ai_raw:
-            row.raw_ai_responses.append({"text": ai_raw, "source": tag, "query": prompt[:100]})
-            best_phone = _fill_row_from_ai_mode(ai_raw, row)
-            if best_phone: break
-
-    # --- 2. FALLBACK: Direct Scraping ---
-    if not best_phone:
-        # Knowledge Panel
-        if row.nom:
-            best_phone = await _search_knowledge_panel_phone(row, agent, f"{row.nom} {adr}")
-        
-        # Domain Search
-        if not best_phone:
-            q = build_search_query(row)
-            if q:
-                res, _ = await _search_and_extract_phone(row, agent, q, "google_scrap")
-                best_phone = res
-
-    row.phone   = best_phone
-    row.status  = "DONE" if best_phone else "NO TEL"
-    row.processing_end_ts = time.perf_counter()
-
-
-def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
-    """
-    Parses Google AI Mode's JSON response and fills ALL row fields:
-    phone, email, linkedin, siren, siret, legal_form, address, website.
-    Returns the best phone found, or None.
-    """
-    data = parse_ai_mode_json(raw_text)
-    if not data:
-        logger.debug("[AI Mode Parser] No JSON found in response.")
-        return None
-
-    logger.debug(f"[AI Mode Parser] Parsed keys: {list(data.keys())}")
-
-    # ─ Extract phone ─
-    phones_raw = data.get("phone_numbers") or data.get("telephone") or data.get("phone")
-    best = None
-    if isinstance(phones_raw, list) and phones_raw:
-        best = normalize_phone(phones_raw[0])
-    elif isinstance(phones_raw, str):
-        best = normalize_phone(phones_raw)
-    # Also fall back to regex on the raw text
-    if not best:
-        candidates = extract_phones(raw_text)
-        best = get_best_phone(candidates)
-
-    # ─ Fill enriched_fields & Row Attributes ─
-    field_map = {
-        "email":       ["email"],
-        "linkedin":    ["linkedin", "linkedin_url"],
-        "website":     ["website", "website_url"],
-        "siren":       ["siren"],
-        "siret":       ["siret"],
-        "legal_form":  ["legal_form", "legal_name"],
-        "naf":         ["activity_code_naf", "naf"],
-        "address":     ["headquarters_address", "address"],
-        "dirigeant":   ["director", "dirigeant", "ceo"],
-        "capital":     ["capital"],
-        "ville":       ["city", "ville"],
-        "code_postal": ["postal_code", "code_postal"],
-    }
-    
-    # Map for setting core row attributes (if they are empty)
-    # Row Key (enriched_fields) -> Attribute Name (ExcelRow instance)
-    attr_map = {
-        "email":      "email",
-        "linkedin":   "linkedin",
-        "website":    "website",
-        "siren":      "siren",
-        "siret":      "siret",
-        "legal_form": "forme_juridique",
-        "naf":        "naf",
-        "dirigeant":  "dirigeant",
-        "capital":    "capital",
-        "ville":      "ville",
-        "code_postal":"code_postal",
-    }
-    
-    for row_key, json_keys in field_map.items():
-        for jk in json_keys:
-            val = data.get(jk)
-            # Handle nested collections (dict or list)
-            if isinstance(val, dict):
-                val = ", ".join(str(v) for v in val.values() if v)
-            elif isinstance(val, list):
-                val = ", ".join(str(v) for v in val if v)
-            if val and str(val).upper() not in ("NOT_FOUND", "NONE", "", "NULL"):
-                clean_val = str(val).strip()
-                # 1. Fill the audit metadata
-                row.enriched_fields[row_key] = {
-                    "value":      clean_val,
-                    "source":     "google_ai_mode",
-                    "confidence": 0.97,
-                }
-                # 2. Fill the row attribute directly if it's currently empty
-                attr = attr_map.get(row_key)
-                if attr and not getattr(row, attr, None):
-                    setattr(row, attr, clean_val)
-                    logger.debug(f"[AI Mode Parser] Filled attribute '{attr}': {clean_val}")
-                break
-    return best
-
-# Legacy _extract_aeo_phone removed, now handled directly by UUE inline in _search_and_extract_phone
-
-async def _extract_geo_phone(row: ExcelRow, agent, page_content: str) -> Optional[str]:
-    logger.info(f"    [GEO] No conclusive phone found. Initializing Gemini RAG fallback...")
-    # Use the new robust cleaner to remove JS/Style tags
-    context = clean_html_to_text(page_content)[:8000].strip()
-    
-    geo_prompt = config.GEO_FALLBACK_PROMPT.format(
-        nom=row.nom or row.siren,
-        adresse=row.adresse,
-        raw_web_context=context
-    )
-    
-    await human_delay_async(1, 2)
-    geo_response = await agent.search_gemini_ai(geo_prompt)
-    
-    if geo_response:
-        row.raw_ai_responses.append({
-            "text":   geo_response,
-            "source": "gemini_json",
-            "query":  geo_prompt[:200],
-        })
-        try:
-            json_match = re.search(r'\{.*\}', geo_response, re.DOTALL)
-            if json_match:
-                import json
-                res = json.loads(json_match.group(0).strip())
-                tel = res.get("telephone")
-                if tel and str(tel).upper() != "NOT_FOUND":
-                    logger.info(f"    [GEO] Extracted phone via RAG: {tel} ({res.get('source')})")
-                    return tel
-        except Exception as e:
-            logger.debug(f"    [GEO] JSON parsing failed: {e}")
-    return None
-
-async def _handle_captcha_streak_async(page_content: Optional[str], agent=None) -> None:
-    global _captcha_streak
-    async with _captcha_lock:
-        if page_content is None:
-            _captcha_streak += 1
-            if _captcha_streak >= config.MAX_CONSECUTIVE_CAPTCHA:
-                if getattr(config, "PROXY_ROTATION_ACTIVATES_ON_BAN", False):
-                    logger.critical(f"[Agent] {_captcha_streak} consecutive blocks! 🛡️ ACTIVATING PROXY ROTATION...")
-                    config.PROXY_ENABLED = True
-                    if agent and hasattr(agent, "rotate_proxy"):
-                        await agent.rotate_proxy()
-                    _captcha_streak = 0
-                else:
-                    logger.critical(f"[Agent] {_captcha_streak} consecutive blocks! Pausing 60s...")
-                    await asyncio.sleep(60)
-                    _captcha_streak = 0
-        else:
-            _captcha_streak = 0 
-
-def _fill_missing_siren(row: ExcelRow, page_content: str) -> None:
-    match = re.search(r'\b(\d{9})\b', page_content)
-    if match:
-        row.siren = match.group(1)
-        logger.info(f"    [AI] Found missing SIREN: {row.siren}")
-
 
 async def _worker_process_row(row: ExcelRow, sem: asyncio.Semaphore, save_lock: asyncio.Lock, rows: List[ExcelRow], filepath: str, tracker: PerformanceTracker, idx: int, total: int) -> ExcelRow:
     async with sem:
-        # Get an agent from the pool — agent.worker_id identifies which Chrome window
         agent = await _agent_pool.get()
-        worker_id  = getattr(agent, "worker_id", "?")
-        row_start  = time.perf_counter()
-
-        logger.info(
-            f"[🔵 Worker-{worker_id}] ► Row {idx}/{total} │ #{row.row_index} │ {row.nom or row.siren or 'N/A'}"
-        )
+        worker_id = getattr(agent, "worker_id", "?")
+        row_start = time.perf_counter()
 
         try:
+            # 1. PEFORM SEARCH (Specialized Agent)
             await process_row(row, agent)
+            
+            # 2. PERFORM ENRICHMENT (Specialized Agent)
             if row.status != "SKIP":
                 await asyncio.to_thread(enrich_row, row)
 
-            # Mark as done in JSON tracker
+            # Mark progress
             input_folder = Path(filepath).parent.name
             file_key = f"{input_folder}/{Path(filepath).name}"
             progress.mark_row_done(file_key, row.row_index)
 
-            if row.status not in ("DONE", "NO TEL", "SKIP"):
-                await human_delay_async()
         except Exception as e:
-            logger.error(f"[Worker-{worker_id}] ❌ Error on row #{row.row_index}: {e}", exc_info=True)
+            logger.error(f"[Worker-{worker_id}] Error row #{row.row_index}: {e}")
         finally:
-            # Return the agent to the pool
             await _agent_pool.put(agent)
 
-        # ── Per-row performance log ──
-        elapsed   = time.perf_counter() - row_start
-        icon      = "✅" if row.phone else "❌"
-        source    = ""
-        if row.raw_ai_responses:
-            source = row.raw_ai_responses[-1].get("source", "")
+        elapsed = time.perf_counter() - row_start
+        tracker.track_row(elapsed, row.status)
 
-        logger.info(
-            f"[🔵 Worker-{worker_id}] {icon} Row #{row.row_index} │ "
-            f"status={row.status} │ phone={row.phone or 'None'} │ "
-            f"source={source or 'N/A'} │ ⏱ {elapsed:.1f}s"
-        )
-
-        duration = elapsed
-        tracker.track_row(duration, row.status)
-
-        # Progress & checkpoint every 10 rows
         if idx % 10 == 0 or idx == total:
-            done_count = sum(1 for r in rows if r.phone)
-            pct        = round(done_count / max(len(rows), 1) * 100, 1)
-            logger.info(
-                f"[📊 Progress] {idx}/{total} rows done │ "
-                f"✅ Found: {done_count} ({pct}%) │ "
-                f"❌ No Tel: {sum(1 for r in rows if r.status == 'NO TEL')}"
-            )
             async with save_lock:
                 await asyncio.to_thread(save_results, rows, filepath)
 
     return row
 
 async def process_file_async(filepath: str) -> None:
-    logger.info(f"[Agent] ━━━ Starting file (Async): {os.path.basename(filepath)} ━━━")
-
-    # Read excel synchronously
-    rows, mapping = await asyncio.to_thread(read_excel, filepath)
-    if not rows:
-        logger.warning(f"[Agent] No rows found in {filepath}. Skipping.")
-        return
+    logger.info(f"[Agent] Starting file: {os.path.basename(filepath)}")
+    rows, _ = await asyncio.to_thread(read_excel, filepath)
+    if not rows: return
 
     tracker = PerformanceTracker()
     tracker.start_file_processing()
 
-    try:
-        # Sync with JSON
-        await asyncio.to_thread(sync_with_previous_results, rows, filepath)
+    await asyncio.to_thread(sync_with_previous_results, rows, filepath)
+    rows_to_process = [r for r in rows if r.status != "DONE"] if config.REPROCESS_FAILED_ROWS else [r for r in rows if r.status not in ("DONE", "NO TEL", "SKIP")]
 
-        # Select rows to process: 
-        # Always PENDING/None, and conditionally NO TEL/SKIP based on config.
-        if config.REPROCESS_FAILED_ROWS:
-            rows_to_process = [r for r in rows if r.status != "DONE"]
-        else:
-            rows_to_process = [r for r in rows if r.status not in ("DONE", "NO TEL", "SKIP")]
-
-        total = len(rows_to_process)
-        if total > 0:
-            save_lock = asyncio.Lock()
-            workers = config.MAX_CONCURRENT_WORKERS
-            sem = asyncio.Semaphore(workers)
-            
-            tasks = []
-            for idx, r in enumerate(rows_to_process, start=1):
-                task = asyncio.create_task(
-                    _worker_process_row(r, sem, save_lock, rows, filepath, tracker, idx, total)
-                )
-                tasks.append(task)
-            
-            await asyncio.gather(*tasks)
-        
-        await asyncio.to_thread(save_results, rows, filepath)
-        
-    except asyncio.CancelledError:
-        logger.warning("[Agent] Cancelled. Saving partial results...")
-        await asyncio.to_thread(save_results, rows, filepath)
-        raise
-    except KeyboardInterrupt:
-        logger.warning("[Agent] Interrupted. Saving partial results...")
-        await asyncio.to_thread(save_results, rows, filepath)
-        raise
-    except Exception as e:
-        logger.error(f"[Agent] Unexpected error: {e}", exc_info=True)
-        await asyncio.to_thread(save_results, rows, filepath)
-
+    total = len(rows_to_process)
+    if total > 0:
+        save_lock, sem = asyncio.Lock(), asyncio.Semaphore(config.MAX_CONCURRENT_WORKERS)
+        tasks = [asyncio.create_task(_worker_process_row(r, sem, save_lock, rows, filepath, tracker, i, total)) for i, r in enumerate(rows_to_process, 1)]
+        await asyncio.gather(*tasks)
+    
+    await asyncio.to_thread(save_results, rows, filepath)
     tracker.end_file_processing()
-    
-    logger.info(tracker.format_console_report())
-    
-    done    = sum(1 for r in rows if r.status == "DONE")
-    no_tel  = sum(1 for r in rows if r.status == "NO TEL")
-    skipped = sum(1 for r in rows if r.status == "SKIP")
-
-    logger.info(
-        f"[Agent] ━━━ Finished: {os.path.basename(filepath)} ━━━\n"
-        f"         ✅ DONE   : {done}\n"
-        f"         📵 NO TEL : {no_tel}\n"
-        f"         ⏭️  SKIP   : {skipped}"
-    )
-
-    # ── POST-PROCESSING: ARCHIVE & RECYCLE ──
     await finalize_file_processing(rows, filepath)
 
-
 async def finalize_file_processing(rows: List[ExcelRow], original_filepath: str) -> None:
-    """
-    Post-processing after a file is fully processed:
-
-    1. ✅ DONE rows  → archived to output/Archived_Results/
-    2. ❌ NO TEL + ⏱ SKIP rows → archived to output/Archived_Failed/
-    3. Original file is deleted.
-    """
-    from pathlib import Path
-
-    orig_path   = Path(original_filepath)
-    # Remove "_DONE" / "RETRY_" / "part" from the base name to clean it up
-    clean_stem = orig_path.stem
-    for prefix in ["RETRY_", "_DONE", "part"]:
-        import re
-        clean_stem = re.sub(rf"^{prefix}+|{prefix}.*$", "", clean_stem)
-    # Also strip if the user sent it formatted weirdly
-    clean_stem = clean_stem.strip("_")
-
-    suffix      = ".xlsx"  # Always save as xlsx
-
+    orig_path = Path(original_filepath)
     success_rows = [r for r in rows if r.phone or r.status == "DONE"]
-    retry_rows   = [r for r in rows if r.status in ("NO TEL", "SKIP", "PENDING")]
+    retry_rows = [r for r in rows if r.status in ("NO TEL", "SKIP", "PENDING")]
 
-    logger.info(
-        f"[Post-Process] ✅ {len(success_rows)} DONE │ "
-        f"❌ {len(retry_rows)} FAILED (Skipped/No Tel)"
-    )
-
-    # ── ROUTING LOGIC (SUCCEED/FAILED) ──
-    
-    # ── 1. ARCHIVE DONE ROWS ──
     if success_rows:
         config.OUTPUT_SUCCEED_DIR.mkdir(parents=True, exist_ok=True)
-        archive_path = config.OUTPUT_SUCCEED_DIR / f"{orig_path.name}"
-        if archive_path.exists():
-            ts = time.strftime("%H%M%S")
-            archive_path = config.OUTPUT_SUCCEED_DIR / f"{orig_path.stem}_{ts}{suffix}"
-        logger.info(f"[Post-Process] 📦 Archiving DONE → {archive_path.name}")
-        await asyncio.to_thread(save_subset_to_excel, success_rows, archive_path)
-
-    # ── 2. ARCHIVE FAILED ROWS (No Tel) ──
+        await asyncio.to_thread(save_subset_to_excel, success_rows, config.OUTPUT_SUCCEED_DIR / orig_path.name)
     if retry_rows:
         config.OUTPUT_FAILED_DIR.mkdir(parents=True, exist_ok=True)
-        failed_path = config.OUTPUT_FAILED_DIR / f"{orig_path.name}"
-        if failed_path.exists():
-            ts = time.strftime("%H%M%S")
-            failed_path = config.OUTPUT_FAILED_DIR / f"{orig_path.stem}_{ts}{suffix}"
-        logger.info(f"[Post-Process] 📦 Archiving NO TEL → {failed_path.name}")
-        await asyncio.to_thread(save_subset_to_excel, retry_rows, failed_path)
+        await asyncio.to_thread(save_subset_to_excel, retry_rows, config.OUTPUT_FAILED_DIR / orig_path.name)
 
-    # ── 3. CLEANUP ──
-    input_folder = orig_path.parent.name
-    file_key = f"{input_folder}/{orig_path.name}"
-    progress.clear_file(file_key)
-
-    try:
-        os.remove(original_filepath)
-        logger.info(f"[Post-Process] 🗑️ Cleaned up original and tracker for: {orig_path.name}")
-    except Exception as e:
-        logger.warning(f"[Post-Process] Could not delete {orig_path.name}: {e}")
-
-
-async def _deep_scrape_website(row: ExcelRow, agent) -> Optional[str]:
-    """
-    Tries to find the official website, crawls it (home + contact),
-    and uses Gemini (IA Mode) to extract ALL B2B data.
-    """
-    # 1. Identify Official Website URL (if not already known)
-    website_url = row.enriched_fields.get("website", {}).get("value")
-    
-    if not website_url:
-        # Quick search to find the website
-        search_query = f'"{row.nom}" "{row.adresse or ""}" official website'
-        logger.info(f"   [Tier 0.5] Finding official website: {search_query}")
-        content = await agent.search_google_ai(search_query)
-        if content:
-            import re
-            # Simple heuristic: find the first <a> link that isn't google/social media
-            # Better: use regex for common patterns
-            urls = re.findall(r'https?://[^\s<>"]+', content)
-            
-            # Expanded heuristic to avoid common non-official sites
-            banned_domains = [
-                "google", "pappers.fr", "societe.com", "infogreffe",
-                "facebook.com", "linkedin.com", "twitter.com", "instagram.com",
-                "pagesjaunes.fr", "annuaire-entreprises", "mappy", "118000"
-            ]
-            
-            for u in urls:
-                if any(x in u for x in banned_domains):
-                    continue
-                website_url = u
-                logger.info(f"   [Tier 0.5] Found candidate website: {u}")
-                row.enriched_fields["website"] = {"value": u, "source": "google_heuristic", "confidence": 0.8}
-                break
-
-    if not website_url:
-        return None
-
-    # 2. Crawl multiple pages
-    scraped_text = await agent.crawl_website(website_url)
-    if not scraped_text or len(scraped_text) < 200:
-        return None
-
-    # 3. IA Mode (Gemini) Extraction
-    # Clean text before sending to IA to avoid JS contamination
-    context = clean_html_to_text(scraped_text)[:12000]
-    prompt = config.DEEP_SCRAPE_PROMPT.format(raw_web_context=context)
-    logger.info(f"   [IA Mode] analyzing official website data...")
-    
-    # We call search_gemini_ai which opens a "new tap" (implicitly in the context)
-    ia_response = await agent.search_gemini_ai(prompt)
-    
-    if ia_response:
-        row.raw_ai_responses.append({
-            "text": ia_response,
-            "source": f"IA_Mode_Website:{website_url}",
-            "query": "Deep Scrape Prompt"
-        })
-        
-        # 4. Parse JSON
-        json_match = re.search(r'\{.*\}', ia_response, re.DOTALL)
-        if json_match:
-            try:
-                data = json.loads(json_match.group(0).strip())
-                logger.info(f"   ✨ [IA Mode] Success! Extracted: {list(data.keys())}")
-                
-                phone = data.get("telephone")
-                # Update row enriched fields
-                fields_to_update = {
-                    "email": "email",
-                    "linkedin": "linkedin",
-                    "facebook": "facebook",
-                    "instagram": "instagram",
-                    "twitter": "twitter",
-                    "address": "adresse_physique",
-                    "legal_name": "nom_officiel"
-                }
-                for row_key, json_key in fields_to_update.items():
-                    val = data.get(json_key)
-                    if val and str(val).upper() not in ("NOT_FOUND", "NONE", ""):
-                        row.enriched_fields[row_key] = {
-                            "value": val,
-                            "source": "IA_Mode_Website",
-                            "confidence": data.get("confiance", 0.9)
-                        }
-                
-                if phone and str(phone).upper() != "NOT_FOUND":
-                    return normalize_phone(phone)
-            except Exception as e:
-                logger.debug(f"   [IA Mode] JSON Parse Error: {e}")
-                
-    return None
-
+    progress.clear_file(f"{orig_path.parent.name}/{orig_path.name}")
+    try: os.remove(original_filepath)
+    except: pass

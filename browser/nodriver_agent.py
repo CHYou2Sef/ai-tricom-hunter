@@ -23,7 +23,7 @@ import re
 from typing import Optional, List, Dict, Any
 
 import config
-from browser.base_agent import BaseBrowserAgent
+from agents.base_agent import BaseBrowserAgent
 from utils.anti_bot import (
     get_fingerprint_bundle,
     build_cdp_injection_script,

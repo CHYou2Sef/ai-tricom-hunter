@@ -38,6 +38,7 @@ except ImportError:
 import config
 from agent import process_file_async, init_agent_pool, close_agent_pool
 from utils.logger import get_logger
+from utils.health_check import check_all
 
 logger = get_logger(__name__)
 
@@ -170,6 +171,12 @@ async def main_async() -> None:
 
     ensure_directories()
     
+    # ── HEALTH CHECK ──
+    health = await check_all()
+    if not health["dirs"]:
+        logger.critical("[Main] Critical failure: Work directories cannot be verified/created. Exiting.")
+        return
+
     # Initialize the agent pool for true parallelism
     await init_agent_pool(config.MAX_CONCURRENT_WORKERS)
 

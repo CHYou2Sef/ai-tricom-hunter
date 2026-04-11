@@ -1,96 +1,60 @@
 # 🤖 AI Phone Hunter - B2B Data Enrichment Agent
 
-Bienvenue dans **AI Phone Hunter**, un robot asynchrone haute performance automatisant la recherche et l'enrichissement de données d'entreprises (Téléphones, SIREN, Emails, Dirigeants) via Google AI Mode.
-
-## 🚀 Documentation de Référence
-
-- 👉 **[Rapport Architectural & Historique Complet (PROJECT_REPORT.md)](docs/PROJECT_REPORT.md)** *(Lecture recommandée pour l'examen)*
-- 👉 **[Journal de Bord Quotidien (DAILY_JOURNAL.md)](docs/DAILY_JOURNAL.md)**
-- 👉 **[Architecture d'Enrichissement des Données](docs/ENRICHMENT_ARCHITECTURE.md)**
+Bienvenue dans **AI Phone Hunter**, un robot asynchrone haute performance automatisant la recherche et l'enrichissement de données d'entreprises via Google AI Mode et Intelligence Locale.
 
 ---
 
-## 📂 Architecture Industrielle en 2 Étapes
+## 📂 Architecture Industrielle & Intelligence
 
-Le projet est divisé en deux phases distinctes pour maximiser le taux de succès et la vitesse de traitement.
+Le projet est structuré pour maximiser le taux de succès, la vitesse et la résilience token.
 
 ### Phase 1: Le Pré-processeur (`pre_process.py`)
-Ce script ("Watchdog") surveille en continu le dossier `WORK/INCOMING/`.
-- **Support CSV & Excel** : Détection automatique des formats et délimiteurs (virgule, point-virgule, etc.).
-- **Nettoyage Dynamique** : Exclusion automatique des entreprises marquées comme "Radiées".
-- **Classification Stratégique** : Ventile les leads selon leur richesse initiale de données dans les buckets `WORK/STD/`, `WORK/RS/` et `WORK/SIREN/`.
+Ce script ("Watchdog") surveille `WORK/INCOMING/`, nettoie les données (exclusion des radiées) et ventile les leads dans les buckets stratégiques (`STD`, `RS`, `SIREN`).
 
-### Phase 2 : L'Agent IA Asynchrone (`main.py`)
-Ce script traite les listes triées en utilisant un pool de navigateurs parallèles (Multi-Worker).
+### Phase 2 : L'Agent de Recherche (`main.py` -> `agents/`)
+L'orchestrateur pilote des agents spécialisés pour l'extraction :
+- **Phone Hunter (`agents/phone_hunter.py`)** : Gère le waterfall de recherche (AI Mode Expert -> Knowledge Panel -> Local RAG).
+- **Enricher (`agents/enricher.py`)** : Consolidation multi-sources des données légales et de contact.
 
-- **Google AI Expert Mode (Tier 0)** : Technologie "Double Check". Si le premier scan échoue, un expert virtuel prend le relais avec une stratégie de recherche agressive pour capturer les détails cachés (LinkedIn, CEOS, etc.).
-- **Immunité au Décalage (Atomic Mapping)** : Les colonnes Excel sont bindées par clé unique, empêchant tout glissement de données, même sur des fichiers fusionnés.
-
-### Phase 3 : Moteur Hybride 4-Tiers & Anti-Détection (`hybrid_engine.py`)
-Architecture de pointe pour l'industrialisation B2B :
-- **Extraction UUE Centrale (Universal Unified Extractor)** : Analyse structurelle (Sémantique Schema.org, Heuristique attrid, Visuelle href) découplée du navigateur pour une fiabilité 100% garantie "Zero Token".
-- **Moteur Multi-Tier (Waterfall)** : Bascule automatique en cascade pour maximiser le succès :
-  - **Tier 1 : Patchright** (Chromium patché, furtivité native, 100% stable).
-  - **Tier 2 : Nodriver** (CDP-only, zéro signal WebDriver, idéal Google/LinkedIn).
-  - **Tier 3 : Crawl4AI** (Scraper managé pour sites E-commerce complexes).
-  - **Tier 4 : Camoufox** (Firefox Anti-Detect, empreinte Gecko radicalement différente, ultime recours).
-- **Adaptive Circuit Breaker** : Système intelligent détectant les bans IP globaux pour stopper les requêtes et déclencher une pause de 300s + rotation de proxy.
-- **Fingerprinting CDP & Gecko** : Injection de signatures hardware et logiciel uniques à chaque session.
-- **Gestionnaire de CAPTCHA Actif** : Intégration API (2Captcha/Capsolver) pour une résolution 100% autonome.
+### Phase 3 : Intelligence Hybride & Moteur 4-Tiers
+Architecture de pointe combinant IA Cloud (Gemini) et IA Locale (Ollama) :
+- **Moteur Waterfall** : Tier 1 (Patchright) → Tier 2 (Nodriver) → Tier 3 (Crawl4AI) → Tier 4 (Camoufox).
+- **Local RAG Fallback** : Utilise **Ollama (qwen2.5:3b)** pour extraire les téléphones en local si les méthodes standards échouent.
+- **Caveman Efficiency** : Optimisation automatique des prompts pour réduire la consommation de tokens de **75%**.
 
 ---
 
 ## 🛠️ Installation et Configuration
 
-### 1. Prérequis
-- Python 3.10+
-- Google Chrome & Firefox installés localement.
-
-### 2. Installation
+### 1. Configuration Rapide
 ```bash
-# 1. Installer les dépendances Python
-pip install -r requirements.txt
-
-# 2. Installer les moteurs anti-détection & binaires
-patchright install chromium
-python -m camoufox fetch
-crawl4ai-setup
+./scripts/setup_dev.sh
 ```
 
-### 3. Fichier de Configuration (`.env`)
-Configurez vos clés et chemins dans `.env` :
-- `HYBRID_DEFAULT_TIER=1` (Recommandé pour Patchright)
-- `CAPTCHA_API_KEY=...` (Pour le mode autonome)
-- `CHROMIUM_PROFILE_PATH=...` (Votre profil Chrome habituel)
+### 2. AST Knowledge Graph (Persistent)
+Pour maintenir une compréhension profonde de la structure du code (AST) :
+```bash
+pip install code-review-graph
+code-review-graph install --platform antigravity
+code-review-graph build
+```
+> [!NOTE]
+> Un hook git post-commit lance automatiquement `code-review-graph update`.
+
+### 3. Fichier `.env`
+Configurez vos préférences :
+- `PROMPT_STYLE=caveman` : Active l'optimisation de tokens.
+- `OLLAMA_ENABLED=true` : Active l'IA locale de secours.
 
 ---
 
-## 🎮 Mode d'emploi (Terminal)
-
-### Terminal 1 : Gestionnaire de Fichiers (Watcher)
-```bash
-python pre_process.py
-```
-> *Déposez vos fichiers sources (Excel ou CSV) dans le dossier `WORK/INCOMING/`.*
-
-### Terminal 2 : Intelligence Artificielle (Runner)
-```bash
-python main.py
-```
-> *Le robot prend le relais, enrichit les données en parallèle (3 fenêtres par défaut) et archive les fichiers une fois "DONE".*
+## 🎮 Mode d'emploi
+1. **Terminal 1** : `python pre_process.py`
+2. **Terminal 2** : `python main.py`
+3. **Monitoring** : Accédez à `api/app.py` pour l'état de santé du système.
 
 ---
 
-## 🧰 Maintenance & Utilitaires
-
-### Consolidation Master Excel
-Pour regrouper tous vos succès ("DONE") dans un seul méga-fichier dédoublonné (par SIREN) :
-```bash
-python scripts/consolidate_results.py
-```
-
-### Nettoyage des Profils Chrome
-Les profils de navigation stockent beaucoup de cache avec le temps. Pour libérer de l'espace disque sans perdre vos cookies de session vitaux :
-```bash
-python scripts/clean_chrome_profiles.py
-```
+## 🧰 Maintenance
+- **Consolidation** : `python scripts/consolidate_results.py`
+- **Nettoyage** : `python scripts/clean_chrome_profiles.py`

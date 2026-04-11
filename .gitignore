@@ -16,11 +16,19 @@ venv.bak/
 browser_profiles/
 .crawl4ai_cache/
 .playwright/
+.code-review-graph/
+.code-review-graphignore
 *._AUDIT.json
 *.xlsx
 *.xls
 *.csv
 *.json
+
+# ── Work Pipeline (Temporary Data) ──
+WORK/**/*
+!WORK/
+!WORK/**/.gitkeep
+WORK/active_processing.json
 
 # ── Logs and databases ──
 *.log
@@ -49,7 +57,6 @@ htmlcov/
 .pytype/
 
 # ── IDEs ──
-/.gemini
 .gemini
 .idea/
 .vscode/

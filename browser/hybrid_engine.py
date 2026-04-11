@@ -272,8 +272,12 @@ class HybridAutomationEngine:
             # calling an extraction method.
             if tier != tier_sequence[0] and self._last_target_url and method_name != "goto_url":
                 if "search" not in method_name and method_name == "extract_universal_data":
-                    logger.info(f"[HybridEngine] 🌐 Catching up Tier {tier} to URL: {self._last_target_url}")
-                    await getattr(agent, "goto_url")(self._last_target_url)
+                    # Defensive check: ensure the agent actually supports goto_url
+                    if hasattr(agent, "goto_url"):
+                        logger.info(f"[HybridEngine] 🌐 Catching up Tier {tier} to URL: {self._last_target_url}")
+                        await getattr(agent, "goto_url")(self._last_target_url)
+                    else:
+                        logger.debug(f"[HybridEngine] Tier {tier} lacks goto_url; skipping catch-up.")
 
             method = getattr(agent, method_name, None)
 

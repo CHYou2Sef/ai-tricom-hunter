@@ -35,6 +35,11 @@ class RawFileHandler(FileSystemEventHandler):
 
     def handle_event(self, filepath):
         file_path = Path(filepath)
+        
+        # Immediate check
+        if not file_path.exists():
+            return
+
         ext = file_path.suffix.lower()
         if ext in config.ACCEPTED_EXTENSIONS:
             filename = file_path.name
@@ -48,13 +53,21 @@ class RawFileHandler(FileSystemEventHandler):
             # Wait for file to settle
             time.sleep(config.FILE_SETTLE_DELAY)
             
+            if not file_path.exists():
+                logger.warning(f"  ⚠️ File vanished during settle delay: {filename}")
+                return
+
             try:
                 from utils.chunker import FileChunker
-                chunker = FileChunker(work_dir=str(file_path.parent))
+                # Use default chunk directory (WORK/CHUNKS) to avoid watching ourselves
+                chunker = FileChunker()
                 chunk_paths = chunker.split_file(filepath)
 
                 for chunk_path in chunk_paths:
                     # Read the chunk (or original if small)
+                    if not chunk_path.exists():
+                        continue
+                        
                     rows, mapping = read_excel(str(chunk_path))
                     if not rows:
                         logger.warning(f"  Empty file/chunk: {chunk_path.name}")
@@ -71,26 +84,30 @@ class RawFileHandler(FileSystemEventHandler):
                     if str(chunk_path) != filepath:
                         os.remove(str(chunk_path))
 
-                # ── Archive the original synchronously ──
-                # Using sync move avoids the "phantom file" issue where pre_process 
-                # might try to read a file that it just started moving in another thread.
-                archive_dir = Path(config.ARCHIVE_DIR)
-                archive_dir.mkdir(parents=True, exist_ok=True)
-                dest_path = archive_dir / filename
-                
-                # Handle filename collisions in archive
-                if dest_path.exists():
-                    timestamp = time.strftime("%Y%m%d_%H%M%S")
-                    dest_path = archive_dir / f"{timestamp}_{filename}"
-                
-                shutil.move(file_path, dest_path)
-                
+                # ── Archive or Delete based on file type ──
+                # We only archive "Original" files. "Decomposed" parts (_batch_) 
+                # are deleted to keep the ARCHIVE clean.
+                if "_batch_" in filename:
+                    if file_path.exists():
+                        os.remove(file_path)
+                    logger.info(f"✅ [Phase 1] Done! Decomposed part deleted (not archived). Buckets updated.")
+                else:
+                    archive_dir = Path(config.ARCHIVE_DIR)
+                    archive_dir.mkdir(parents=True, exist_ok=True)
+                    dest_path = archive_dir / filename
+                    
+                    # Handle filename collisions in archive
+                    if dest_path.exists():
+                        timestamp = time.strftime("%Y%m%d_%H%M%S")
+                        dest_path = archive_dir / f"{timestamp}_{filename}"
+                    
+                    shutil.move(file_path, dest_path)
+                    logger.info(f"✅ [Phase 1] Done! Original archived. Buckets updated.")
+
                 # Delete sidecar metadata if it was generated
                 meta_path = chunker._get_metadata_path(file_path)
                 if meta_path.exists():
                     os.remove(meta_path)
-                    
-                logger.info(f"✅ [Phase 1] Done! Original archived. Buckets updated.")
                 
             except Exception as e:
                 logger.error(f"  ❌ Error pre-processing {filename}: {e}", exc_info=True)

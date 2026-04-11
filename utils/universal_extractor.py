@@ -91,6 +91,16 @@ class UniversalExtractor:
                     result["heuristic_phones"].append(href[4:])
                 elif href.startswith("mailto:"):
                     result["heuristic_emails"].append(href[7:])
+            
+            # --- 4. Global Regex Fallback (Last resort within UUE) ---
+            # If we found nothing semantic or heuristic, scan the raw text 
+            # so we don't return an "Empty" result if data is visible.
+            if not result["heuristic_phones"]:
+                from search.phone_extractor import extract_phones
+                raw_text = soup.get_text(" ", strip=True)
+                regex_phones = extract_phones(raw_text)
+                if regex_phones:
+                    result["heuristic_phones"] = regex_phones[:5] # Take top 5
                     
             # --- Deduplicate ---
             result["heuristic_phones"] = list(set([p for p in result["heuristic_phones"] if p]))

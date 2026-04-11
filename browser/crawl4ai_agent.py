@@ -30,7 +30,7 @@ from utils.logger import get_logger, alert
 logger = get_logger(__name__)
 
 
-from browser.base_agent import BaseBrowserAgent
+from agents.base_agent import BaseBrowserAgent
 
 class Crawl4AIAgent(BaseBrowserAgent):
     """
@@ -217,6 +217,15 @@ class Crawl4AIAgent(BaseBrowserAgent):
             return True
         logger.warning("[Crawl4AI] submit_google_search — empty or blocked response.")
         return False
+
+    async def goto_url(self, url: str) -> bool:
+        """
+        Managed navigation for Tier 3. 
+        Stores the result internally for use by get_page_source().
+        """
+        content = await self.scrape(url)
+        self._last_content = content
+        return bool(content)
 
     async def search_gemini_ai(self, query: str) -> Optional[str]:
         """
