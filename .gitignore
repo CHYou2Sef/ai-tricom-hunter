@@ -57,6 +57,7 @@ htmlcov/
 .pytype/
 
 # ── IDEs ──
+.claude
 .gemini
 .idea/
 .vscode/

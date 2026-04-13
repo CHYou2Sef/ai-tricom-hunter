@@ -1,60 +1,68 @@
-# 🤖 AI Phone Hunter - B2B Data Enrichment Agent
+# 🤖 AI Phone Hunter - Universal B2B Agent
 
-Bienvenue dans **AI Phone Hunter**, un robot asynchrone haute performance automatisant la recherche et l'enrichissement de données d'entreprises via Google AI Mode et Intelligence Locale.
-
----
-
-## 📂 Architecture Industrielle & Intelligence
-
-Le projet est structuré pour maximiser le taux de succès, la vitesse et la résilience token.
-
-### Phase 1: Le Pré-processeur (`pre_process.py`)
-Ce script ("Watchdog") surveille `WORK/INCOMING/`, nettoie les données (exclusion des radiées) et ventile les leads dans les buckets stratégiques (`STD`, `RS`, `SIREN`).
-
-### Phase 2 : L'Agent de Recherche (`main.py` -> `agents/`)
-L'orchestrateur pilote des agents spécialisés pour l'extraction :
-- **Phone Hunter (`agents/phone_hunter.py`)** : Gère le waterfall de recherche (AI Mode Expert -> Knowledge Panel -> Local RAG).
-- **Enricher (`agents/enricher.py`)** : Consolidation multi-sources des données légales et de contact.
-
-### Phase 3 : Intelligence Hybride & Moteur 4-Tiers
-Architecture de pointe combinant IA Cloud (Gemini) et IA Locale (Ollama) :
-- **Moteur Waterfall** : Tier 1 (Patchright) → Tier 2 (Nodriver) → Tier 3 (Crawl4AI) → Tier 4 (Camoufox).
-- **Local RAG Fallback** : Utilise **Ollama (qwen2.5:3b)** pour extraire les téléphones en local si les méthodes standards échouent.
-- **Caveman Efficiency** : Optimisation automatique des prompts pour réduire la consommation de tokens de **75%**.
+High-performance asynchronous agent for automated company data enrichment using Google AI Mode. Works on **Windows, macOS, and Linux**.
 
 ---
 
-## 🛠️ Installation et Configuration
+## ⚡ Quick Start (All OS)
 
-### 1. Configuration Rapide
-```bash
-./scripts/setup_dev.sh
+### 1. Requirements
+- **Python 3.10+**
+- **Google Chrome** (Just install the regular browser, the agent will find it automatically).
+
+### 2. Tools (Optional)
+The project is optimized for speed and simplicity. Advanced tools like `code-review-graph` are now optional.
+
+### 3. Setup
+Clone the repository and run:
+
+**Windows (PowerShell):**
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+patchright install chromium
 ```
 
-### 2. AST Knowledge Graph (Persistent)
-Pour maintenir une compréhension profonde de la structure du code (AST) :
+**macOS / Linux:**
 ```bash
-pip install code-review-graph
-code-review-graph install --platform antigravity
-code-review-graph build
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+patchright install chromium
 ```
-> [!NOTE]
-> Un hook git post-commit lance automatiquement `code-review-graph update`.
 
-### 3. Fichier `.env`
-Configurez vos préférences :
-- `PROMPT_STYLE=caveman` : Active l'optimisation de tokens.
-- `OLLAMA_ENABLED=true` : Active l'IA locale de secours.
+### 4. Configuration
+Copy `.env.example` to `.env`. 
+- **Auto-Detect Chrome:** By default, the agent searches for your installed Chrome. No path config needed!
+- **Ollama/Camoufox:** Disabled by default for maximum speed and simplicity. (Set to `true` only if you manually install them).
 
 ---
 
-## 🎮 Mode d'emploi
-1. **Terminal 1** : `python pre_process.py`
-2. **Terminal 2** : `python main.py`
-3. **Monitoring** : Accédez à `api/app.py` pour l'état de santé du système.
+## 🎮 How to Run
+
+The pipeline works in two steps:
+
+1.  **Ingestion:** Start the pre-processor to watch for new files in `WORK/INCOMING/`.
+    ```bash
+    python pre_process.py
+    ```
+2.  **Enrichment:** Start the main agent to begin browsing and extracting data.
+    ```bash
+    python main.py
+    ```
 
 ---
 
-## 🧰 Maintenance
-- **Consolidation** : `python scripts/consolidate_results.py`
-- **Nettoyage** : `python scripts/clean_chrome_profiles.py`
+## 🛡️ Resilience & Safety
+- **Crash Proof:** Progress is saved every row in `WORK/active_processing.json`.
+- **Power Off:** If your PC shuts down, the agent resumes exactly where it left off.
+- **Stealth:** Uses a 3-tier hybrid engine (Patchright, Nodriver, Crawl4AI) to bypass most anti-bot protections.
+
+---
+
+## 📂 Project Structure
+- `WORK/INCOMING/`: Drop your raw Excel/CSV files here.
+- `WORK/output/`: Final results appear here.
+- `logs/`: Daily logs for monitoring activity.
+- `utils/progress_tracker.py`: The "recovery" brain of the project.

@@ -1,7 +1,14 @@
 import asyncio
 import logging
 import config
-from ollama import AsyncClient
+try:
+    from ollama import AsyncClient
+except ImportError:
+    # Fallback to prevent crash if library is missing
+    class AsyncClient:
+        def __init__(self, *args, **kwargs): pass
+        async def generate(self, *args, **kwargs):
+            return {"response": ""}
 
 logger = logging.getLogger("OllamaClient")
 

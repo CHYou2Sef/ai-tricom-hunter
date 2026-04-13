@@ -23,9 +23,8 @@ websockets>=13.0
 crawl4ai>=0.4.0
 
 # Tier 4: Camoufox — Patched Firefox anti-detect browser (last resort, Firefox engine)
-#   Uses Gecko instead of Chromium — completely different TLS/JS/network fingerprint.
 #   After install: python -m camoufox fetch  (downloads the custom Firefox binary ~200MB)
-camoufox
+# camoufox (Removed for light version)
 
 
 # ── Data Extraction & Parsing ──────────────────────────────────────────
@@ -63,11 +62,10 @@ pytest-asyncio>=0.24.0
 # Step 3: python -m camoufox fetch          ← Tier 4 (Firefox anti-detect)
 # ──────────────────────────────────────────────────────────────────────
 
-# Legacy: Selenium (removed 2026-04-06 — too detectable)
 #selenium>=4.18.0
 #webdriver-manager>=4.0.1
-ollama
-code-review-graph
+# ollama (Removed for light version)
+# code-review-graph (Removed for light version)
 httpx[http2]
 fastapi
 uvicorn

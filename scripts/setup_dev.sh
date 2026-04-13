@@ -18,12 +18,7 @@ echo "📥 Installing requirements..."
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# 4. Initialize Tools
-echo "🛠️  Initializing dev tools..."
-if command -v code-review-graph &> /dev/null; then
-    code-review-graph install --platform antigravity
-    code-review-graph build
-fi
+# 4. Initialize Tools (Skipped code-review-graph)
 
 # 5. Environment Setup
 if [ ! -f ".env" ]; then
