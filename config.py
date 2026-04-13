@@ -213,6 +213,9 @@ HYBRID_TIER3_DOMAINS = [
 # Tier 1 (Patchright) is prioritized for speed and baseline stealth.
 HYBRID_DEFAULT_TIER = int(os.getenv("HYBRID_DEFAULT_TIER", "1"))
 
+# Tier 4 (Camoufox) is heavy. Disable it to save resources if not needed.
+CAMOUFOX_ENABLED = os.getenv("CAMOUFOX_ENABLED", "false").lower() == "true"
+
 # ── Obsolete / Fail-safe (For backward compatibility) ──
 # This is no longer used by the Hybrid Waterfall engine but kept as a 
 # fail-safe to prevent AttributeError from old script references.
@@ -248,7 +251,24 @@ CHROMIUM_PROFILE_NAME = os.getenv("CHROMIUM_PROFILE_NAME", "Default")
 # Full path to the chromium binary executable.
 # Leave as "" to let the agent auto-detect it.
 # Example: "/usr/bin/chromium-browser"
-CHROMIUM_BINARY_PATH = os.getenv("CHROMIUM_BINARY_PATH", "")
+def find_chrome_executable():
+    """Search for Chrome/Chromium executable across common OS paths."""
+    import platform
+    if platform.system() == "Windows":
+        paths = [
+            os.path.join(os.environ.get("PROGRAMFILES", "C:\\Program Files"), "Google\\Chrome\\Application\\chrome.exe"),
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"), "Google\\Chrome\\Application\\chrome.exe"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google\\Chrome\\Application\\chrome.exe"),
+        ]
+        for p in paths:
+            if os.path.exists(p): return p
+    elif platform.system() == "Linux":
+        paths = ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"]
+        for p in paths:
+            if os.path.exists(p): return p
+    return ""
+
+CHROMIUM_BINARY_PATH = os.getenv("CHROMIUM_BINARY_PATH", find_chrome_executable())
 
 
 
@@ -265,7 +285,7 @@ GOOGLE_URL        = "https://www.google.com"
 GEMINI_URL        = "https://gemini.google.com"
 
 # ── LOCAL LLM (OLLAMA) — Vector-less RAG Fallback
-OLLAMA_ENABLED  = os.getenv("OLLAMA_ENABLED", "true").lower() == "true"
+OLLAMA_ENABLED  = os.getenv("OLLAMA_ENABLED", "false").lower() == "true"
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "60"))

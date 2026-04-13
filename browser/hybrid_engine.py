@@ -158,6 +158,9 @@ class HybridAutomationEngine:
                 logger.info(f"[HybridEngine] ✅ Tier 3 (Crawl4AI/Chrome) started for worker {self.worker_id}.")
 
             elif tier == 4 and not self._tier4:
+                if not config.CAMOUFOX_ENABLED:
+                    logger.warning("[HybridEngine] Tier 4 (Camoufox) is DISABLED in config. Skipping.")
+                    return False
                 # Tier 4 (Camoufox) is heavy. Lock it globally.
                 async with self._tier4_global_lock:
                     from browser.camoufox_agent import CamoufoxAgent
@@ -243,7 +246,8 @@ class HybridAutomationEngine:
         # ── 2. SMART TIER SELECTION ───────────────────────────────────────────
         # If we have a 'last_successful_tier' that is still alive, try it FIRST.
         # This is CRITICAL for search -> extraction continuity.
-        tier_sequence = list(range(config.HYBRID_DEFAULT_TIER, 5))
+        max_tier = 4 if config.CAMOUFOX_ENABLED else 3
+        tier_sequence = list(range(config.HYBRID_DEFAULT_TIER, max_tier + 1))
         if self._last_successful_tier and self._last_successful_tier in tier_sequence:
             # Move it to the front of the list
             tier_sequence.remove(self._last_successful_tier)

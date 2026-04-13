@@ -69,3 +69,5 @@ pytest-asyncio>=0.24.0
 ollama
 code-review-graph
 httpx[http2]
+fastapi
+uvicorn
