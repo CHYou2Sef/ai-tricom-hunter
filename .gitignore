@@ -9,8 +9,13 @@ ENV/
 env.bak/
 venv.bak/
 
-# __My_own_search__
-/docs
+# __My_own_search__ /docs
+/docs/
+/scratch/
+AGENTS.md
+ARCHITECTURE.md
+CLAUDE.md
+GEMINI.md
 
 # ── Project Specific ──
 browser_profiles/

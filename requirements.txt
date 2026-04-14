@@ -14,6 +14,7 @@
 selenium>=4.18.0
 webdriver-manager>=4.0.1
 undetected-chromedriver>=3.5.5
+setuptools>=69.0.0  # Required for undetected-chromedriver in Python 3.12+
 # Tier 1: Patchright — Drop-in replacement for Playwright, patched for stealth.
 #   Passes: Cloudflare, Kasada, Akamai, Datadome, Fingerprint.com, Sannysoft.
 #   API: 100% identical to Playwright — only the import line changed.

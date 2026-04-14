@@ -26,7 +26,7 @@ from typing import Optional
 
 import config
 from agents.base_agent import BaseBrowserAgent
-from utils.anti_bot import get_fingerprint_bundle, is_captcha_page
+from utils.anti_bot import get_fingerprint_bundle, is_captcha_page, wait_for_human_captcha_solve
 from utils.logger import get_logger, alert
 
 logger = get_logger(__name__)
@@ -73,56 +73,134 @@ class SeleniumAgent(BaseBrowserAgent):
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """
-        Launch an undetected-chromedriver session.
-        All browser I/O is synchronous internally; we run it in a
-        thread pool so the asyncio event loop stays unblocked.
-        """
-        await asyncio.to_thread(self._sync_start)
+        """Launch the Selenium browser with the requested stealth profile."""
+        if self._driver:
+            return
+
+        logger.info(f"[Selenium] 🚀 Starting browser (worker={self.worker_id})...")
+        try:
+            await asyncio.to_thread(self._sync_start)
+        except Exception as exc:
+            # Record interruption in telemetry so it's captured by the benchmark runner
+            await self._record_interruption("startup_failure", f"Failed to start: {exc}")
+            # Log the specific error the user is looking for
+            if "undetected_chromedriver" in str(exc) or "undetected-chromedriver" in str(exc):
+                 logger.error(f"[Selenium] ❌ undetected-chromedriver is not installed. Run: pip install undetected-chromedriver")
+            raise
 
     def _sync_start(self) -> None:
-        try:
-            import undetected_chromedriver as uc  # type: ignore
-        except ImportError:
-            raise ImportError(
-                "undetected-chromedriver is not installed. "
-                "Run: pip install undetected-chromedriver"
-            )
+        """Synchronous launch logic called via to_thread."""
+        from pathlib import Path
+        import time
 
         vp = self._fingerprint["viewport"]
-        options = uc.ChromeOptions()
-        options.add_argument(f"--window-size={vp['width']},{vp['height']}")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--no-first-run")
-        options.add_argument("--no-default-browser-check")
-        options.add_argument("--disable-infobars")
-        options.add_argument(f"--lang=fr-FR")
 
+        # ── Build common Chrome options ──
+        common_args = [
+            f"--window-size={vp['width']},{vp['height']}",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-infobars",
+            "--disable-notifications",
+            "--lang=fr-FR",
+            "--disable-extensions",
+        ]
         if not config.BROWSER_USE_SANDBOX:
-            options.add_argument("--no-sandbox")
-            options.add_argument("--disable-setuid-sandbox")
+            common_args += ["--no-sandbox", "--disable-setuid-sandbox"]
 
-        # Use a per-worker profile directory to avoid lock conflicts
+        # Per-worker isolated profile
         profile_base = Path(config.CHROMIUM_PROFILE_PATH).parent
         profile_dir  = profile_base / f"selenium_worker_{self.worker_id}"
         profile_dir.mkdir(parents=True, exist_ok=True)
-        options.add_argument(f"--user-data-dir={profile_dir}")
+        common_args.append(f"--user-data-dir={profile_dir}")
 
-        self._driver = uc.Chrome(
-            options=options,
-            headless=False,
-            use_subprocess=True,
-            version_main=None,  # auto-detect
-        )
+        # ── Proxy Configuration ──
+        import os
+        proxy = os.getenv("PROXY") or getattr(config, "PROXY_DEFAULT", None)
+        if proxy:
+            if "@" in proxy:
+                # Proxy requires authentication (user:pass@host:port)
+                ext_path = self._create_proxy_auth_extension(proxy)
+                if ext_path:
+                    logger.info(f"[Selenium] 🔑 Using AUTH proxy with extension: {proxy}")
+                    common_args.append(f"--load-extension={ext_path}")
+            else:
+                # Regular proxy
+                logger.info(f"[Selenium] 🔌 Using proxy: {proxy}")
+                common_args.append(f"--proxy-server={proxy}")
+
+        # Headless mode config
+        is_headless = (config.SELENIUM_DISPLAY_MODE == "headless")
+
+        # ── Level 1: undetected-chromedriver (maximum stealth) ─────────────
+        try:
+            import undetected_chromedriver as uc  # type: ignore
+            options = uc.ChromeOptions()
+            for arg in common_args:
+                options.add_argument(arg)
+            
+            self._driver = uc.Chrome(
+                options=options,
+                headless=is_headless,
+                use_subprocess=True,
+                version_main=None,
+            )
+            self._stealth_mode = "undetected-chromedriver"
+            logger.info(
+                f"[Selenium] ✅ UC Mode — undetected-chromedriver started "
+                f"({vp['width']}×{vp['height']}, worker={self.worker_id}, headless={is_headless})"
+            )
+
+        # ── Level 2: plain selenium.webdriver.Chrome with stealth flags ────
+        except (ImportError, Exception) as uc_exc:
+            logger.warning(
+                f"[Selenium] undetected-chromedriver skipped ({uc_exc}) — "
+                "falling back to standard selenium (stealth flags active)"
+            )
+            try:
+                from selenium import webdriver  # type: ignore
+                from selenium.webdriver.chrome.service import Service
+                from selenium.webdriver.chrome.options import Options
+
+                options = Options()
+                for arg in common_args:
+                    options.add_argument(arg)
+                
+                if config.SELENIUM_DISPLAY_MODE == "headless":
+                    options.add_argument("--headless=new")
+
+                # Try local installation first, then download if needed
+                try:
+                    service = Service()
+                    self._driver = webdriver.Chrome(service=service, options=options)
+                except Exception:
+                    from webdriver_manager.chrome import ChromeDriverManager
+                    service = Service(ChromeDriverManager().install())
+                    self._driver = webdriver.Chrome(service=service, options=options)
+
+                # ── Post-launch stealth: Full CDP Fingerprint Injection ─────
+                # We use the shared script from anti_bot.py to mask all 10+ signals
+                from utils.anti_bot import build_cdp_injection_script
+                fp_script = build_cdp_injection_script(self._fingerprint)
+                self._driver.execute_cdp_cmd(
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    {"source": fp_script}
+                )
+                
+                self._stealth_mode = "selenium-stealth-bundle"
+                logger.info(
+                    f"[Selenium] ✅ Fallback Mode — selenium started with stealth bundle "
+                    f"({vp['width']}×{vp['height']})"
+                )
+            except Exception as exc:
+                msg = f"Neither undetected-chromedriver nor selenium could start: {exc}. Run: pip install selenium undetected-chromedriver"
+                raise ImportError(msg) from exc
+
         self._driver.set_page_load_timeout(30)
         self._driver.implicitly_wait(5)
         self._session_start_ts = time.monotonic()
-
-        logger.info(
-            f"[Selenium] ✅ Ready — undetected-chromedriver started "
-            f"({vp['width']}×{vp['height']}, worker={self.worker_id})"
-        )
 
     async def close(self) -> None:
         """Terminate the ChromeDriver subprocess and release all handles."""
@@ -139,10 +217,115 @@ class SeleniumAgent(BaseBrowserAgent):
         logger.info("[Selenium] Browser closed.")
 
     async def rotate_proxy(self) -> None:
-        """Proxy rotation: restart the session with the new proxy in the env."""
-        logger.info(f"[Selenium-Worker-{self.worker_id}] ♻️ Rotating proxy — restarting session.")
-        await self.close()
-        await self.start()
+        """Fetch a new proxy and restart the browser session."""
+        from utils.proxy_manager import get_next_proxy
+        new_proxy = get_next_proxy()
+        
+        if new_proxy:
+            logger.info(f"[Selenium-Worker-{self.worker_id}] ♻️  Rotating proxy to: {new_proxy}")
+            # To fix 'corruption', we also clear the profile directory
+            await self.close()
+            self._clear_profile()
+            import os
+            os.environ["PROXY"] = new_proxy # Update for sync-started driver
+            await self.start()
+        else:
+            logger.warning(f"[Selenium-Worker-{self.worker_id}] No proxies left for rotation.")
+
+    def _clear_profile(self) -> None:
+        """Delete the current profile directory to clear 'corrupted' CAPTCHA session state."""
+        import shutil
+        from pathlib import Path
+        p = Path(config.CHROMIUM_PROFILE_PATH).parent / f"selenium_worker_{self.worker_id}"
+        if p.exists():
+            try:
+                shutil.rmtree(p)
+                logger.info(f"[Selenium] 🧹 Profile cleared at {p}")
+            except Exception as e:
+                logger.debug(f"[Selenium] Could not clear profile: {e}")
+
+    def _create_proxy_auth_extension(self, proxy_url: str) -> Optional[str]:
+        """
+        Creates a temporary Chrome extension to handle proxy authentication
+        (bypasses the native 'Sign In' popup).
+        """
+        import zipfile
+        try:
+            # Parse proxy_url: http://user:pass@host:port
+            auth_part, host_port = proxy_url.split("@")
+            username, password = auth_part.replace("http://", "").replace("https://", "").split(":")
+            host, port = host_port.split(":")
+
+            manifest_json = """
+            {
+                "version": "1.0.0",
+                "manifest_version": 2,
+                "name": "Chrome Proxy",
+                "permissions": [
+                    "proxy",
+                    "tabs",
+                    "unlimitedStorage",
+                    "storage",
+                    "<all_urls>",
+                    "webRequest",
+                    "webRequestBlocking"
+                ],
+                "background": {
+                    "scripts": ["background.js"]
+                },
+                "minimum_chrome_version":"22.0.0"
+            }
+            """
+
+            background_js = """
+            var config = {
+                mode: "fixed_servers",
+                rules: {
+                  singleProxy: {
+                    scheme: "http",
+                    host: "%(host)s",
+                    port: parseInt(%(port)s)
+                  },
+                  bypassList: ["localhost"]
+                }
+              };
+
+            chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
+
+            function callbackFn(details) {
+                return {
+                    authCredentials: {
+                        username: "%(username)s",
+                        password: "%(password)s"
+                    }
+                };
+            }
+
+            chrome.webRequest.onAuthRequired.addListener(
+                    callbackFn,
+                    {urls: ["<all_urls>"]},
+                    ['blocking']
+            );
+            """ % {
+                "host": host,
+                "port": port,
+                "username": username,
+                "password": password,
+            }
+
+            ext_base = Path(config.BASE_DIR) / "WORK" / "extensions"
+            ext_base.mkdir(parents=True, exist_ok=True)
+            plugin_path = ext_base / f"proxy_auth_{self.worker_id}.zip"
+
+            with zipfile.ZipFile(plugin_path, 'w') as zp:
+                zp.writestr("manifest.json", manifest_json)
+                zp.writestr("background.js", background_js)
+
+            self._proxy_ext_path = str(plugin_path)
+            return self._proxy_ext_path
+        except Exception as e:
+            logger.error(f"[Selenium] Failed to create proxy auth extension: {e}")
+            return None
 
     # ── Core interface ─────────────────────────────────────────────────────
 
@@ -164,6 +347,16 @@ class SeleniumAgent(BaseBrowserAgent):
             await self._handle_captcha_if_present()
             return True
         except Exception as exc:
+            msg = str(exc)
+            if "ERR_TUNNEL_CONNECTION_FAILED" in msg or "ERR_PROXY_CONNECTION_FAILED" in msg:
+                logger.error(f"[Selenium] 🛑 Proxy connection FAILED (Tunnel Error). Rotating...")
+                await self.rotate_proxy()
+                # Retry once after rotation
+                try:
+                    await asyncio.to_thread(self._driver.get, url)
+                    return True
+                except:
+                    return False
             logger.error(f"[Selenium] goto_url error: {exc}")
             return False
 
@@ -196,6 +389,13 @@ class SeleniumAgent(BaseBrowserAgent):
             return text
 
         except Exception as exc:
+            msg = str(exc)
+            if "ERR_TUNNEL_CONNECTION_FAILED" in msg or "ERR_PROXY_CONNECTION_FAILED" in msg:
+                logger.error(f"[Selenium] 🛑 Proxy FAILED during AI search. Rotating...")
+                await self.rotate_proxy()
+                # Recurse once with new proxy
+                return await self.search_google_ai_mode(prompt)
+            
             logger.error(f"[Selenium] search_google_ai_mode error: {exc}")
             await self._record_interruption("exception", str(exc))
             return None
@@ -269,26 +469,37 @@ class SeleniumAgent(BaseBrowserAgent):
 
     async def _handle_captcha_if_present(self) -> bool:
         """
-        Detect WAF blocks, IP bans, or CAPTCHA challenges.
-        Records the interruption event for MTTI telemetry.
-        Returns True if the session is interrupted, False if page is clean.
+        Refined detection for CAPTCHA vs IP Ban / Hard Block.
+        Returns True if the session is blocked and needs rotation/escalation.
         """
         source = await self.get_page_source()
         if not source:
             return False
 
-        if is_captcha_page(source):
-            logger.warning("[Selenium] ⚠️  CAPTCHA / WAF block detected.")
-            await self._record_interruption("captcha_waf", "CAPTCHA page detected")
-            await asyncio.sleep(10)  # Short non-blocking pause → let waterfall escalate
+        lower_source = source.lower()
+        
+        # 1. Detect Hard IP Ban (403/429/Access Denied)
+        hard_ban_keywords = ["access denied", "forbidden", "too many requests", "403 forbidden", "429 too many"]
+        if any(kw in lower_source for kw in hard_ban_keywords):
+            logger.error("[Selenium] 🚨 HARD IP BAN DETECTED.")
+            await self._record_interruption("ip_ban", "Hard block (Access Denied / 403)")
+            if config.PROXY_ENABLED:
+                await self.rotate_proxy()
             return True
 
-        # Heuristic: IP ban pages often have very short body content
-        if len(source) < 1000 and any(
-            kw in source.lower() for kw in ["unusual traffic", "ip banned", "access denied", "403", "429"]
-        ):
-            logger.warning("[Selenium] ⚠️  Likely IP restriction / rate-limit page.")
-            await self._record_interruption("ip_ban", "Rate-limit / 403 / 429 detected")
+        # 2. Detect Soft CAPTCHA / Unusual Traffic
+        if is_captcha_page(source):
+            logger.warning("[Selenium] ⚠️  SOFT CAPTCHA / WAF Detected (Unusual Traffic).")
+            await self._record_interruption("captcha_waf", "CAPTCHA challenge detected")
+            
+            # Fast solution: If we hit unusual traffic, rotation is usually the only way out
+            # without manual intervention.
+            if config.PROXY_ENABLED:
+                logger.info("[Selenium] ♻️  Attempting automated proxy rotation for CAPTCHA...")
+                await self.rotate_proxy()
+            else:
+                # Fallback to manual solve if no proxies
+                await asyncio.to_thread(wait_for_human_captcha_solve)
             return True
 
         return False

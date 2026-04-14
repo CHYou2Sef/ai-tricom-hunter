@@ -213,6 +213,9 @@ HYBRID_TIER3_DOMAINS = [
 # Tier 1 (Patchright) is prioritized for speed and baseline stealth.
 HYBRID_DEFAULT_TIER = int(os.getenv("HYBRID_DEFAULT_TIER", "1"))
 
+# Tier 0 (Selenium) is available for high-fidelity searches but prone to CAPTCHA.
+SELENIUM_ENABLED = os.getenv("SELENIUM_ENABLED", "true").lower() == "true"
+
 # Tier 4 (Camoufox) is heavy. Disable it to save resources if not needed.
 CAMOUFOX_ENABLED = os.getenv("CAMOUFOX_ENABLED", "false").lower() == "true"
 
@@ -247,6 +250,8 @@ Path(CHROMIUM_PROFILE_PATH).parent.mkdir(parents=True, exist_ok=True)
 # The specific profile folder name inside the profile path
 # (usually "Default" unless you created multiple profiles)
 CHROMIUM_PROFILE_NAME = os.getenv("CHROMIUM_PROFILE_NAME", "Default")
+# ── Tier 0: Selenium (Benchmark Arena) ──────────────────────────────
+SELENIUM_DISPLAY_MODE = "gui"  # "headless" or "gui"
 
 # Full path to the chromium binary executable.
 # Leave as "" to let the agent auto-detect it.

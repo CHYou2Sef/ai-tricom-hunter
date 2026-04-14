@@ -239,4 +239,12 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
+        # Suppress Noise: Python 3.12+ raised CancelledError then KeyboardInterrupt
+        print("\n" + "═" * 60)
+        print("🛑  Benchmark stopped by user.")
+        print("═" * 60 + "\n")
+        import sys
+        sys.exit(0)

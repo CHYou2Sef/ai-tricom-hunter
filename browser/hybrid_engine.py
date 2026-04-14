@@ -90,6 +90,7 @@ class HybridAutomationEngine:
     
     def __init__(self, worker_id: int = 0):
         self._worker_id = worker_id
+        self._tier0: Optional[object] = None   # SeleniumAgent (Legacy/High-Fidelity)
         self._tier1: Optional[object] = None   # PatchrightAgent (Chrome stealth)
         self._tier2: Optional[object] = None   # NodriverAgent   (Chrome CDP)
         self._tier3: Optional[object] = None   # Crawl4AIAgent   (Chrome managed)
@@ -106,10 +107,11 @@ class HybridAutomationEngine:
         self._last_target_url: Optional[str] = None # For re-navigation catch-up
 
         self._stats: Dict[int, Dict[str, Any]] = {
+            0: {"attempts": 0, "successes": 0, "total_ms": 0},  # Selenium
             1: {"attempts": 0, "successes": 0, "total_ms": 0},
             2: {"attempts": 0, "successes": 0, "total_ms": 0},
             3: {"attempts": 0, "successes": 0, "total_ms": 0},
-            4: {"attempts": 0, "successes": 0, "total_ms": 0},  # Camoufox / Firefox
+            4: {"attempts": 0, "successes": 0, "total_ms": 0},
         }
 
     @property
@@ -129,7 +131,8 @@ class HybridAutomationEngine:
     async def start_tier(self, tier: int) -> bool:
         try:
             # 1. Check if existing agent is alive (Bug #6 fix)
-            agent = {1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}.get(tier)
+            agent_map = {0: self._tier0, 1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}
+            agent = agent_map.get(tier)
             if agent:
                  # Standard health check: can we get page source?
                  try:
@@ -138,6 +141,12 @@ class HybridAutomationEngine:
                      logger.warning(f"[HybridEngine] Tier {tier} appears STALE. Restarting...")
                      await self.stop_tier(tier)
                      agent = None
+
+            if tier == 0 and not self._tier0:
+                from browser.selenium_agent import SeleniumAgent
+                self._tier0 = SeleniumAgent(worker_id=self._worker_id)
+                await self._tier0.start()
+                logger.info(f"[HybridEngine] ✅ Tier 0 (Selenium) started for worker {self.worker_id}.")
 
             if tier == 1 and not self._tier1:
                 from browser.patchright_agent import PatchrightAgent
@@ -181,7 +190,8 @@ class HybridAutomationEngine:
 
     async def stop_tier(self, tier: int) -> None:
         """Explicitly close a specific tier to free resources before escalation."""
-        agent = {1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}.get(tier)
+        agent_map = {0: self._tier0, 1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}
+        agent = agent_map.get(tier)
         if agent:
             try:
                 await agent.close()
@@ -189,13 +199,14 @@ class HybridAutomationEngine:
             except Exception as exc:
                 logger.warning(f"[HybridEngine] Tier {tier} close error: {exc}")
 
-        if tier == 1:   self._tier1 = None
+        if tier == 0:   self._tier0 = None
+        elif tier == 1: self._tier1 = None
         elif tier == 2: self._tier2 = None
         elif tier == 3: self._tier3 = None
         elif tier == 4: self._tier4 = None
 
     async def stop_all(self) -> None:
-        for tier in [1, 2, 3, 4]:
+        for tier in [0, 1, 2, 3, 4]:
             await self.stop_tier(tier)
 
     async def close(self) -> None:
@@ -203,7 +214,8 @@ class HybridAutomationEngine:
 
     async def rotate_proxy(self):
         """Forward proxy rotation to the active agent."""
-        agent = {1: self._tier1, 2: self._tier2, 3: self._tier3}.get(self._current_tier)
+        agent_map = {0: self._tier0, 1: self._tier1, 2: self._tier2, 3: self._tier3}
+        agent = agent_map.get(self._current_tier)
         if agent and hasattr(agent, "rotate_proxy"):
             await agent.rotate_proxy()
 
@@ -248,6 +260,11 @@ class HybridAutomationEngine:
         # This is CRITICAL for search -> extraction continuity.
         max_tier = 4 if config.CAMOUFOX_ENABLED else 3
         tier_sequence = list(range(config.HYBRID_DEFAULT_TIER, max_tier + 1))
+        
+        # If Selenium is enabled, prepend it as Tier 0
+        if getattr(config, "SELENIUM_ENABLED", False):
+            tier_sequence.insert(0, 0)
+
         if self._last_successful_tier and self._last_successful_tier in tier_sequence:
             # Move it to the front of the list
             tier_sequence.remove(self._last_successful_tier)
@@ -268,7 +285,8 @@ class HybridAutomationEngine:
                     break
                 continue
 
-            agent = {1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}[tier]
+            agent_map = {0: self._tier0, 1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}
+            agent = agent_map[tier]
 
             # ── 2.1 RE-NAVIGATION CATCH-UP ───────────────────────────────────
             # If we just started a NEW tier (not Tier 1 or the sticky one), 
@@ -312,7 +330,9 @@ class HybridAutomationEngine:
                     # Track last URL if this was a navigation
                     if method_name in ["goto_url", "submit_google_search", "search_google_ai_mode"]:
                         try:
-                            if tier == 1 and hasattr(agent, "_page") and agent._page:
+                            if tier == 0 and hasattr(agent, "_driver") and agent._driver:
+                                self._last_target_url = await asyncio.to_thread(lambda: agent._driver.current_url)
+                            elif tier == 1 and hasattr(agent, "_page") and agent._page:
                                 self._last_target_url = agent._page.url
                             elif tier == 2 and hasattr(agent, "_page") and agent._page:
                                 self._last_target_url = agent._page.url # Nodriver tab.url
@@ -420,13 +440,14 @@ class HybridAutomationEngine:
 
     def print_engine_report(self) -> None:
         tier_names = {
+            0: "Selenium   🟧",
             1: "Patchright 🟦",
             2: "Nodriver   🟢",
             3: "Crawl4AI   🟡",
             4: "Camoufox 🦊",
         }
         print("\n" + "═" * 64)
-        print("📊  Hybrid Engine Performance Report (4-Tier)")
+        print("📊  Hybrid Engine Performance Report (5-Tier)")
         print("═" * 64)
         for tier, data in self.get_engine_stats().items():
             name = tier_names.get(tier, f"Tier {tier}")
