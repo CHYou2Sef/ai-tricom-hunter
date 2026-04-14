@@ -96,7 +96,7 @@ class UniversalExtractor:
             # If we found nothing semantic or heuristic, scan the raw text 
             # so we don't return an "Empty" result if data is visible.
             if not result["heuristic_phones"]:
-                from search.phone_extractor import extract_phones
+                from search.phone_extractor import extract_phones  # noqa: PLC0415
                 raw_text = soup.get_text(" ", strip=True)
                 regex_phones = extract_phones(raw_text)
                 if regex_phones:

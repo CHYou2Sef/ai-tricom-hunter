@@ -1,49 +1,281 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  utils/metrics.py  —  V2: Dual-Output Telemetry Engine                   ║
+║                                                                          ║
+║  Tracks two distinct metric layers:                                      ║
+║                                                                          ║
+║  1. FILE-LEVEL: PerformanceTracker (backward-compatible)                 ║
+║     Tracks overall file processing speed, success rate, row throughput.  ║
+║                                                                          ║
+║  2. TIER-LEVEL: BenchmarkTelemetry (new)                                 ║
+║     Per-engine MTTI (Mean Time To Interruption), CAPTCHA/IP-ban rates,   ║
+║     connection latency, and cumulative uptime continuity scores.          ║
+║     Outputs to BOTH agent.log (console) AND WORK/telemetry.json.         ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
+import json
 import time
-from typing import Dict, Any
+from pathlib import Path
+from typing import Dict, Any, Optional, List
+
+import config
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+# ─── File path for the persistent JSON telemetry payload ──────────────────
+TELEMETRY_PATH: Path = config.WORK_DIR / "telemetry.json"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# LAYER 1 — PerformanceTracker  (backward-compatible, file-level)
+# ══════════════════════════════════════════════════════════════════════════
 
 class PerformanceTracker:
-    """Tracks processing times and computes metrics for file and row-level operations."""
+    """Tracks processing times and success rates for a single file run."""
 
     def __init__(self):
-        self.file_start_time = None
-        self.file_end_time = None
-        self.rows_processed = 0
-        self.rows_done = 0
-        self.total_row_duration = 0.0
+        self.file_start_time: Optional[float] = None
+        self.file_end_time: Optional[float] = None
+        self.rows_processed: int = 0
+        self.rows_done: int = 0
+        self.total_row_duration: float = 0.0
 
-    def start_file_processing(self):
+    def start_file_processing(self) -> None:
         self.file_start_time = time.perf_counter()
 
-    def end_file_processing(self):
+    def end_file_processing(self) -> None:
         self.file_end_time = time.perf_counter()
 
-    def track_row(self, duration: float, status: str):
+    def track_row(self, duration: float, status: str) -> None:
         self.rows_processed += 1
         self.total_row_duration += duration
         if status == "DONE":
             self.rows_done += 1
 
     def get_metrics_summary(self) -> Dict[str, Any]:
-        if not self.file_start_time or not self.file_end_time:
-            total_time = 0.0
-        else:
-            total_time = round(self.file_end_time - self.file_start_time, 2)
-            
+        total_time = (
+            round(self.file_end_time - self.file_start_time, 2)
+            if self.file_start_time and self.file_end_time
+            else 0.0
+        )
         success_rate = (self.rows_done / self.rows_processed * 100) if self.rows_processed > 0 else 0.0
         avg_row_time = (self.total_row_duration / self.rows_processed) if self.rows_processed > 0 else 0.0
-
         return {
             "total_execution_seconds": total_time,
             "average_row_seconds": round(avg_row_time, 2),
             "rows_processed": self.rows_processed,
-            "success_rate_percent": round(success_rate, 2)
+            "success_rate_percent": round(success_rate, 2),
         }
 
     def format_console_report(self) -> str:
-        metrics = self.get_metrics_summary()
+        m = self.get_metrics_summary()
         return (
             f"⏱️  Performance Report ⏱️\n"
-            f"   Total elapsed: {metrics['total_execution_seconds']}s\n"
-            f"   Avg row speed: {metrics['average_row_seconds']}s / row\n"
-            f"   Success rate : {metrics['success_rate_percent']}% ({self.rows_done}/{metrics['rows_processed']} done)"
+            f"   Total elapsed:  {m['total_execution_seconds']}s\n"
+            f"   Avg row speed:  {m['average_row_seconds']}s / row\n"
+            f"   Success rate :  {m['success_rate_percent']}% "
+            f"({self.rows_done}/{m['rows_processed']} done)"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# LAYER 2 — BenchmarkTelemetry  (new, tier/engine-level continuity)
+# ══════════════════════════════════════════════════════════════════════════
+
+class TierStats:
+    """Accumulates raw events for a single engine/tier during a benchmark run."""
+
+    def __init__(self, engine_name: str):
+        self.engine_name: str = engine_name
+        self.rows_attempted: int = 0
+        self.rows_done: int = 0
+        self.rows_no_tel: int = 0
+        self.rows_error: int = 0
+        # Interruption tracking
+        self.interruptions: List[Dict[str, Any]] = []   # [{reason, ts, row_index}]
+        self.captcha_count: int = 0
+        self.ip_ban_count: int = 0
+        # Timing
+        self.total_latency_sec: float = 0.0
+        self.session_start_ts: float = time.monotonic()
+        self._last_clean_ts: float = time.monotonic()  # Start of current uninterrupted streak
+
+    # ── Event recording ────────────────────────────────────────────────
+
+    def record_row_result(
+        self,
+        row_index: int,
+        status: str,
+        latency_sec: float,
+        interruption_reason: Optional[str] = None,
+    ) -> None:
+        """
+        Record one row's outcome.
+        - status: 'DONE' | 'NO TEL' | 'ERROR'
+        - interruption_reason: 'captcha_waf' | 'ip_ban' | 'exception' | None
+        """
+        self.rows_attempted += 1
+        self.total_latency_sec += latency_sec
+
+        if status == "DONE":
+            self.rows_done += 1
+        elif status == "NO TEL":
+            self.rows_no_tel += 1
+        else:
+            self.rows_error += 1
+
+        if interruption_reason:
+            now = time.monotonic()
+            self.interruptions.append({
+                "row_index": row_index,
+                "reason": interruption_reason,
+                "uptime_before_sec": round(now - self._last_clean_ts, 1),
+                "ts_offset_sec": round(now - self.session_start_ts, 1),
+            })
+            self._last_clean_ts = now  # Reset streak clock
+            if "captcha" in interruption_reason or "waf" in interruption_reason:
+                self.captcha_count += 1
+            elif "ip_ban" in interruption_reason:
+                self.ip_ban_count += 1
+
+    # ── Derived metrics ────────────────────────────────────────────────
+
+    def compute(self) -> Dict[str, Any]:
+        """Compute all derived MTTI and continuity statistics."""
+        success_rate = round(self.rows_done / self.rows_attempted * 100, 2) if self.rows_attempted else 0.0
+        avg_latency  = round(self.total_latency_sec / self.rows_attempted, 2) if self.rows_attempted else 0.0
+        total_uptime = round(time.monotonic() - self.session_start_ts, 1)
+
+        # MTTI — average seconds of uninterrupted operation between failures
+        uptimes = [ev["uptime_before_sec"] for ev in self.interruptions]
+        mtti_sec = round(sum(uptimes) / len(uptimes), 1) if uptimes else total_uptime
+
+        return {
+            "engine": self.engine_name,
+            "rows_attempted": self.rows_attempted,
+            "rows_done": self.rows_done,
+            "rows_no_tel": self.rows_no_tel,
+            "rows_error": self.rows_error,
+            "success_rate_pct": success_rate,
+            "avg_latency_sec": avg_latency,
+            "total_session_sec": total_uptime,
+            "interruptions_total": len(self.interruptions),
+            "captcha_blocks": self.captcha_count,
+            "ip_ban_blocks": self.ip_ban_count,
+            "mtti_sec": mtti_sec,   # ← Primary continuity KPI
+            "interruption_log": self.interruptions,
+        }
+
+    def format_console_report(self) -> str:
+        """Render a rich console-friendly block for this engine."""
+        m = self.compute()
+        bar_filled = int(m["success_rate_pct"] / 5)
+        bar = ("█" * bar_filled).ljust(20)
+        return (
+            f"\n  ┌─ {m['engine']}\n"
+            f"  │  Rows:        {m['rows_done']:>4} DONE / {m['rows_no_tel']:>4} NO TEL / {m['rows_error']:>4} ERR\n"
+            f"  │  Success:     [{bar}] {m['success_rate_pct']}%\n"
+            f"  │  Avg latency: {m['avg_latency_sec']}s / row\n"
+            f"  │  Session time:{m['total_session_sec']}s\n"
+            f"  │  ─── Continuity ──────────────────────\n"
+            f"  │  MTTI:        {m['mtti_sec']}s  (mean time to interruption)\n"
+            f"  │  Interruptions:{m['interruptions_total']} total  "
+            f"(CAPTCHA/WAF: {m['captcha_blocks']} | IP Ban: {m['ip_ban_blocks']})\n"
+            f"  └──────────────────────────────────────"
+        )
+
+
+class BenchmarkTelemetry:
+    """
+    Orchestrates multi-engine benchmark telemetry.
+
+    Usage:
+        telemetry = BenchmarkTelemetry()
+        telemetry.register_engine("Selenium")
+        telemetry.register_engine("Patchright")
+
+        # Inside the benchmark loop:
+        telemetry.record("Selenium", row_idx, "DONE", latency, interruption_reason)
+
+        # At the end:
+        telemetry.finalize()   # prints + saves telemetry.json
+    """
+
+    def __init__(self):
+        self._engines: Dict[str, TierStats] = {}
+        self._benchmark_start_ts: float = time.monotonic()
+
+    def register_engine(self, name: str) -> None:
+        """Register a named engine before the benchmark run starts."""
+        if name not in self._engines:
+            self._engines[name] = TierStats(engine_name=name)
+            logger.info(f"[Telemetry] Registered engine: {name}")
+
+    def record(
+        self,
+        engine_name: str,
+        row_index: int,
+        status: str,
+        latency_sec: float,
+        interruption_reason: Optional[str] = None,
+    ) -> None:
+        """Record a single row result for the given engine."""
+        if engine_name not in self._engines:
+            self.register_engine(engine_name)
+        self._engines[engine_name].record_row_result(
+            row_index=row_index,
+            status=status,
+            latency_sec=latency_sec,
+            interruption_reason=interruption_reason,
+        )
+
+    def finalize(self) -> Dict[str, Any]:
+        """
+        Compute all metrics, print the full console report, and flush to
+        WORK/telemetry.json (dual-output).
+        Returns the full computed payload.
+        """
+        total_runtime = round(time.monotonic() - self._benchmark_start_ts, 1)
+        payload = {
+            "benchmark_runtime_sec": total_runtime,
+            "engines": [stats.compute() for stats in self._engines.values()],
+        }
+
+        # ── Rank engines by MTTI (best continuity = highest MTTI) ─────────
+        ranked = sorted(
+            payload["engines"],
+            key=lambda e: (-e["mtti_sec"], -e["success_rate_pct"]),
+        )
+        payload["ranking"] = [
+            {"rank": i + 1, "engine": e["engine"], "mtti_sec": e["mtti_sec"], "success_rate_pct": e["success_rate_pct"]}
+            for i, e in enumerate(ranked)
+        ]
+
+        # ── Console output ────────────────────────────────────────────────
+        print("\n" + "═" * 64)
+        print("📊  BENCHMARK TELEMETRY REPORT — Engine Continuity Comparison")
+        print("═" * 64)
+        print(f"   Total benchmark runtime: {total_runtime}s")
+        for stats in self._engines.values():
+            print(stats.format_console_report())
+        print("\n  🏆  RANKING  (Best Continuity → Worst)")
+        for r in payload["ranking"]:
+            print(f"     #{r['rank']}  {r['engine']:<20}  MTTI={r['mtti_sec']}s  |  Success={r['success_rate_pct']}%")
+        print("═" * 64 + "\n")
+
+        # ── JSON flush (WORK/telemetry.json) ──────────────────────────────
+        self._flush_to_json(payload)
+
+        return payload
+
+    def _flush_to_json(self, payload: Dict[str, Any]) -> None:
+        """Write the telemetry payload to the persistent JSON file."""
+        try:
+            TELEMETRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(TELEMETRY_PATH, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+            logger.info(f"[Telemetry] ✅ Metrics flushed to: {TELEMETRY_PATH}")
+        except Exception as exc:
+            logger.error(f"[Telemetry] Failed to write telemetry.json: {exc}")
