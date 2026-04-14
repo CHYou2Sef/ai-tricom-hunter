@@ -84,8 +84,8 @@ class SeleniumAgent(BaseBrowserAgent):
         try:
             import undetected_chromedriver as uc  # type: ignore
         except ImportError:
-            raise RuntimeError(
-                "undetected-chromedriver is not installed.\n"
+            raise ImportError(
+                "undetected-chromedriver is not installed. "
                 "Run: pip install undetected-chromedriver"
             )
 

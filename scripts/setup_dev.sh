@@ -30,13 +30,15 @@ fi
 
 # 5. Browser Binaries
 
+# Tier 0 (Selenium) — ChromeDriver is managed automatically by webdriver-manager
+# and undetected-chromedriver. No manual step required.
+echo "🌐 [Tier 0] Selenium ChromeDriver will be auto-managed at runtime."
+
+
 # Tier 1 (Patchright/Chromium stealth)
 echo "🌐 [Tier 1] Installing Patchright Chromium..."
 patchright install chromium
 
-# Tier 0 (Selenium) — ChromeDriver is managed automatically by webdriver-manager
-# and undetected-chromedriver. No manual step required.
-echo "🌐 [Tier 0] Selenium ChromeDriver will be auto-managed at runtime."
 
 # Tier 4 (Camoufox — optional, heavy ~200MB Firefox binary)
 if [ "${INSTALL_CAMOUFOX:-false}" = "true" ]; then
@@ -61,15 +63,6 @@ for d in dirs:
 print('  ✅ WORK/ structure ready.')
 "
 
-echo ""
-echo "╔═══════════════════════════════════════════════════════════════════╗"
-echo "║  ✅  Setup Complete!                                               ║"
-echo "║                                                                   ║"
-echo "║  Run the agent:                                                   ║"
-echo "║      python main.py                                               ║"
-echo "║                                                                   ║"
-echo "║  Run the engine benchmark (1000 lines):                          ║"
-echo "║      python scripts/benchmark_engines.py \\                       ║"
-echo "║             --input WORK/INCOMING/your_1000_lines.xlsx \\         ║"
-echo "║             --engines selenium patchright nodriver               ║"
-echo "╚═══════════════════════════════════════════════════════════════════╝"
+echo "  ✅  Setup Complete!   "
+                                           
+python main.py 
