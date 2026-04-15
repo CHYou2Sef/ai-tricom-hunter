@@ -111,7 +111,11 @@ class NodriverAgent(BaseBrowserAgent):
             else:
                 browser_args.append(f"--proxy-server={self._proxy}")
 
+        # Hardened: ensure path is a valid string or exactly None (not "")
+        nd_path = config.CHROMIUM_BINARY_PATH if config.CHROMIUM_BINARY_PATH else None
+
         self._browser = await nd.start(
+            browser_executable_path=nd_path,
             browser_args=browser_args,
             headless=False,               # Headed mode is more stealthy
             no_sandbox=not config.BROWSER_USE_SANDBOX,  # Industrial stability
@@ -267,8 +271,8 @@ class NodriverAgent(BaseBrowserAgent):
             return None
 
         try:
-            encoded = urllib.parse.quote_plus(query)
-            url     = config.GOOGLE_AI_MODE_URL + encoded
+            from utils.search_engine import generate_google_ai_url
+            url = generate_google_ai_url(query)
 
             logger.info(f"[Nodriver] 🔍 Google AI Mode: {query}")
             await self._page.get(url)

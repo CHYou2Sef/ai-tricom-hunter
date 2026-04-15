@@ -39,6 +39,7 @@ import config
 from agent import process_file_async, init_agent_pool, close_agent_pool
 from utils.logger import get_logger
 from utils.health_check import check_all
+from utils.lock_manager import acquire_lock, release_lock
 
 logger = get_logger(__name__)
 
@@ -171,10 +172,12 @@ async def main_async() -> None:
 
     ensure_directories()
     
-    # ── HEALTH CHECK ──
-    health = await check_all()
-    if not health["dirs"]:
-        logger.critical("[Main] Critical failure: Work directories cannot be verified/created. Exiting.")
+    # ── SINGLETON LOCK (Conflict Prevention) ──
+    instance_name = "DOCKER-AGENT" if getattr(config, "DOCKER_ENV", False) else f"LOCAL-{os.getlogin()}"
+    if not acquire_lock(instance_name):
+        logger.critical(f"🛑 SHUTDOWN: Conflict detected. Another agent is already using the {config.WORK_DIR} directory.")
+        print(f"\n🚨  CONFLICT ALERT: Only ONE agent can manage the WORK directory at a time.")
+        print(f"    Please stop the other instance before starting this one.\n")
         return
 
     # Initialize the agent pool for true parallelism
@@ -244,6 +247,8 @@ async def main_async() -> None:
         observer.join()
         await close_agent_pool()
         logger.info("[Main] Browser pool closed.")
+        
+        release_lock()
         
         cleanup_input_folders()
         logger.info("[Main] Cleanup finished. Goodbye!")

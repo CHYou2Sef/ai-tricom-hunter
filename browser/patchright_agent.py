@@ -249,6 +249,10 @@ class PatchrightAgent(BaseBrowserAgent):
 
     async def _navigate_and_search(self, query: str) -> None:
         logger.info(f"[Google] Search: {query}")
+        from utils.search_engine import generate_google_ai_url
+        url = generate_google_ai_url(query)
+        
+        logger.info(f"[Crawl4AI] 🔍 Google AI Mode scrape: {query}")
         await self.page.goto(config.GOOGLE_URL, wait_until="load")
         await asyncio.sleep(1)
         
@@ -399,9 +403,8 @@ class PatchrightAgent(BaseBrowserAgent):
         
         async with self._lock:
             try:
-                import urllib.parse
-                encoded = urllib.parse.quote_plus(prompt)
-                ai_mode_url = config.GOOGLE_AI_MODE_URL + encoded
+                from utils.search_engine import generate_google_ai_url
+                ai_mode_url = generate_google_ai_url(prompt)
                 
                 logger.info(f"🤖 [AI Mode] Navigating to: {ai_mode_url}")
                 await self.page.goto(ai_mode_url, wait_until="load", timeout=30000)

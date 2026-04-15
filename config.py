@@ -253,27 +253,51 @@ CHROMIUM_PROFILE_NAME = os.getenv("CHROMIUM_PROFILE_NAME", "Default")
 # ── Tier 0: Selenium (Benchmark Arena) ──────────────────────────────
 SELENIUM_DISPLAY_MODE = "gui"  # "headless" or "gui"
 
-# Full path to the chromium binary executable.
-# Leave as "" to let the agent auto-detect it.
-# Example: "/usr/bin/chromium-browser"
-def find_chrome_executable():
-    """Search for Chrome/Chromium executable across common OS paths."""
+# ── Chrome Binary Resolution Strategy ───────────────────────────────
+def find_chrome_executable() -> str:
+    """
+    Unified strategy to locate the Chrome/Chromium binary.
+    Prioritizes:
+    1. Explicit .env override (CHROMIUM_BINARY_PATH)
+    2. Docker standard path (/usr/bin/google-chrome)
+    3. OS-standard discovery
+    """
     import platform
-    if platform.system() == "Windows":
+    
+    # 1. Explicit Override (Loaded from .env by python-dotenv)
+    env_path = os.getenv("CHROMIUM_BINARY_PATH")
+    if env_path and os.path.exists(env_path):
+        return env_path
+        
+    # 2. Docker Context
+    if os.path.exists("/.dockerenv") or os.environ.get("DOCKER_ENV"):
+        docker_path = "/usr/bin/google-chrome"
+        if os.path.exists(docker_path):
+            return docker_path
+
+    # 3. OS Discovery
+    system = platform.system()
+    if system == "Windows":
         paths = [
             os.path.join(os.environ.get("PROGRAMFILES", "C:\\Program Files"), "Google\\Chrome\\Application\\chrome.exe"),
             os.path.join(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"), "Google\\Chrome\\Application\\chrome.exe"),
             os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google\\Chrome\\Application\\chrome.exe"),
         ]
-        for p in paths:
-            if os.path.exists(p): return p
-    elif platform.system() == "Linux":
-        paths = ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"]
-        for p in paths:
-            if os.path.exists(p): return p
+    elif system == "Linux":
+        paths = ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome-stable"]
+    elif system == "Darwin": # macOS
+        paths = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+    else:
+        paths = []
+
+    for p in paths:
+        if os.path.exists(p):
+            return p
+            
     return ""
 
-CHROMIUM_BINARY_PATH = os.getenv("CHROMIUM_BINARY_PATH", find_chrome_executable())
+# Source of truth for all agents
+CHROMIUM_BINARY_PATH = find_chrome_executable()
 
 
 

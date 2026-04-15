@@ -11,6 +11,10 @@ services:
     init: true               # Correctly cleans up zombie browser processes
     ipc: host                # Allow zero-copy memory access for faster rendering
     
+    environment:
+      - CHROMIUM_BINARY_PATH=/usr/bin/google-chrome
+      - DOCKER_ENV=true
+
     env_file:
       - .env
     volumes:

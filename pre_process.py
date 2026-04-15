@@ -10,6 +10,7 @@
 """
 
 import os
+import sys
 import time
 import shutil
 import threading
@@ -21,6 +22,7 @@ import config
 from excel.reader import read_excel
 from excel.cleaner import clean_and_classify
 from utils.logger import get_logger
+from utils.lock_manager import acquire_lock, release_lock
 
 logger = get_logger("PreProcessor")
 
@@ -132,6 +134,12 @@ def ensure_dirs():
 if __name__ == "__main__":
     ensure_dirs()
     
+    # ── SINGLETON LOCK (Conflict Prevention) ──
+    instance_name = "DOCKER-PRE" if getattr(config, "DOCKER_ENV", False) else f"LOCAL-PRE-{os.getlogin()}"
+    if not acquire_lock(instance_name):
+        print(f"\n🚨  CONFLICT: Pre-Processor is already running elsewhere.")
+        sys.exit(1)
+    
     # Pre-process any existing files in incoming/
     logger.info("Scanning for existing files in incoming/...")
     handler = RawFileHandler()
@@ -153,4 +161,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         observer.stop()
         logger.info("Stopped by user.")
+    
+    release_lock()
     observer.join()

@@ -144,11 +144,15 @@ class SeleniumAgent(BaseBrowserAgent):
             for arg in common_args:
                 options.add_argument(arg)
             
+            # Hardened: ensure path is a valid string or exactly None (not "")
+            uc_path = config.CHROMIUM_BINARY_PATH if config.CHROMIUM_BINARY_PATH else None
+
             self._driver = uc.Chrome(
                 options=options,
                 headless=is_headless,
                 use_subprocess=True,
                 version_main=None,
+                browser_executable_path=uc_path
             )
             self._stealth_mode = "undetected-chromedriver"
             logger.info(
@@ -372,9 +376,9 @@ class SeleniumAgent(BaseBrowserAgent):
         """
         if not self._driver:
             return None
-
-        encoded = urllib.parse.quote_plus(prompt)
-        url = config.GOOGLE_AI_MODE_URL + encoded
+        
+        from utils.search_engine import generate_google_ai_url
+        url = generate_google_ai_url(prompt)
 
         try:
             logger.info(f"🤖 [Selenium-AI-Mode] Navigating for prompt ({len(prompt)} chars)")

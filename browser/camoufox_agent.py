@@ -174,8 +174,8 @@ class CamoufoxAgent(BaseBrowserAgent):
         if not self._page:
             return None
         try:
-            encoded = urllib.parse.quote_plus(query)
-            url = config.GOOGLE_AI_MODE_URL + encoded
+            from utils.search_engine import generate_google_ai_url
+            url = generate_google_ai_url(query)
 
             logger.info(f"[Camoufox] 🔍 Google AI Mode (Firefox): {query}")
             await self._page.goto(url, wait_until="load", timeout=30000)

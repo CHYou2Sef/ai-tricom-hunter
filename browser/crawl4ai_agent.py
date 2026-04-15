@@ -193,8 +193,8 @@ class Crawl4AIAgent(BaseBrowserAgent):
 
         Returns extracted page text for downstream enrichment.
         """
-        import urllib.parse
-        url = config.GOOGLE_AI_MODE_URL + urllib.parse.quote_plus(query)
+        from utils.search_engine import generate_google_ai_url
+        url = generate_google_ai_url(query)
         logger.info(f"[Crawl4AI] 🔍 Google AI Mode scrape: {query}")
         return await self.scrape(url)
 
