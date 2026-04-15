@@ -69,5 +69,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/TRICOM_NABEUL/ai_tricom_hunter:latest
-            ghcr.io/TRICOM_NABEUL/ai_tricom_hunter:${{ github.sha }}
+            ghcr.io/tricom_ai_agent/ai_tricom_hunter:latest
+            ghcr.io/tricom_ai_agent/ai_tricom_hunter:${{ github.sha }}
