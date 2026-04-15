@@ -17,12 +17,14 @@ import io
 import os
 import json
 import re
+import asyncio
 from typing import List, Optional, Tuple
 
 import openpyxl
 
 import config
 from utils.column_detector import detect_columns, validate_mapping
+from utils.llm_parser import detect_columns_with_llm
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -62,24 +64,6 @@ class ExcelRow:
         self.adresse = get("adresse")
         self.siren   = get("siren") or get("siret")
 
-        # ── 3. Fallback: Pattern-based detection for SIREN/SIRET or Nom ──
-        # This is critical for CSV files that lack clean headers.
-        if not self.siren:
-            for val in raw.values():
-                s = str(val).strip() if val is not None else ""
-                # Look for 9 digits (standard SIREN) or 9 digits with spaces
-                if re.fullmatch(r'\d{9}|\d{3}\s\d{3}\s\d{3}', s):
-                    self.siren = s.replace(" ", "")
-                    break
-
-        # If we have SIREN but no name, and it's a headless CSV, the first column is often the name
-        if not self.nom and raw:
-            first_key = list(raw.keys())[0]
-            val = str(raw[first_key]).strip()
-            # If it's a longish string and not a date/number, treat it as a potential name
-            if len(val) > 2 and not val.replace(" ", "").isdigit() and "/" not in val:
-                self.nom = val
-
         if self.nom and self.adresse:
             self.search_type = "RS_ADR"
         elif self.siren and self.adresse:
@@ -92,10 +76,12 @@ class ExcelRow:
         else:
             self.search_type = "SKIP"
 
-        self.status = "PENDING" if self.search_type != "SKIP" else "SKIP"
+        self.status = ""
         etat_val = get("Etat") or get("stat")
         if etat_val and etat_val.upper() == "DONE":
             self.status = "DONE"
+        elif etat_val and "NO" in etat_val.upper() and ("TEL" in etat_val.upper() or "PHONE" in etat_val.upper()):
+            self.status = "NO TEL"
         
         self.phone = get("telephone") or get("phone") or get("téléphone") or get("__phone")
         self.agent_phone = get("agent_phone") or get("__agent_phone")
@@ -221,12 +207,22 @@ def read_excel(filepath: str) -> Tuple[List[ExcelRow], dict]:
     mapping = detect_columns(headers)
     validation = validate_mapping(mapping)
 
-    logger.info(f"[Reader] Column mapping: { {k:v for k,v in mapping.items() if v} }")
-    logger.info(f"[Reader] Validation: {validation}")
+    logger.info(f"[Reader] Column heuristic mapping: { {k:v for k,v in mapping.items() if v} }")
+
+    if not validation["can_search_rs"] and not validation["can_search_siren"]:
+        logger.warning("[Reader] Heuristics failed to detect sufficient columns.")
+        # ── LLM Fallback Mapping ──
+        sample_rows_raw = list(ws.iter_rows(min_row=header_idx + 1, max_row=header_idx + 3, values_only=True))
+        if sample_rows_raw:
+            llm_mapping = asyncio.run(detect_columns_with_llm(headers, list(sample_rows_raw)))
+            if llm_mapping:
+                mapping.update({k: v for k, v in llm_mapping.items() if v})
+                validation = validate_mapping(mapping)
+                logger.info(f"[Reader] LLM Fallback applied: { {k:v for k,v in mapping.items() if v} }")
 
     if not validation["can_search_rs"] and not validation["can_search_siren"]:
         logger.warning(
-            "[Reader] WARNING: Could not detect enough columns to search. "
+            "[Reader] WARNING: Could not detect enough columns to search even with LLM. "
             "Rows will be marked SKIP. Check column names."
         )
 
@@ -354,8 +350,17 @@ def _read_csv(filepath: str) -> Tuple[List[ExcelRow], dict]:
 
     mapping    = detect_columns(headers)
     validation = validate_mapping(mapping)
-    logger.info(f"[Reader] Column mapping: { {k:v for k,v in mapping.items() if v} }")
-    logger.info(f"[Reader] Validation: {validation}")
+    logger.info(f"[Reader] CSV column heuristic mapping: { {k:v for k,v in mapping.items() if v} }")
+
+    if not validation["can_search_rs"] and not validation["can_search_siren"]:
+        logger.warning("[Reader] CSV Heuristics failed to detect sufficient columns.")
+        sample_rows_raw = [list(r.values()) for r in rows_raw[:3]]
+        if sample_rows_raw:
+            llm_mapping = asyncio.run(detect_columns_with_llm(headers, sample_rows_raw))
+            if llm_mapping:
+                mapping.update({k: v for k, v in llm_mapping.items() if v})
+                validation = validate_mapping(mapping)
+                logger.info(f"[Reader] CSV LLM Fallback applied: { {k:v for k,v in mapping.items() if v} }")
 
     if not validation["can_search_rs"] and not validation["can_search_siren"]:
         logger.warning(

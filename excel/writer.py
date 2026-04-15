@@ -90,6 +90,8 @@ def save_results(rows: list, original_filepath: str) -> None:
                 a = str(o_adr or "").strip().lower()
                 n = re.sub(r'[^a-z0-9]', '', n)
                 a = re.sub(r'[^a-z0-9]', '', a)
+                if o_siren:
+                    o_siren = str(o_siren).replace(".0", "").replace(" ", "").zfill(9)
                 if o_siren and len(o_siren) >= 9:
                     fp = f"SIREN:{o_siren}"
                 else:
@@ -129,11 +131,9 @@ def save_results(rows: list, original_filepath: str) -> None:
             continue
 
         # Determine Status accurately
-        status_to_write = "Pending"
+        status_to_write = ""
         if r.phone:
             status_to_write = "Done"
-        elif r.status == "SKIP":
-            status_to_write = "No Tel"
         elif r.status == "NO TEL":
             status_to_write = "No Tel"
         elif r.status == "DONE":
@@ -205,11 +205,9 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
     ws.append(all_headers)
 
     for r in rows:
-        status_to_write = "Pending"
+        status_to_write = ""
         if r.phone:
             status_to_write = "Done"
-        elif r.status == "SKIP":
-            status_to_write = "No Tel"
         elif r.status == "NO TEL":
             status_to_write = "No Tel"
         elif r.status == "DONE":

@@ -32,11 +32,18 @@ class MockRow:
         self.nom     = nom
         self.adresse = adresse
         self.siren   = siren     # holds SIREN *or* SIRET
-        self.raw     = raw or {}
         self.row_index = 1
         self.status    = "DONE"
         self.phone     = None
         self.agent_phone = None
+        
+        self.raw = raw or {}
+        if nom and "nom" not in self.raw:
+            self.raw["nom"] = nom
+        if adresse and "adresse" not in self.raw:
+            self.raw["adresse"] = adresse
+        if siren and "siren" not in self.raw:
+            self.raw["siren"] = siren
 
 
 # ─────────────────────────────────────────────────────────────────────────────
