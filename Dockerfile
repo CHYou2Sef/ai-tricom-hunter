@@ -1,0 +1,63 @@
+# ╔════════════════════════════════════════════════════════════════╗
+# ║  Dockerfile - AI Phone Hunter (Industrial 4-Pillar Build)      ║
+# ║  Base: Python 3.10 slim, Node.js 20, Xvfb (Virtual Display)    ║
+# ╚════════════════════════════════════════════════════════════════╝
+
+FROM python:3.10-slim-bookworm
+
+# ── 1. Install System Dependencies & Headless Display (Xvfb) ──────────
+# Xvfb provides a "fake" monitor. This consumes almost zero CPU/RAM,
+# but it tricks anti-bot systems into thinking a real monitor exists,
+# allowing patchright/nodriver to run in "headed" mode invisibly.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    gnupg \
+    xvfb \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    fonts-liberation \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── 2. (Removed Node.js - Native Python Validation is used) ────────────
+
+# ── 3. Install 'uv' (Fast Python Package Manager - Pillar 1) ──────────
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Set up working directory
+WORKDIR /app
+
+# ── 4. Install Python Dependencies ────────────────────────────────────
+# Copy requirements first to leverage Docker Layer Caching
+COPY requirements.txt .
+RUN uv pip install --system -r requirements.txt
+
+# ── 5. Install Stealth Browsers ───────────────────────────────────────
+# Patchright requires custom Chromium binaries to bypass Kasada/Cloudflare
+RUN patchright install chromium
+
+# ── 6. Copy Application Source Code ───────────────────────────────────
+COPY . .
+
+# Ensure entrypoint script is executable
+RUN chmod +x scripts/entrypoint.sh
+
+# ── 7. Configure Container Startup ────────────────────────────────────
+# The entrypoint launches Xvfb and validates the agent before running main.py
+ENTRYPOINT ["/app/scripts/entrypoint.sh"]
+
+# Default command if none is provided
+CMD ["python", "main.py"]

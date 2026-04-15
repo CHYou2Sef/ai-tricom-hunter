@@ -1,0 +1,17 @@
+name: AI Phone Hunter
+version: 1.0.0
+description: "A high-performance autonomous agent for B2B data enrichment and phone number extraction across anti-bot protected vectors."
+model:
+  provider: ollama
+  default: llama3
+  fallback: gpt-4o-mini
+skills:
+  - browser/hybrid_engine.py
+  - agents/phone_hunter.py
+  - utils/universal_extractor.py
+memory:
+  enabled: true
+  path: memory/runtime/
+compliance:
+  rules: RULES.md
+  soul: SOUL.md

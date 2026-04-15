@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  agent:
+    build: .
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-youssef}/ai_tricom_hunter:latest
+    container_name: tricom_ai_agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Mount the local WORK directory so data persists between runs
+      - ./WORK:/app/WORK
+      # Mount logs directory to inspect them from the host
+      - ./logs:/app/logs
+    # Cap resources to ensure desktop stability
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'

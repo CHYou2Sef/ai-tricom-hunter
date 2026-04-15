@@ -10,17 +10,22 @@ echo "🚀 Starting Developer Setup..."
 # 1. Check Python version
 python3 --version || { echo "❌ Python 3 not found"; exit 1; }
 
-# 2. Setup virtual environment
+# 2. Setup virtual environment using 'uv' (100x faster than pip)
+if ! command -v uv &> /dev/null; then
+    echo "📦 Installing 'uv' package manager..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+fi
+
 if [ ! -d "venv" ]; then
-    echo "📦 Creating virtual environment..."
-    python3 -m venv venv
+    echo "📦 Creating virtual environment with uv..."
+    uv venv
 fi
 source venv/bin/activate
 
-# 3. Install all Python dependencies (includes Selenium + undetected-chromedriver)
-echo "📥 Installing requirements..."
-pip install --upgrade pip
-pip install -r requirements.txt
+# 3. Install Python dependencies deterministically
+echo "📥 Installing requirements via uv..."
+uv pip install -r requirements.txt
 
 # 4. Environment Setup
 if [ ! -f ".env" ]; then
@@ -64,5 +69,3 @@ print('  ✅ WORK/ structure ready.')
 "
 
 echo "  ✅  Setup Complete!   "
-                                           
-python main.py 

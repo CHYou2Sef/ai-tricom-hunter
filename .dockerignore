@@ -1,0 +1,24 @@
+# Virtual Environments
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# IDEs
+.vscode/
+.idea/
+
+# Local Data and Logs
+WORK/
+logs/
+browser_profiles/
+.env
+
+# Git
+.git/
+.gitignore
+
+# Documentation testing
+*.pdf
+*.tex
