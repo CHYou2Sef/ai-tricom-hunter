@@ -529,3 +529,85 @@ def randomise_viewport() -> Tuple[int, int]:
         random.randint(config.FINGERPRINT_VIEWPORT_MIN_W, config.FINGERPRINT_VIEWPORT_MAX_W),
         random.randint(config.FINGERPRINT_VIEWPORT_MIN_H, config.FINGERPRINT_VIEWPORT_MAX_H),
     )
+
+
+def create_proxy_auth_extension(proxy_url: str, worker_id: int = 0) -> str:
+    """
+    Creates a temporary Chrome extension to handle proxy authentication
+    (bypasses the native 'Sign In' popup).
+
+    Args:
+        proxy_url : http://user:pass@host:port
+        worker_id : To isolate temporary extension folders
+
+    Returns:
+        str : Path to the created extension folder
+    """
+    import zipfile
+    import shutil
+    import os
+    from pathlib import Path
+
+    try:
+        # Parse: http://user:pass@host:port
+        auth_part, host_port = proxy_url.split("@")
+        username, password = auth_part.replace("http://", "").replace("https://", "").split(":")
+        host, port = host_port.split(":")
+
+        manifest_json = """
+        {
+            "version": "1.0.0",
+            "manifest_version": 2,
+            "name": "Chrome Proxy Auth",
+            "permissions": [
+                "proxy", "tabs", "unlimitedStorage", "storage",
+                "<all_urls>", "webRequest", "webRequestBlocking"
+            ],
+            "background": { "scripts": ["background.js"] },
+            "minimum_chrome_version":"22.0.0"
+        }
+        """
+
+        background_js = """
+        var config = {
+            mode: "fixed_servers",
+            rules: {
+              singleProxy: {
+                scheme: "http",
+                host: "%(host)s",
+                port: parseInt(%(port)s)
+              },
+              bypassList: ["localhost"]
+            }
+          };
+        chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
+        function callbackFn(details) {
+            return {
+                authCredentials: {
+                    username: "%(username)s",
+                    password: "%(password)s"
+                }
+            };
+        }
+        chrome.webRequest.onAuthRequired.addListener(
+            callbackFn, {urls: ["<all_urls>"]}, ['blocking']
+        );
+        """ % {"host": host, "port": port, "username": username, "password": password}
+
+        ext_dir = Path("browser_profiles") / f"proxy_auth_ext_{worker_id}"
+        if ext_dir.exists():
+            try:
+                shutil.rmtree(ext_dir)
+            except Exception:
+                pass
+        ext_dir.mkdir(parents=True, exist_ok=True)
+
+        with open(ext_dir / "manifest.json", "w") as f:
+            f.write(manifest_json)
+        with open(ext_dir / "background.js", "w") as f:
+            f.write(background_js)
+
+        return str(ext_dir.absolute())
+    except Exception as exc:
+        logger.error(f"[AntiBot] Failed to create proxy auth extension: {exc}")
+        return ""

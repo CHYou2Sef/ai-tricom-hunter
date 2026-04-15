@@ -92,10 +92,24 @@ class NodriverAgent(BaseBrowserAgent):
             "--no-default-browser-check",
             "--disable-infobars",
             "--disable-notifications",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--no-dbus-config",
         ]
 
         if self._proxy:
-            browser_args.append(f"--proxy-server={self._proxy}")
+            if "@" in self._proxy:
+                from utils.anti_bot import create_proxy_auth_extension
+                ext_path = create_proxy_auth_extension(self._proxy, self.worker_id)
+                if ext_path:
+                    logger.info(f"[Nodriver] 🔑 Using AUTH proxy extension: {self._proxy}")
+                    # In Nodriver, we MUST NOT use --proxy-server if we use the extension
+                    # the extension handles the proxy routing via chrome.proxy.settings
+                    browser_args.append(f"--load-extension={ext_path}")
+                else:
+                    browser_args.append(f"--proxy-server={self._proxy}")
+            else:
+                browser_args.append(f"--proxy-server={self._proxy}")
 
         self._browser = await nd.start(
             browser_args=browser_args,
@@ -130,6 +144,19 @@ class NodriverAgent(BaseBrowserAgent):
             self._browser = self._page = None
             self._reconnect_count = 0
             logger.info("[Nodriver] Browser closed.")
+
+    async def rotate_proxy(self) -> None:
+        """Fetch a new proxy and restart the Nodriver browser session."""
+        from utils.proxy_manager import get_next_proxy
+        new_proxy = get_next_proxy()
+        
+        if new_proxy:
+            logger.info(f"[Nodriver-Worker-{self.worker_id}] ♻️  Rotating proxy to: {new_proxy}")
+            self._proxy = new_proxy
+            await self.close()
+            await self.start()
+        else:
+            logger.warning("[Nodriver] No fresh proxy available for rotation.")
 
     # ─────────────────────────────────────────────────────────────────
     # STALE CONNECTION RECOVERY
@@ -247,7 +274,10 @@ class NodriverAgent(BaseBrowserAgent):
             await self._page.get(url)
             await action_delay_async("read_wait")
 
-            await self._handle_captcha_if_present()
+            interrupted = await self._handle_captcha_if_present()
+            if interrupted:
+                logger.info("[Nodriver] Re-trying AI search after rotation...")
+                return await self.search_google_ai(query)
 
             content = await self.get_page_source()
             if not content:
@@ -346,11 +376,10 @@ class NodriverAgent(BaseBrowserAgent):
     # CAPTCHA INTEGRATION
     # ─────────────────────────────────────────────────────────────────
 
-    async def _handle_captcha_if_present(self) -> None:
+    async def _handle_captcha_if_present(self) -> bool:
         """
         Detect CAPTCHA and route to the decision-tree solver.
-        Nodriver's stealth mode prevents ~90% of CAPTCHAs from appearing;
-        this handler catches the remaining edge cases.
+        Returns True if a rotation was triggered (session restarted).
         """
         html          = await self.get_page_source()
         captcha_type  = detect_captcha_type(html)
@@ -358,7 +387,10 @@ class NodriverAgent(BaseBrowserAgent):
         if captcha_type:
             solved = await solve_captcha_async(self._page, captcha_type)
             if not solved:
-                logger.warning("[Nodriver] CAPTCHA not solved — page may be incomplete.")
+                logger.warning("[Nodriver] CAPTCHA not solved — TRIGGERING PROXY ROTATION.")
+                await self.rotate_proxy()
+                return True
+        return False
 
     # ─────────────────────────────────────────────────────────────────
     # PRIVATE HELPERS

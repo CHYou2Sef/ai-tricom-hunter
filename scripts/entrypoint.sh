@@ -2,10 +2,18 @@
 # ╔════════════════════════════════════════════════════════════════╗
 # ║  entrypoint.sh - Container Execution Environment Setup         ║
 # ╚════════════════════════════════════════════════════════════════╝
-
 set -e
 
-# ── 1. Virtual Display (Xvfb) ───────────────────────────────────────
+# ── 1. Recovery & Cleanup ───────────────────────────────────────────
+# Remove stale Xvfb lock files (prevents "Server already active" error)
+rm -f /tmp/.X1-lock /tmp/.X99-lock
+
+# Ensure local persistence directories are writable
+mkdir -p /app/logs /app/WORK /app/browser_profiles
+# Don't fail if we can't chmod (e.g. read-only mounts), but try to ensure write access.
+chmod 777 /app/logs /app/WORK /app/browser_profiles /tmp || true
+
+# ── 2. Virtual Display (Xvfb) ───────────────────────────────────────
 # Starts a fake, invisible monitor. This takes near-zero resources
 # but allows Chrome to run in "Headed" mode to bypass bot detectors.
 echo "🖥️  Starting Xvfb on Display :99 (Invisible Headed Mode)..."

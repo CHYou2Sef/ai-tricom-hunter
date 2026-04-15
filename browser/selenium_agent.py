@@ -106,6 +106,8 @@ class SeleniumAgent(BaseBrowserAgent):
             "--disable-notifications",
             "--lang=fr-FR",
             "--disable-extensions",
+            "--disable-gpu",
+            "--no-dbus-config",
         ]
         if not config.BROWSER_USE_SANDBOX:
             common_args += ["--no-sandbox", "--disable-setuid-sandbox"]
@@ -118,11 +120,12 @@ class SeleniumAgent(BaseBrowserAgent):
 
         # ── Proxy Configuration ──
         import os
+        from utils.anti_bot import create_proxy_auth_extension
         proxy = os.getenv("PROXY") or getattr(config, "PROXY_DEFAULT", None)
         if proxy:
             if "@" in proxy:
                 # Proxy requires authentication (user:pass@host:port)
-                ext_path = self._create_proxy_auth_extension(proxy)
+                ext_path = create_proxy_auth_extension(proxy, self.worker_id)
                 if ext_path:
                     logger.info(f"[Selenium] 🔑 Using AUTH proxy with extension: {proxy}")
                     common_args.append(f"--load-extension={ext_path}")
@@ -348,8 +351,8 @@ class SeleniumAgent(BaseBrowserAgent):
             return True
         except Exception as exc:
             msg = str(exc)
-            if "ERR_TUNNEL_CONNECTION_FAILED" in msg or "ERR_PROXY_CONNECTION_FAILED" in msg:
-                logger.error(f"[Selenium] 🛑 Proxy connection FAILED (Tunnel Error). Rotating...")
+            if any(err in msg for err in ["ERR_TUNNEL_CONNECTION_FAILED", "ERR_PROXY_CONNECTION_FAILED", "invalid session id"]):
+                logger.error(f"[Selenium] 🛑 Session/Proxy FAILED (Self-Healing triggered). Rotating...")
                 await self.rotate_proxy()
                 # Retry once after rotation
                 try:
@@ -389,11 +392,11 @@ class SeleniumAgent(BaseBrowserAgent):
             return text
 
         except Exception as exc:
-            msg = str(exc)
-            if "ERR_TUNNEL_CONNECTION_FAILED" in msg or "ERR_PROXY_CONNECTION_FAILED" in msg:
-                logger.error(f"[Selenium] 🛑 Proxy FAILED during AI search. Rotating...")
+            msg = str(exc).lower()
+            if any(err in msg for err in ["err_tunnel_connection_failed", "err_proxy_connection_failed", "invalid session id"]):
+                logger.error(f"[Selenium] 🛑 Session/Proxy FAILED during AI search. Self-healing...")
                 await self.rotate_proxy()
-                # Recurse once with new proxy
+                # Recurse once with new proxy/session
                 return await self.search_google_ai_mode(prompt)
             
             logger.error(f"[Selenium] search_google_ai_mode error: {exc}")

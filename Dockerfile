@@ -29,6 +29,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation \
     wget \
     ca-certificates \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf2.0-0 \
+    libgtk-3-0 \
+    libxshmfence1 \
+    libglu1-mesa \
     && rm -rf /var/lib/apt/lists/*
 
 # ── 2. (Removed Node.js - Native Python Validation is used) ────────────
@@ -50,14 +57,16 @@ RUN uv pip install --system -r requirements.txt
 RUN patchright install chromium
 
 # ── 6. Copy Application Source Code ───────────────────────────────────
-COPY . .
+# First, copy and fix entrypoint specifically to prevent Windows 'file not found' errors
+COPY scripts/entrypoint.sh /app/scripts/entrypoint.sh
+RUN chmod +x /app/scripts/entrypoint.sh
 
-# Ensure entrypoint script is executable
-RUN chmod +x scripts/entrypoint.sh
+# Then copy the rest
+COPY . .
 
 # ── 7. Configure Container Startup ────────────────────────────────────
 # The entrypoint launches Xvfb and validates the agent before running main.py
-ENTRYPOINT ["/app/scripts/entrypoint.sh"]
+ENTRYPOINT ["/bin/bash", "/app/scripts/entrypoint.sh"]
 
 # Default command if none is provided
 CMD ["python", "main.py"]

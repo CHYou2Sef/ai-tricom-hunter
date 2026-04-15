@@ -16,6 +16,7 @@ AGENTS.md
 ARCHITECTURE.md
 CLAUDE.md
 GEMINI.md
+.agents/
 
 # ── Project Specific ──
 browser_profiles/
@@ -28,6 +29,10 @@ browser_profiles/
 *.xls
 *.csv
 *.json
+benchmark_checkpoint.json
+telemetry.json
+browser_profiles/**
+!browser_profiles/
 
 # ── Work Pipeline (Temporary Data) ──
 WORK/**/*

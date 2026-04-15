@@ -104,6 +104,7 @@ async def run_engine_benchmark(
     rows: List[ExcelRow],
     telemetry: BenchmarkTelemetry,
     search_only: bool = False,
+    start_idx: int = 0,
 ) -> None:
     """
     Execute the full search pipeline on `rows` using a single agent instance.
@@ -166,7 +167,7 @@ async def run_engine_benchmark(
         if i % 25 == 0 or i == len(rows):
             stats = telemetry._engines[engine_name].compute()
             logger.info(
-                f"  [{engine_name}] Row {i}/{len(rows)}  |  "
+                f"  [{engine_name}] Row {start_idx + i}/{start_idx + len(rows)}  |  "
                 f"DONE={stats['rows_done']}  NO_TEL={stats['rows_no_tel']}  "
                 f"ERR={stats['rows_error']}  |  MTTI={stats['mtti_sec']}s"
             )
@@ -174,6 +175,9 @@ async def run_engine_benchmark(
         # Human-like delay between rows (mirrors production behaviour)
         import random
         await asyncio.sleep(random.uniform(config.MIN_DELAY_SECONDS, config.MAX_DELAY_SECONDS))
+        
+        # Save row-level checkpoint (adding the start offset)
+        save_checkpoint(engine_name, start_idx + i)
 
     try:
         await agent.close()
@@ -207,10 +211,12 @@ async def main() -> None:
         f"Engines to test: {args.engines}"
     )
 
-    # Fresh telemetry for this run
+    # Cumulative telemetry (loads existing results from WORK/telemetry.json)
     telemetry = BenchmarkTelemetry()
     for name in args.engines:
         telemetry.register_engine(name)
+    
+    logger.info("📈  Cumulative results tracking active. Previous data preserved.")
 
     # Run each engine independently and sequentially
     for engine_name in args.engines:
@@ -223,19 +229,55 @@ async def main() -> None:
             row.phone = None
             row.status = "PENDING"
 
+        # Check if engine is already fully done in checkpoint
+        checkpoint = load_checkpoint()
+        last_row = checkpoint.get(engine_name, 0)
+        
+        if last_row >= len(rows_to_process):
+            logger.info(f"⏭️   Engine '{engine_name}' already completed in previous run. Skipping.")
+            continue
+
         await run_engine_benchmark(
             engine_name=engine_name,
-            rows=rows_to_process,
+            rows=rows_to_process[last_row:], # Start from where we left off
             telemetry=telemetry,
             search_only=args.search_only,
+            start_idx=last_row,
         )
+
+        # Save results for this engine
+        telemetry.finalize()
 
         # Cooldown between engines
         logger.info("⏸️   Cooling down 30s before next engine...")
         await asyncio.sleep(30)
 
-    # Final report — dual output (console + telemetry.json)
-    telemetry.finalize()
+    # All engines complete
+    logger.info("🏁  All benchmarks finished.")
+    # Clear checkpoint on full success
+    checkpoint_path = Path(config.WORK_DIR) / "benchmark_checkpoint.json"
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
+
+
+def load_checkpoint() -> dict:
+    path = Path(config.WORK_DIR) / "benchmark_checkpoint.json"
+    if path.exists():
+        try:
+            import json
+            return json.loads(path.read_text())
+        except:
+            return {}
+    return {}
+
+
+def save_checkpoint(engine: str, row_idx: int):
+    path = Path(config.WORK_DIR) / "benchmark_checkpoint.json"
+    import json
+    data = load_checkpoint()
+    data[engine] = row_idx
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2))
 
 
 if __name__ == "__main__":

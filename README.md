@@ -20,12 +20,18 @@ This project is built on a highly portable, cross-platform architecture:
 The production target requires absolutely ZERO setups. No Python, no Node.js, no environments. Just Docker.
 
 1. Ensure Docker Desktop is installed.
-2. Put your `.env` in the root folder alongside `docker-compose.yml`.
-3. Open terminal/PowerShell and run:
+2. Put your `.env` in the root folder.
+3. Launch with the performance/security flags (Fedora/Linux aware):
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
-The agent starts in the background and watches your `WORK/INCOMING/` folder.
+The agent starts in the background, handles SELinux/Permissions automatically, and watches your `WORK/INCOMING/` folder.
+
+### ⚙️ Multi-Worker Scaling
+To double your speed, update `.env`:
+```bash
+MAX_CONCURRENT_WORKERS=3  # Launch 3 browsers in parallel
+```
 
 ### Option B: Local Developer setup (Linux/macOS)
 If you wish to develop and test locally, use the one-shot dev script.

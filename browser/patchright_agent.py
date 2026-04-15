@@ -113,6 +113,8 @@ class PatchrightAgent(BaseBrowserAgent):
 
         launch_args.extend([
             "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--no-dbus-config",
             f"--window-size={vp['width']},{vp['height']}",
             # NOTE: --disable-blink-features=AutomationControlled is intentionally
             # OMITTED here. Patchright adds it automatically at the binary level.

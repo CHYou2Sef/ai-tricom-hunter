@@ -206,6 +206,42 @@ class BenchmarkTelemetry:
     def __init__(self):
         self._engines: Dict[str, TierStats] = {}
         self._benchmark_start_ts: float = time.monotonic()
+        self.load_existing()
+
+    def load_existing(self) -> None:
+        """Load existing telemetry data from disk to support cumulative benchmarks."""
+        if not TELEMETRY_PATH.exists():
+            return
+        
+        try:
+            with open(TELEMETRY_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # Reconstruct TierStats for each engine
+            for engine_data in data.get("engines", []):
+                name = engine_data["engine"]
+                stats = TierStats(name)
+                stats.rows_attempted = engine_data.get("rows_attempted", 0)
+                stats.rows_done = engine_data.get("rows_done", 0)
+                stats.rows_no_tel = engine_data.get("rows_no_tel", 0)
+                stats.rows_error = engine_data.get("rows_error", 0)
+                stats.interruptions = engine_data.get("interruption_log", [])
+                stats.captcha_count = engine_data.get("captcha_blocks", 0)
+                stats.ip_ban_count = engine_data.get("ip_ban_blocks", 0)
+                stats.total_latency_sec = engine_data.get("avg_latency_sec", 0) * stats.rows_attempted
+                
+                # For session time, we treat existing data as a "previous session" block
+                # We can't perfectly recover monotonic time, so we adjust session_start_ts
+                # to reflect the already accumulated total_session_sec
+                prev_session_sec = engine_data.get("total_session_sec", 0)
+                stats.session_start_ts = time.monotonic() - prev_session_sec
+                stats._last_clean_ts = time.monotonic()
+                
+                self._engines[name] = stats
+            
+            logger.info(f"[Telemetry] Loaded existing data for {len(self._engines)} engines.")
+        except Exception as exc:
+            logger.error(f"[Telemetry] Failed to load existing telemetry: {exc}")
 
     def register_engine(self, name: str) -> None:
         """Register a named engine before the benchmark run starts."""
