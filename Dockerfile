@@ -49,8 +49,8 @@ WORKDIR /app
 
 # ── 4. Install Python Dependencies ────────────────────────────────────
 # Copy requirements first to leverage Docker Layer Caching
-COPY requirements.txt .
-RUN uv pip install --system -r requirements.txt
+COPY requirements-prod.txt .
+RUN uv pip install --system -r requirements-prod.txt
 
 # ── 5. Install Stealth Browsers ───────────────────────────────────────
 # Patchright requires custom Chromium binaries to bypass Kasada/Cloudflare

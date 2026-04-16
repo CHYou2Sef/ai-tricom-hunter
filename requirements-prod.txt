@@ -1,25 +1,33 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  requirements-prod.txt                                           ║
 # ║  Streamlined dependencies for production (Docker) environments   ║
-# ║  Excludes local dev tools, benchmark tools, and optional/bloated ║
-# ║  engines (like Camoufox or raw Selenium) to minimize footprint   ║
+# ║  Excludes local dev tools, benchmark tools, and optional bloat.  ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-# Core data processing
+# Core data processing & Excel
 pandas>=2.2.0
+openpyxl>=3.1.2
 
 # The Primary Browsers (Patchright, Nodriver, Crawl4AI)
-patchright>=1.58.2
-nodriver>=0.48.1
-Crawl4AI>=0.8.6
+patchright>=1.51.0
+nodriver>=0.34
+Crawl4AI>=0.4.0
 httpx[http2]>=0.27.0
+
+# Text Extraction & Parsing
 beautifulsoup4>=4.12.0
 lxml>=5.1.0
+selectolax>=0.3.21
 
-# LLM Fallback (Minimal client)
+# 24/7 Surveillance & Async I/O
+watchdog>=4.0.0
+aiofiles>=23.2.1
+
+# LLM & AI Clients
 google-generativeai>=0.4.0
 
-# Utility & Parsing
+# Utility & Config
 python-dotenv>=1.0.0
 colorama>=0.4.6
-openpyxl>=3.1.2
+fastapi>=0.110.0
+uvicorn>=0.27.0

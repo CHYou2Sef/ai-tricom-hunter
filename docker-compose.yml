@@ -18,8 +18,9 @@ services:
     env_file:
       - .env
     volumes:
-      - ./WORK:/app/WORK:Z
-      - ./logs:/app/logs:Z
+      # Direct Wormhole: Map your Windows Host folder to the Container's WORK directory
+      - ${HOST_WORK_DIR:-./WORK}:/app/WORK:Z
+      - ${HOST_LOG_DIR:-./logs}:/app/logs:Z
       # Map browser profiles to a hidden folder to avoid host pollution
       - ./browser_profiles:/app/browser_profiles:Z
     
