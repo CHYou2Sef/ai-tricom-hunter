@@ -116,7 +116,7 @@ async def _search_and_extract_phone(row: ExcelRow, agent, query: str, source_tag
     if not phone and metadata.get("heuristic_phones"):
         phone = metadata["heuristic_phones"][0]
     if not phone and content:
-        phones = extract_phones(content)
+        phones = extract_phones(content, source_label=source_tag)
         phone = get_best_phone(phones)
     if not phone and content:
         phone = await _extract_geo_phone(row, agent, content)
@@ -132,7 +132,7 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
     elif isinstance(phones_raw, str):
         best = normalize_phone(phones_raw)
     if not best:
-        candidates = extract_phones(raw_text)
+        candidates = extract_phones(raw_text, source_label="google_ai_mode")
         best = get_best_phone(candidates)
     
     field_map = {
@@ -161,12 +161,13 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
                 break
     return best
 
-async def process_row(row: ExcelRow, agent) -> None:
+async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Optional[int] = None) -> None:
     if row.status == "DONE" or (row.status in ("SKIP", "NO TEL") and not config.REPROCESS_FAILED_ROWS):
         logger.info(f"[Agent] Row #{row.row_index} SKIPPED — status={row.status}.")
         return
 
-    logger.info(f"[Agent] Processing row #{row.row_index} | {row.get_search_name()}")
+    progress_str = f"{idx}/{total}" if idx and total else f"#{row.row_index}"
+    logger.info(f"[Agent] Processing row {progress_str} | {row.get_search_name()}")
     row.processing_start_ts = time.perf_counter()
     best_phone = None
 
@@ -191,3 +192,10 @@ async def process_row(row: ExcelRow, agent) -> None:
     row.phone = best_phone
     row.status = "DONE" if best_phone else "NO TEL"
     row.processing_end_ts = time.perf_counter()
+
+    # 🚀 THE HARVEST LOG: Final explicit visibility for the user
+    elapsed = round(row.processing_end_ts - row.processing_start_ts, 1)
+    if best_phone:
+        logger.info(f"🏆 [Row {progress_str}] HARVESTED: {best_phone} (Tier: {agent.__class__.__name__}) | Time: {elapsed}s")
+    else:
+        logger.warning(f"🔦 [Row {progress_str}] DEPLETED: No phone found (Tier: {agent.__class__.__name__}) | Time: {elapsed}s")

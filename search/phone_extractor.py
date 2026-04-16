@@ -49,17 +49,17 @@ _META_RE       = re.compile(r'content=["\'][^\s"\']*?(?:tel|phone|telephone):([+
 # PUBLIC API
 # ──────────────────────────────────────────────────────────────────────────────
 
-def extract_phones(text: str) -> List[str]:
+def extract_phones(text: str, source_label: Optional[str] = None) -> List[str]:
     """
     Extract phone numbers from plain text (AI snippets, page text).
     Returns a deduplicated, normalised list.
     """
     if not text:
         return []
-    return _dedupe_and_log(_find_in_text(text))
+    return _dedupe_and_log(_find_in_text(text), source_label)
 
 
-def extract_phones_from_html(html: str) -> List[str]:
+def extract_phones_from_html(html: str, source_label: Optional[str] = None) -> List[str]:
     """
     Extract phone numbers from raw HTML page source.
     Scans in priority order:
@@ -91,7 +91,7 @@ def extract_phones_from_html(html: str) -> List[str]:
     clean_text = re.sub(r'<[^>]+>', ' ', html)
     found.extend(_find_in_text(clean_text))
 
-    return _dedupe_and_log(found)
+    return _dedupe_and_log(found, source_label)
 
 
 def get_best_phone(phones: List[str]) -> Optional[str]:
@@ -155,7 +155,7 @@ def _match_and_normalize(pattern: re.Pattern, text: str) -> List[str]:
     return results
 
 
-def _dedupe_and_log(phones: List[str]) -> List[str]:
+def _dedupe_and_log(phones: List[str], source_label: Optional[str] = None) -> List[str]:
     """Deduplicate while preserving priority order, then log."""
     seen = set()
     unique = []
@@ -163,8 +163,10 @@ def _dedupe_and_log(phones: List[str]) -> List[str]:
         if p not in seen:
             seen.add(p)
             unique.append(p)
+    
     if unique:
-        logger.info(f"[PhoneExtractor] Found {len(unique)} phone(s): {unique}")
+        label = f" ({source_label})" if source_label else ""
+        logger.info(f"✨ [PhoneExtractor] Found {len(unique)} phone(s){label}: {unique}")
     else:
         logger.debug("[PhoneExtractor] No phone numbers found.")
     return unique

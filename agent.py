@@ -128,7 +128,7 @@ async def _worker_process_row(row: ExcelRow, sem: asyncio.Semaphore, save_lock: 
 
         try:
             # 1. PEFORM SEARCH (Specialized Agent)
-            await process_row(row, agent)
+            await process_row(row, agent, idx=idx, total=total)
             
             # 2. PERFORM ENRICHMENT (Specialized Agent)
             if row.status != "SKIP":

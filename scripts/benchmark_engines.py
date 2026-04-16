@@ -145,8 +145,12 @@ async def run_engine_benchmark(
             if result:
                 # Quick phone check without full enrichment
                 from search.phone_extractor import extract_phones
-                phones = extract_phones(result)
+                phones = extract_phones(result, source_label=engine_name)
                 row.phone = phones[0] if phones else None
+                
+                # 🏆 THE HARVEST LOG: Immediate feedback with progression
+                if row.phone:
+                    logger.info(f"🏆 [{engine_name.upper()}] Row {i}/{len(rows)} HARVESTED: {row.phone}")
 
             status = "DONE" if row.phone else "NO TEL"
 
