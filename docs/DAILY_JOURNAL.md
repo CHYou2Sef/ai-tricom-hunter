@@ -7,6 +7,20 @@ Ce document trace l'historique complet de l'évolution du projet **AI Phone Hunt
 analyser agent.log et debug_archive.log et @terminal:python puis expliquer dans un rapport techniques les problemes , les bugs , les erreurs , .. puis proposer des solution stable et robust .. ;
 Repondre aux questions : - combien de foix le playwriter est success de lancer apres qu'il soit bloquer ? comment il etait bloquer ?; combien de foix les autre tier sont success ?; pourquoi l'agent est maintenant bloquer ?
 
+## 2026-04-16 (Evening): Industrial Harvest & CI/CD Automation
+
+### 🏆 "The Harvest" Real-Time Visibility
+- **Harvest Trophy Logs**: Implemented a celebratory logging system. The terminal now displays a trophy emoji (`🏆`) and the exact extracted phone number in real-time. This provides immediate visual confirmation of the agent's productivity without scrolling through verbose debug logs.
+- **Progress Ratio Logic**: Added `current/total` counters to every single row log (e.g., `Row 42/1000`). This allows the manager to estimate remaining time at a glance.
+- **Source-Labeled Extraction**: Upgraded the `PhoneExtractor` and `BenchmarkRunner` to tag every finding with its source (e.g., `[SELENIUM]`, `[AI_MODE]`). This makes it easy to spot which tiers are currently "harvesting" the most data.
+
+### 🛠️ Industrial CI/CD & Deployment
+- **Fail-Safe Update Scripts**: Created `scripts/update.sh` (Linux) and `scripts/update.bat` (Windows). These scripts handle the full update lifecycle: `git pull` -> `docker build` -> `container replacement` -> `disk cleanup`. This eliminates accidental "container name conflicts" during redeployment.
+- **Telemetry Resilience (KeyError Fix)**: Hotfixed a critical crash in the benchmark engine. The system now uses "Safe-Get" logic when reading legacy `telemetry.json` files, ensuring that updates to the metrics schema never break existing data archives.
+- **Smart Gitignore**: Fine-tuned `.gitignore` to allow tracking of production environment templates (`.env.prod`) and project documentation, while keeping local secrets strictly private.
+
+---
+
 ## 2026-04-16 (Noon): Target PC Optimization (Windows/HDD/Docker)
 
 ### 🏎️ HDD & RAM Performance Hardening

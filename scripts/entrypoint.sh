@@ -8,6 +8,10 @@ set -e
 # Remove stale Xvfb lock files (prevents "Server already active" error)
 rm -f /tmp/.X1-lock /tmp/.X99-lock
 
+# Auto-heal Phantom Locks: Remove agent singleton lock if container was forcefully killed
+echo "🔓 Removing singleton locks for Auto-healing..."
+rm -f /app/WORK/.agent.lock
+
 # Ensure local persistence directories are writable
 mkdir -p /app/logs /app/WORK /app/browser_profiles
 

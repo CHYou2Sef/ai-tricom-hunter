@@ -31,7 +31,7 @@ def build_agent_query(row: ExcelRow) -> str:
 
 async def _search_knowledge_panel_phone(row: ExcelRow, agent, query: str) -> Optional[str]:
     row.search_queries_used.append(f"KP: {query}")
-    logger.info(f"    [Tier 0] Knowledge Panel Search: {query}")
+    logger.info(f"    ├─ [Tier 0] Knowledge Panel Search: '{query}'")
 
     success = await agent.submit_google_search(query)
     if not success:
@@ -102,6 +102,7 @@ async def _extract_geo_phone(row: ExcelRow, agent, page_content: str) -> Optiona
 
 async def _search_and_extract_phone(row: ExcelRow, agent, query: str, source_tag: str) -> Tuple[Optional[str], Optional[str]]:
     row.search_queries_used.append(query)
+    logger.info(f"    ├─ [{source_tag.upper()}] Query: '{query}'")
     content = await agent.search_google_ai(query)
     if content:
         row.raw_ai_responses.append({"text": content, "source": source_tag, "query": query})
@@ -167,7 +168,10 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
         return
 
     progress_str = f"{idx}/{total}" if idx and total else f"#{row.row_index}"
-    logger.info(f"[Agent] Processing row {progress_str} | {row.get_search_name()}")
+    # 🔍 VERIFICATION LAYER: Shows exactly what data is being used for this run
+    siren_log = row.siren if row.siren else "N/A"
+    logger.info(f"🔍 [Verification] Row {progress_str} | Target: '{row.nom}' | SIREN: {siren_log} | Localité: '{row.adresse}'")
+    
     row.processing_start_ts = time.perf_counter()
     best_phone = None
 
