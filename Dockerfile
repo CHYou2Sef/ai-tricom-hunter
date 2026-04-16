@@ -59,10 +59,13 @@ RUN patchright install chromium
 # ── 6. Copy Application Source Code ───────────────────────────────────
 # First, copy and fix entrypoint specifically to prevent Windows 'file not found' errors
 COPY scripts/entrypoint.sh /app/scripts/entrypoint.sh
-RUN chmod +x /app/scripts/entrypoint.sh
+RUN sed -i 's/\r$//' /app/scripts/entrypoint.sh && chmod +x /app/scripts/entrypoint.sh
 
 # Then copy the rest
 COPY . .
+
+# Professional Final Pass: Ensure all shell scripts have Linux LF endings
+RUN find /app/scripts -name "*.sh" -exec sed -i 's/\r$//' {} +
 
 # ── 7. Configure Container Startup ────────────────────────────────────
 # The entrypoint launches Xvfb and validates the agent before running main.py

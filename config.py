@@ -29,53 +29,57 @@ except ImportError:
 load_dotenv()
 
 # ═══════════════════════════════════════════════════════════════════
-# 📁  PATHS
+# 📁  PATHS & ENVIRONMENT
 # ═══════════════════════════════════════════════════════════════════
 
 # Absolute path to the folder where THIS file (config.py) lives.
 BASE_DIR = Path(__file__).resolve().parent
 
-# ── NEW CENTRALIZED WORK DIRECTORY ──
+# ── SINGLETON FLAGS ──
+DOCKER_ENV = os.getenv("DOCKER_ENV", "false").lower() == "true"
+
+# ── CENTRALIZED WORK DIRECTORY ──
 # Everything operational (watching, outputs, archives) happens here.
-WORK_DIR = BASE_DIR / "WORK"
+# Inside Docker, this should be /app/WORK. On Windows host, it's mapped via volume.
+WORK_DIR = Path(os.getenv("WORK_DIR", str(BASE_DIR / "WORK")))
 
 # ── Force Crawl4AI to use a writable workspace directory ──
-CRAWL4AI_HOME = BASE_DIR / ".crawl4ai_cache"
+CRAWL4AI_HOME = Path(os.getenv("CRAWL4AI_HOME", str(BASE_DIR / ".crawl4ai_cache")))
 os.environ["CRAWL4AI_HOME"] = str(CRAWL4AI_HOME)
 CRAWL4AI_HOME.mkdir(parents=True, exist_ok=True)
 
 # The entry point for ALL raw files. Place your dirty/new Excel files here.
-INCOMING_DIR = WORK_DIR / "INCOMING"
+INCOMING_DIR = Path(os.getenv("INCOMING_DIR", str(WORK_DIR / "INCOMING")))
 
 # The internal processing folders. The agent watches these buckets.
-INPUT_DIR      = WORK_DIR
-INPUT_STD_DIR  = WORK_DIR / "STD"   # SIREN + RS + Adresse
-INPUT_SIR_DIR  = WORK_DIR / "SIREN" # SIREN + Adresse only
-INPUT_RS_DIR   = WORK_DIR / "RS"    # RS + Adresse only
-INPUT_OTHER_DIR = WORK_DIR / "OTHERS" # partial data (Not to processed)
+INPUT_DIR       = WORK_DIR
+INPUT_STD_DIR   = WORK_DIR / "STD"
+INPUT_SIR_DIR   = WORK_DIR / "SIREN"
+INPUT_RS_DIR    = WORK_DIR / "RS"
+INPUT_OTHER_DIR = WORK_DIR / "OTHERS"
 
 # ── LIVE OUTPUTS ───────────────────────────────────────────────
-# These subfolders inside WORK/output/ hold results based on the input bucket.
-# We also use them for the "daily fusion" files.
 OUTPUT_ROOT    = WORK_DIR / "output"
 OUTPUT_RS_ADR  = OUTPUT_ROOT / "RS_Adr"
 OUTPUT_SIR_ADR = OUTPUT_ROOT / "Sir_Adr"
 OUTPUT_DEFAULT = OUTPUT_ROOT / "Results"
 
 # ── FINAL ARCHIVES ─────────────────────────────────────────────
-# Original files go here after they are split/moved from INCOMING.
 ARCHIVE_BACKUP_DIR = WORK_DIR / "ARCHIVE" / "BACKUP"
-
-# Final results for the day.
 OUTPUT_SUCCEED_DIR = WORK_DIR / "ARCHIVE" / "SUCCEED"
 OUTPUT_FAILED_DIR  = WORK_DIR / "ARCHIVE" / "FAILED"
 
-# Compatibility aliases (legacy names pointing to new structure)
+# Compatibility aliases
 ARCHIVE_DIR        = ARCHIVE_BACKUP_DIR
 OUTPUT_ARCHIVE_DIR = OUTPUT_SUCCEED_DIR
 
-# Log files go here (one log file per day)
-LOG_DIR = BASE_DIR / "logs"
+# Log files go here
+LOG_DIR = Path(os.getenv("LOG_DIR", str(BASE_DIR / "logs")))
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── OUTPUT SETTINGS ──
+STATUS_COLUMN_NAME = os.getenv("STATUS_COLUMN_NAME", "Etat_IA")
+READY_DIR          = WORK_DIR / "READY"
 
 # ── OUTPUT SETTINGS ────────────────────────────────────────────────
 # The column name for the agent's processing result (Done, No Tel, etc.)
@@ -94,24 +98,24 @@ def get_output_dir(input_folder_name: str) -> Path:
     return path
 
 
-# ── Parallelism & Future Scope ──
-# 3 Workers = 3 simultaneous browser windows
+# ── Parallelism & Professional Throttling ──
+# MAX_CONCURRENT_WORKERS = number of simultaneous browser windows
 MAX_CONCURRENT_WORKERS = int(os.getenv("MAX_CONCURRENT_WORKERS", "1"))
 BROWSER_USE_SANDBOX    = os.getenv("BROWSER_USE_SANDBOX", "false").lower() == "true"
-LANGCHAIN_ENABLED      = os.getenv("LANGCHAIN_ENABLED", "false").lower() == "true"
+
+# ── HDD OPTIMIZATION ──
+# How often (in rows) the agent saves the Excel file back to disk.
+# High values (50-100) are recommended for HDDs to reduce write operations.
+SAVE_INTERVAL = int(os.getenv("SAVE_INTERVAL", "50"))
 
 # Number of rows per RETRY chunk file sent back to incoming/.
 RETRY_CHUNK_SIZE = int(os.getenv("RETRY_CHUNK_SIZE", "50"))
 
 # ── File Decomposition (Chunking) ──
-# How many rows per sub-file during the initial split. 
-# 500 is the standard for long-running reliability.
 DECOMPOSITION_CHUNK_SIZE = int(os.getenv("DECOMPOSITION_CHUNK_SIZE", "1000"))
 
 # ── Recovery & Second Chance ──
-# Set to True to re-process rows already marked as "NO TEL" or "SKIP".
-# Useful for recovering from previous browser crashes.
-REPROCESS_FAILED_ROWS = True
+REPROCESS_FAILED_ROWS = os.getenv("REPROCESS_FAILED_ROWS", "true").lower() == "true"
 
 # ── Proxy Rotation (Anti-Ban) ──
 PROXY_ENABLED                  = True   # ON by default to solve CAPTCHA problems immediately
@@ -243,8 +247,14 @@ BROWSER_ENGINE = "hybrid"
 #   Linux   →  "/home/yourname/.config/chromium"
 #   Windows →  "C:/Users/YourName/AppData/Local/Chromium/User Data"
 #   macOS   →  "/Users/yourname/Library/Application Support/Chromium"
-# ── Chromium Profile Path — Local to project to avoid permission issues ──
-CHROMIUM_PROFILE_PATH = os.path.expanduser(os.getenv("CHROMIUM_PROFILE_PATH", str(BASE_DIR / "browser_profiles" / "Default")))
+# ── Chromium Profile Path ──
+# Professional Hack: If running in Docker, we force the profile to RAM (/dev/shm)
+# to bypass HDD latency on the Windows host.
+_default_profile = str(BASE_DIR / "browser_profiles" / "Default")
+if DOCKER_ENV and os.path.exists("/dev/shm"):
+    _default_profile = "/dev/shm/ai_hunter_profile"
+    
+CHROMIUM_PROFILE_PATH = os.path.expanduser(os.getenv("CHROMIUM_PROFILE_PATH", _default_profile))
 Path(CHROMIUM_PROFILE_PATH).parent.mkdir(parents=True, exist_ok=True)
 
 # The specific profile folder name inside the profile path
@@ -313,10 +323,12 @@ FALLBACK_ENGINE = "gemini"               # Google Gemini (Deep Search)
 GOOGLE_URL        = "https://www.google.com"
 GEMINI_URL        = "https://gemini.google.com"
 
-# ── LOCAL LLM (OLLAMA) — Vector-less RAG Fallback
+# ── LOCAL LLM (OLLAMA) ──
 OLLAMA_ENABLED  = os.getenv("OLLAMA_ENABLED", "false").lower() == "true"
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+# For Docker Desktop, the host is usually at host.docker.internal
+_ollama_def     = "http://host.docker.internal:11434" if DOCKER_ENV else "http://localhost:11434"
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", _ollama_def)
 OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "60"))
 
 # ── AI Mode — direct URL that activates the 'AI Mode' tab in Google ──
@@ -488,7 +500,7 @@ PHONE_PATTERNS = [
 # ═══════════════════════════════════════════════════════════════════
 
 # How often (seconds) the file watcher polls the INPUT_DIR for new files
-WATCHDOG_POLL_INTERVAL = 5
+WATCHDOG_POLL_INTERVAL = int(os.getenv("WATCHDOG_POLL_INTERVAL", "5"))
 
 # Only process files with these extensions (case-insensitive)
 # Added .json for bulk data industrialization
@@ -496,7 +508,7 @@ ACCEPTED_EXTENSIONS = [".xlsx", ".xls", ".csv", ".json"]
 
 # Wait this many seconds after a file appears before opening it.
 # This prevents reading a file that is still being copied/uploaded.
-FILE_SETTLE_DELAY = 3
+FILE_SETTLE_DELAY = int(os.getenv("FILE_SETTLE_DELAY", "3"))
 
 # ── Geolocation (for search results accuracy) ──
 SET_GEOLOCATION = True

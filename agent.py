@@ -147,7 +147,7 @@ async def _worker_process_row(row: ExcelRow, sem: asyncio.Semaphore, save_lock: 
         elapsed = time.perf_counter() - row_start
         tracker.track_row(elapsed, row.status)
 
-        if idx % 10 == 0 or idx == total:
+        if idx % config.SAVE_INTERVAL == 0 or idx == total:
             async with save_lock:
                 await asyncio.to_thread(save_results, rows, filepath)
 
