@@ -16,7 +16,7 @@ services:
       - DOCKER_ENV=true
 
     env_file:
-      - .env
+      - .env.prod
     volumes:
       # Direct Wormhole: Map your Windows Host folder to the Container's WORK directory
       - ${HOST_WORK_DIR:-./WORK}:/app/WORK:Z

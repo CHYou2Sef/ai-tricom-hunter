@@ -148,8 +148,9 @@ class TierStats:
         avg_latency  = round(self.total_latency_sec / self.rows_attempted, 2) if self.rows_attempted else 0.0
         total_uptime = round(time.monotonic() - self.session_start_ts, 1)
 
-        # MTTI — average seconds of uninterrupted operation between failures
-        uptimes = [ev["uptime_before_sec"] for ev in self.interruptions]
+        # MTTI — average seconds of uninterrupted operation between failures. 
+        # Safely extract uptimes, handling potential missing keys from old logs.
+        uptimes = [ev.get("uptime_before_sec", 0.0) for ev in self.interruptions]
         mtti_sec = round(sum(uptimes) / len(uptimes), 1) if uptimes else total_uptime
 
         return {

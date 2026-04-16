@@ -12,6 +12,7 @@ venv.bak/
 
 # Project metadata
 /scratch/
+/docs/
 /scratch/
 AGENTS.md
 ARCHITECTURE.md
