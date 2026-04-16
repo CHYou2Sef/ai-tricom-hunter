@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>AI Tricom Hunter</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reset.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.min.css">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@700&family=Open+Sans:wght@400;600&display=swap');
+        
+        :root {
+            --primary-blue: #1E428A; /* Carthage Blue */
+            --accent-red: #D22026;   /* Tricom Red */
+            --soft-blue: #F1F5F9;
+            --text-dark: #1E293B;
+            --text-muted: #475569;
+            --border-light: #CBD5E1;
+        }
+
+        .reveal {
+            font-family: 'Open Sans', sans-serif;
+            color: var(--text-dark);
+            background-color: #FFFFFF;
+        }
+        
+        .reveal h1, .reveal h2, .reveal h3 {
+            font-family: 'Merriweather', serif;
+            color: var(--primary-blue);
+            text-transform: none;
+            margin-bottom: 0.5em;
+        }
+
+        .reveal h1 { font-size: 2.2em; color: var(--text-dark); border-bottom: 4px solid var(--accent-red); display: inline-block; padding-bottom: 20px;}
+        .reveal h2 { font-size: 1.6em; color: var(--primary-blue); margin-bottom: 40px;}
+        .reveal h3 { font-size: 1.2em; color: var(--accent-red); margin-top: 20px;}
+        
+        .reveal p, .reveal li {
+            font-size: 1em;
+            line-height: 1.6;
+            color: var(--text-dark);
+            margin-bottom: 15px;
+        }
+
+        .reveal .controls, .reveal .progress { color: var(--primary-blue); }
+        .reveal .slide-number { font-size: 0.6em; color: var(--text-muted); right: 20px; bottom: 20px; }
+
+        .slide-container {
+            padding: 40px;
+        }
+
+        .diagram-box {
+            background-color: var(--soft-blue);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-light);
+            margin-top: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            width: 100%;
+        }
+
+        .svg-container {
+            width: 100%;
+            height: auto;
+            max-height: 500px;
+        }
+
+        .svg-container img {
+            width: 100%;
+            height: auto;
+            border: none;
+            background: none;
+        }
+
+        table.custom-table {
+            width: 100%;
+            margin-top: 30px;
+            border-collapse: collapse;
+            font-size: 0.75em;
+        }
+        table.custom-table th, table.custom-table td {
+            border: 1px solid var(--border-light);
+            padding: 15px;
+            text-align: left;
+        }
+        table.custom-table th { background: var(--primary-blue); color: white; }
+        
+        .highlight { color: var(--accent-red); font-weight: bold; }
+
+        .ticket-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 25px;
+            margin-top: 40px;
+        }
+        .ticket {
+            background: var(--soft-blue);
+            border-top: 4px solid var(--accent-red);
+            padding: 20px;
+            border-radius: 4px;
+            width: 44%;
+            text-align: left;
+            font-size: 0.75em;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        .ticket-title {
+            font-family: 'Merriweather', serif;
+            font-weight: bold;
+            color: var(--primary-blue);
+            margin-bottom: 10px;
+            font-size: 1.5em;
+            border-bottom: 2px solid var(--border-light);
+            padding-bottom: 5px;
+        }
+        .ticket-role { color: var(--accent-red); font-weight: bold; }
+
+        .fixed-logo-container {
+            position: fixed;
+            bottom: 25px;
+            left: 25px;
+            display: flex;
+            gap: 15px;
+            z-index: 1000;
+            pointer-events: none;
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+
+<div class="fixed-logo-container">
+    <img src="../images/logo-tricom.png" style="height: 30px; background:none; box-shadow:none; border:none;">
+    <img src="../images/Université_Carthage_logo.png" style="height: 40px; background:none; box-shadow:none; border:none;">
+</div>
+
+<div class="reveal">
+    <div class="slides">
+
+        <!-- SLIDE 1: TITLE -->
+        <section>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <img src="../images/logo-tricom.png" alt="Tricom Logo" style="height: 60px; border: none; background: none; box-shadow: none;">
+                <img src="../images/Université_Carthage_logo.png" alt="Carthage Logo" style="height: 80px; border: none; background: none; box-shadow: none;">
+            </div>
+            <h1>🚀 AI Tricom Hunter</h1>
+            <h3>Concevoir un Pipeline de Données B2B Multi-Agent Autonome</h3>
+            <p style="margin-top: 30px;"><strong>Projet de Fin d'Études (PFE)</strong></p>
+            <p style="color: var(--secondary-blue);">Systèmes Distribués et IA Appliquée</p>
+        </section>
+
+        <!-- SLIDE 2: PROBLEM -->
+        <section>
+            <h2>🚨 Le Problème Stratégique</h2><br>
+            <p><strong>Le Goulot d'Étranglement Déterministe et la Dégradation des Données</strong></p>
+            <ul>
+                <li>📉 <span class="highlight">La Data :</span> Se dégrader de ~30% par an.</li>
+                <li>❌ <span class="highlight">Scraping Traditionnel :</span> Casser instantanément lors des mises à jour du DOM/UI.</li>
+                <li>❌ <span class="highlight">Systèmes Anti-Bot :</span> Bloquer le scraping séquentiel.</li>
+                <li>❌ <span class="highlight">Code Monolithique :</span> Surcharger le CPU et ralentir le traitement.</li>
+            </ul>
+        </section>
+
+        <!-- SLIDE 3: MARKET GAP -->
+        <section>
+            <h2>⚠️ Le Vide Technologique</h2><br>
+            <table class="custom-table">
+                <tr>
+                    <th>Archétype Technologique</th>
+                    <th>Le Problème (Limites)</th>
+                </tr>
+                <tr>
+                    <td><strong>Agrégateurs Statiques</strong> (Apollo)</td>
+                    <td>Générer des données obsolètes. Couvrir faiblement les PME locales.</td>
+                </tr>
+                <tr>
+                    <td><strong>Automatisation Cloud</strong> (PhantomBuster)</td>
+                    <td>Contourner les Anti-Bots, mais échouer sur les changements du DOM.</td>
+                </tr>
+                <tr>
+                    <td><strong>Génération LLM Pure</strong> (Perplexity)</td>
+                    <td>Risquer d'halluciner des valeurs spécifiques (tel, SIREN, NAF).</td>
+                </tr>
+            </table>
+            <p style="margin-top: 20px;">👉 Aucun système ne parvient à fusionner la validation déterministe avec l'inférence IA à grande échelle.</p>
+        </section>
+
+        <!-- SLIDE 4: SOLUTION -->
+        <section>
+            <h2>💡 La Solution Principale</h2><br>
+            <p><strong>Créer un Moteur Multi-Agent Bifurqué</strong></p>
+            <ul>
+                <li>✅ <span class="highlight">Extraction Stateless :</span> Utiliser le navigateur comme un Sandbox contextuel.</li>
+                <li>✅ <span class="highlight">Orchestration Async :</span> Déployer une machine d'état tolérante aux pannes.</li>
+                <li>✅ <span class="highlight">Validation Sémantique :</span> Synthétiser les données via le Truth Engine (Moteur de Vérité).</li>
+            </ul>
+        </section>
+
+        <!-- SLIDE 5: ARCHITECTURE -->
+        <section>
+            <h2>🏗️ Architecture Globale</h2>
+            <p style="font-size: 0.8em; color: var(--text-muted);">Un système asynchrone découplant l'ingestion de l'exécution multi-agent.</p>
+            <div class="diagram-box">
+                <div class="svg-container">
+                    <img src="../images/arch_globale.svg" alt="Architecture Globa        <!-- SLIDE 6: EXTRACTION CASCADE -->
+        <section>
+            <h2>🧠 Cascade d'Extraction Générative V4</h2><br>
+            <p style="font-size: 0.7em;">Stratégies hiérarchiques avec "Double Check" Expert.</p>
+            <div class="diagram-box">
+                <div class="mermaid">
+                flowchart LR
+                    classDef default fill:#0B1F3A,stroke:#00D1FF,stroke-width:1px,color:#FFFFFF,font-size:12px;
+                    classDef expert fill:#D22026,stroke:#000,stroke-width:2px;
+                    A((Cible)) --> B{Tier 0: AI Mode}
+                    B -- Échec --> BX{Tier 0: EXPERT PROMPT}:::expert
+                    BX -- Échec --> C{Tier 1: JSON-LD}
+                    C -- Échec --> D[Tier 2: DOM Scraping]
+                    D --> E{Tier 3: Gemini RAG}
+                    E --> F((Output Excel Array))
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE: ANTI-DECALAGE -->
+        <section>
+            <h2>🛡️ Fiabilité Data : Anti-Décalage V4</h2>
+            <div style="display: flex; gap: 40px; align-items: start;">
+                <div style="flex: 1; text-align: left;">
+                    <p style="font-size: 0.9em; font-weight: 500; color: var(--accent-red);">Le Problème (V1-V3) :</p>
+                    <p style="font-size: 0.8em;">Le stockage en liste causait des décalages si l'IA ajoutait une colonne imprévue.</p>
+                    <div style="background: rgba(255,100,100,0.1); padding: 10px; border-left: 3px solid var(--accent-red); font-family: monospace; font-size: 0.7em;">
+                        Index [10] = "Etat" ? <br>
+                        "Non, Nouveau_Champ a pris la place !"
+                    </div>
+                </div>
+                <div style="flex: 1; text-align: left;">
+                    <p style="font-size: 0.9em; font-weight: 500; color: #10b981;">La Solution Industrielle (V4) :</p>
+                    <p style="font-size: 0.8em;">Mapping par dictionnaire au moment de l'écriture Excel.</p>
+                    <ul style="font-size: 0.75em;">
+                        <li>Liaison atomique { Header : Valeur }.</li>
+                        <li>Expansion dynamique automatique.</li>
+                        <li>Immunité totale aux colonnes fluctuantes.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- NEW SLIDE: TIER 0 DETAIL -->
+        <section>
+            <h2>🛡️ Tier 0: Expert Mode Innovation</h2>
+            <div style="display: flex; gap: 20px; align-items: center;">
+                <div style="flex: 1; text-align: left;">
+                    <p class="highlight">La stratégie "Double Chance" :</p>
+                    <ul>
+                        <li><span style="color:var(--accent-red)">1. Scan Standard :</span> Rapidité d'ingestion.</li>
+                        <li><span style="color:var(--accent-red)">2. Prompt Expert :</span> Inférence senior pour les cas difficiles.</li>
+                        <li>Extraction des FB, LinkedIn et numéros mobiles gérants.</li>
+                    </ul>
+                </div>
+                <div style="flex: 1; text-align: left; background: #f1f5f9; padding: 20px; border-radius: 8px; font-size: 0.6em;">
+                    <pre><code>"En tant qu'expert chercheur en 
+renseignement B2B avec 20 ans 
+d'expérience... Fouillez FB, LinkedIn..."</code></pre>
+                </div>
+            </div>
+        </section>de site tiers.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- NEW SLIDE: TIER 1 DETAIL -->
+        <section>
+            <h2>⚖️ Tier 1: AEO (Knowledge Panel)</h2>
+            <div style="display: flex; gap: 20px; align-items: center;">
+                <div style="flex: 1.5;">
+                    <img src="../images/tech_tier1_aeo.svg" alt="Tier 1 AEO" style="width: 100%; border-radius: 10px;">
+                </div>
+                <div style="flex: 1; text-align: left;">
+                    <p class="highlight">Fonctionnement :</p>
+                    <ul>
+                        <li>Analyser le DOM du Knowledge Panel de Google.</li>
+                        <li>Cibler le script structural "application/ld+json".</li>
+                        <li>Source certifiée par les profils business Google.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- NEW SLIDE: TIER 2 & 3 DETAIL -->
+        <section>
+            <section>
+                <h2>⚡ Tier 2 &amp; 3: SQO &amp; GEO Fallbacks</h2>
+                <div style="display: flex; gap: 10px;">
+                    <img src="../images/tech_tier2_sqo.svg" alt="Tier 2 SQO" style="width: 48%; border-radius: 10px;">
+                    <img src="../images/tech_tier3_geo.svg" alt="Tier 3 GEO" style="width: 48%; border-radius: 10px;">
+                </div>
+                <p style="font-size: 0.5em; margin-top: 10px;">En cas d'échec des méthodes directes, le système descend dans la cascade pour analyser le contenu brut des sites avec Gemini.</p>
+            </section>
+        </section>
+
+        <!-- SLIDE 7: SEMANTIC TRUTH -->
+        <section>
+            <h2>🧬 Moteur de Vérité (Truth Engine)</h2><br>
+            <p style="font-size: 0.7em;">Résoudre les conflits d'extraction IA via un système de confiance pondéré.</p>
+            <div class="diagram-box">
+                <div class="mermaid">
+                sequenceDiagram
+                    participant Extractor
+                    participant Truth Engine
+                    participant Data Row
+                    Extractor->>Truth Engine: Envoyer les tuples (Valeur, Source)
+                    Truth Engine->>Truth Engine: Calculer: Poids Source x Confiance Native
+                    Truth Engine->>Data Row: Muter la ligne (Assigner la Valeur Gagnante)
+                    Data Row->>Data Row: Mapper les colonnes par clé de dictionnaire
+                </div>
+            </div>
+        </section>
+
+        <!-- NEW SLIDE: EEAT PYRAMID -->
+        <section>
+            <h2>🏆 Fiabilité de la Cascade EEAT</h2>
+            <div style="text-align: center;">
+                <img src="../images/eeat_reliability_pyramid.svg" alt="Reliability Pyramid" style="width: 70%; border-radius: 10px;">
+                <p style="font-size: 0.5em; color: #A0C0E0;">Plus le système monte (Tier 0), plus la certitude est absolue. Plus il descend (Tier 3), plus l'analyse est profonde.</p>
+            </div>
+        </section>
+
+        <!-- SLIDE 8: TECH STACK TICKETS -->
+        <section>
+            <h2>🧪 Rôles de la Tech Stack</h2><br>
+            <div class="ticket-container">
+                <div class="ticket">
+                    <div class="ticket-title">🐍 Python 3.x</div>
+                    <span class="ticket-role">Rôle :</span> Moteur de Base<br>
+                    <span style="color:#8892B0">Exécuter la matrice Async et lier la logique IA aux fichiers Excel.</span>
+                </div>
+                <div class="ticket">
+                    <div class="ticket-title">⚡ Asyncio</div>
+                    <span class="ticket-role">Rôle :</span> Orchestrateur Concurrence<br>
+                    <span style="color:#8892B0">Lancer de nombreuses requêtes web simultanées sans crasher la RAM.</span>
+                </div>
+                <div class="ticket">
+                    <div class="ticket-title">🌐 Playwright CDP</div>
+                    <span class="ticket-role">Rôle :</span> Sandbox Anti-Bot<br>
+                    <span style="color:#8892B0">Contrôler Headless Chrome de manière invisible pour contourner Cloudflare.</span>
+                </div>
+                <div class="ticket">
+                    <div class="ticket-title">🤖 Gemini Generative</div>
+                    <span class="ticket-role">Rôle :</span> Synthétiseur de Données<br>
+                    <span style="color:#8892B0">Utiliser les prompts RAG pour formater du texte brut en JSON structuré.</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE 8.5: PIPELINE STEPS TICKETS -->
+        <section>
+            <h2>⚙️ Étapes du Pipeline</h2><br>
+            <div class="ticket-container">
+                <div class="ticket">
+                    <div class="ticket-title">📥 1. Producer Daemon</div>
+                    <span class="ticket-role">Rôle :</span> Ingestion & Tri<br>
+                    <span style="color:#8892B0">Nettoyer la liste cible et trier les données manquantes dans des Queues.</span>
+                </div>
+                <div class="ticket">
+                    <div class="ticket-title">🔄 2. Async Consumer</div>
+                    <span class="ticket-role">Rôle :</span> Exécuteur de Tâches<br>
+                    <span style="color:#8892B0">Lancer les sessions Playwright et capturer proprement les crashs de navigateurs.</span>
+                </div>
+                <div class="ticket">
+                    <div class="ticket-title">🧬 3. Truth Engine</div>
+                    <span class="ticket-role">Rôle :</span> Validateur Sémantique<br>
+                    <span style="color:#8892B0">Calculer des poids mathématiques pour choisir le résultat IA le plus exact.</span>
+                </div>
+                <div class="ticket">
+                    <div class="ticket-title">💾 4. Audit Writer</div>
+                    <span class="ticket-role">Rôle :</span> Registre Structuré Excel<br>
+                    <span style="color:#8892B0">Assurer le partitionnement propre `Archived_Results` et l'affectation `Etat_IA` stricte.</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE 9: PERFORMANCE -->
+        <section>
+            <h2>📈 Impact et Performance</h2><br>
+            <table class="custom-table">
+                <tr>
+                    <th>Métrique</th>
+                    <th>Monolithe initial</th>
+                    <th>Architecture Multi-Agent</th>
+                </tr>
+                <tr>
+                    <td><strong>Concurrence Max</strong></td>
+                    <td>1 Nœud (Blocage RAM)</td>
+                    <td><span class="highlight">25+ Nœuds</span> (Async WebSocket)</td>
+                </tr>
+                <tr>
+                    <td><strong>Fidélité d'Extraction</strong></td>
+                    <td>~45%</td>
+                    <td><span class="highlight">> 88%</span> (Contraint par RAG)</td>
+                </tr>
+                <tr>
+                    <td><strong>Résistance aux Crashs</strong></td>
+                    <td>Ajustement manuel</td>
+                    <td><span class="highlight">Assignation dictionnaire (Anti-décalage)</span></td>
+                </tr>
+            </table>
+        </section>
+
+        <!-- SLIDE 10: NEXT STEPS -->
+        <section>
+            <h2>🚀 Le Prochain Horizon</h2>
+            <p style="font-size: 0.7em;">Déployer via des Topologies OS-Agnostic et Caching</p>
+            <div class="diagram-box">
+                <div class="mermaid">
+                graph LR
+                    classDef default fill:#0B1F3A,stroke:#00D1FF,stroke-width:2px,color:#FFFFFF;
+                    A(Master Node API \n Docker) -->|Pousser| B(Redis State Queue)
+                    C(Worker Alpha) <-->|Prendre/Ack| B
+                    D(Worker Beta) <-->|Prendre/Ack| B
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE 11: CONCLUSION -->
+        <section>
+            <h2>🎓 Conclusion</h2>
+            <ul>
+                <li>Observer la fin de l'ère du scraping déterministe.</li>
+                <li><span class="highlight">Preuve AI Tricom Hunter :</span> Utiliser l'inférence contextuelle ML résout parfaitement les pannes structurelles du DOM.</li>
+                <br>
+                <li style="list-style: none;">✔ Garantir une Orchestration Async tolérante aux pannes</li>
+                <li style="list-style: none;">✔ Appliquer le RAG pour une inférence pure</li>
+                <li style="list-style: none;">✔ Assurer la stabilité structurelle et le mapping exact des données B2B</li>
+            </ul>
+        </section>
+
+        <section>
+            <h1>🙏 Des Questions ?</h1>
+            <h3 style="margin-top: 20px;">Prêt pour les détails techniques</h3>
+        </section>
+
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+    Reveal.initialize({
+        controls: true,
+        progress: true,
+        center: true,
+        hash: true,
+        slideNumber: true,
+        transition: 'fade', // professional transition
+    });
+
+    mermaid.initialize({ 
+        startOnLoad: true,
+        theme: 'dark',
+        themeVariables: {
+            fontFamily: 'Inter',
+            primaryColor: '#1E428A',
+            primaryTextColor: '#F5F7FA',
+            lineColor: '#D22026',
+            secondaryColor: '#4F99D6',
+            tertiaryColor: '#1E428A'
+        }
+    });
+</script>
+
+</body>
+</html>

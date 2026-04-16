@@ -1,0 +1,60 @@
+<svg width="800" height="500" viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="800" height="500" rx="15" fill="#f8f9fa"/>
+  
+  <!-- Title -->
+  <text x="400" y="40" font-family="Arial, sans-serif" font-size="24" font-weight="bold" text-anchor="middle" fill="#2d3436">Universal Unified Extractor (UUE) Architecture</text>
+  
+  <!-- Browsers layer -->
+  <rect x="50" y="80" width="150" height="40" rx="5" fill="#74b9ff" stroke="#0984e3" stroke-width="2"/>
+  <text x="125" y="105" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#2d3436">Patchright</text>
+
+  <rect x="230" y="80" width="150" height="40" rx="5" fill="#55efc4" stroke="#00b894" stroke-width="2"/>
+  <text x="305" y="105" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#2d3436">Nodriver</text>
+
+  <rect x="410" y="80" width="150" height="40" rx="5" fill="#ffeaa7" stroke="#fdcb6e" stroke-width="2"/>
+  <text x="485" y="105" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#2d3436">Crawl4AI</text>
+
+  <rect x="590" y="80" width="150" height="40" rx="5" fill="#fab1a0" stroke="#e17055" stroke-width="2"/>
+  <text x="665" y="105" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#2d3436">Camoufox</text>
+
+  <!-- HTML Extractor Pipe -->
+  <path d="M 125 120 L 125 150 L 400 150 L 400 180" fill="none" stroke="#636e72" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <path d="M 305 120 L 305 150 L 400 150" fill="none" stroke="#636e72" stroke-width="2" />
+  <path d="M 485 120 L 485 150 L 400 150" fill="none" stroke="#636e72" stroke-width="2" />
+  <path d="M 665 120 L 665 150 L 400 150" fill="none" stroke="#636e72" stroke-width="2" />
+
+  <text x="400" y="170" font-family="Arial, sans-serif" font-size="12" font-style="italic" text-anchor="middle" fill="#636e72">Raw HTML DOM String</text>
+
+  <!-- UUE Module Container -->
+  <rect x="150" y="190" width="500" height="200" rx="10" fill="#ffffff" stroke="#2d3436" stroke-width="2" stroke-dasharray="5,5"/>
+  <text x="400" y="215" font-family="Arial, sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="#2d3436">UUE Central Brain (BeautifulSoup)</text>
+
+  <!-- Layers -->
+  <rect x="180" y="240" width="130" height="120" rx="5" fill="#81ecec" stroke="#00cec9" stroke-width="2"/>
+  <text x="245" y="270" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#2d3436">Semantic</text>
+  <text x="245" y="295" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#2d3436">JSON-LD</text>
+  <text x="245" y="315" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#2d3436">Schema.org</text>
+
+  <rect x="335" y="240" width="130" height="120" rx="5" fill="#a29bfe" stroke="#6c5ce7" stroke-width="2"/>
+  <text x="400" y="270" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#2d3436">Heuristic</text>
+  <text x="400" y="295" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#2d3436">[data-dtype]</text>
+  <text x="400" y="315" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#2d3436">[data-attrid]</text>
+
+  <rect x="490" y="240" width="130" height="120" rx="5" fill="#fdcb6e" stroke="#e17055" stroke-width="2"/>
+  <text x="555" y="270" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#2d3436">Visual</text>
+  <text x="555" y="295" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#2d3436">href="tel:"</text>
+  <text x="555" y="315" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#2d3436">mailto:</text>
+
+  <!-- Output Node -->
+  <path d="M 400 390 L 400 420" fill="none" stroke="#636e72" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <rect x="250" y="420" width="300" height="50" rx="10" fill="#00b894" stroke="#00a8ff" stroke-width="2"/>
+  <text x="400" y="450" font-family="Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle" fill="white">Unified Metadata Entity</text>
+
+  <!-- Arrowhead Def -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#636e72" />
+    </marker>
+  </defs>
+</svg>

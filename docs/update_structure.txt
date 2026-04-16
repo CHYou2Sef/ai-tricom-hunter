@@ -1,0 +1,188 @@
+
+STRUCTURAL REFACTORING — APPLY ALL:
+
+A. Project layout — reorganize to this canonical IA Agents structure:
+
+   ai_phone_hunter/
+   ├── CLAUDE.md              ← project rules for Claude Code / Antigravity
+   ├── AGENTS.md              ← agent behavior specification
+   ├── README.md              ← updated with full setup instructions
+   ├── config.py              ← unchanged role, add new keys
+   ├── requirements.txt       ← add: ollama, code-review-graph, httpx[http2]
+   ├── .env.example           ← template with all required keys documented
+   ├── .gitignore             ← already correct, verify
+   ├── .code-review-graphignore
+   ├── pyproject.toml         ← add: [tool.pytest], [tool.ruff] sections
+   │
+   ├── agents/                ← NEW: agent behavior modules
+   │   ├── __init__.py
+   │   ├── base_agent.py      ← move from browser/base_agent.py
+   │   ├── phone_hunter.py    ← extract process_row() from agent.py
+   │   └── enricher.py        ← extract enrich_row() wrapper
+   │
+   ├── browser/               ← unchanged structure
+   │   ├── hybrid_engine.py
+   │   ├── patchright_agent.py
+   │   ├── nodriver_agent.py
+   │   ├── crawl4ai_agent.py
+   │   └── camoufox_agent.py
+   │
+   ├── enrichment/            ← unchanged
+   ├── excel/                 ← unchanged
+   ├── search/                ← unchanged
+   │
+   ├── llm/                   ← NEW: local LLM abstraction
+   │   ├── __init__.py
+   │   ├── ollama_client.py   ← OllamaClient (async, retry, timeout)
+   │   ├── prompt_optimizer.py← caveman rewriter
+   │   └── router.py          ← route: local Ollama vs Gemini fallback
+   │
+   ├── utils/                 ← existing + new files
+   │   ├── logger.py
+   │   ├── anti_bot.py
+   │   ├── captcha_solver.py
+   │   ├── chunker.py
+   │   ├── column_detector.py
+   │   ├── disk_cleanup.py
+   │   ├── json_parser.py
+   │   ├── metrics.py
+   │   ├── progress_tracker.py
+   │   ├── proxy_manager.py
+   │   ├── text_cleaner.py
+   │   ├── universal_extractor.py
+   │   └── health_check.py    ← NEW: startup checks (Ollama, disk, proxy)
+   │
+   ├── api/                   ← NEW: optional FastAPI monitoring layer
+   │   ├── __init__.py
+   │   ├── app.py             ← GET /health, GET /stats, GET /queue
+   │   └── models.py          ← Pydantic schemas
+   │
+   ├── scripts/               ← unchanged + new
+   │   ├── consolidate_results.py
+   │   ├── rebuild_output.py
+   │   ├── clean_chrome_profiles.py
+   │   └── setup_dev.sh       ← NEW: one-shot dev environment setup
+   │
+   ├── tests/                 ← expand existing
+   │   ├── test_anti_detection.py
+   │   ├── test_cleaner.py
+   │   ├── test_core.py
+   │   ├── test_hybrid_escalation.py
+   │   ├── test_ollama_client.py  ← NEW
+   │   └── test_prompt_optimizer.py ← NEW
+   │
+   ├── docs/                  
+   │   ├── ARCHITECTURE.md            ← NEW: architectural documentation
+   │   ├── DAILY_JOURNAL.md
+   │   └── ENRICHMENT_ARCHITECTURE.md
+   │
+   └── WORK/                  ← runtime data (gitignored)
+
+B. CLAUDE.md — create this file at root:
+
+   # AI Phone Hunter — Project Rules for Claude Code
+   ## Stack: Python 3.10+, async/await, Patchright, Ollama, SQLite
+   ## Key invariants:
+   - Never block the event loop: all IO is async or asyncio.to_thread()
+   - Browser agents are pooled: always return agent to _agent_pool
+   - Secrets live in .env only: never hardcode credentials
+   - Logs go through utils/logger.py get_logger(__name__)
+   - Phone numbers are always normalized via normalize_phone()
+   - Row status lifecycle: PENDING → DONE | NO TEL | SKIP
+   ## Architecture layers (top to bottom):
+   Entry → Orchestration → Intelligence → LLM → Browser → Extract → Storage
+   ## Token budget: use caveman prompt style for all internal LLM calls
+
+C. AGENTS.md — create this file at root:
+
+   # Agent Behavior Specification
+   ## PhoneHunterAgent
+   - PRIMARY path: AI Mode search → JSON parse → phone extract
+   - FALLBACK 1: Knowledge Panel (UUE heuristic)
+   - FALLBACK 2: Domain scrape → local Ollama GEO extraction
+   - SKIP condition: row already DONE in progress tracker
+   - RETRY condition: config.REPROCESS_FAILED_ROWS = True
+   ## HybridEngine waterfall
+   Tier 1 (Patchright) → Tier 2 (Nodriver) → Tier 3 (Crawl4AI) → Tier 4 (Camoufox)
+   Each tier: start → execute → if None → stop → cool 5s → next tier
+   Circuit breaker: 5 consecutive total failures → pause 300s → proxy rotate
+   ## Enricher
+   Source priority: google_ai_mode (0.97) > aeo_schema (1.00) > gemini_json (0.90)
+   Never overwrite field with existing non-empty value
+
+D. pyproject.toml — add these sections (do not remove existing content):
+
+   [tool.pytest.ini_options]
+   asyncio_mode = "auto"
+   testpaths = ["tests"]
+
+   [tool.ruff]
+   line-length = 100
+   target-version = "py310"
+   select = ["E", "F", "I", "UP"]
+
+E. utils/health_check.py — create startup validator:
+
+   async def check_all() → dict[str, bool]:
+     - check Ollama reachable at config.OLLAMA_BASE_URL
+     - check disk usage < 85%
+     - check WORK/ directories exist
+     - check at least one proxy available (if PROXY_ENABLED)
+     - log result via get_logger(__name__)
+     - return {"ollama": bool, "disk": bool, "dirs": bool, "proxy": bool}
+
+   Call check_all() inside main_async() before init_agent_pool().
+
+F. Gemma 4 migration path (future-ready, implement now as config):
+
+   Add to config.py:
+   OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
+   OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+   OLLAMA_ENABLED = os.getenv("OLLAMA_ENABLED", "true").lower() == "true"
+   OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "60"))
+
+   To switch to Gemma 4 when available via Ollama:
+   set OLLAMA_MODEL=gemma4:latest in .env — zero code change required.
+
+QUALITY GATES — verify before finishing:
+
+   □ pytest tests/ — all existing tests still pass
+   □ ruff check . — zero lint errors
+   □ code-review-graph build — graph built successfully
+   □ python -c "from utils.health_check import check_all; import asyncio; print(asyncio.run(check_all()))"
+   □ python -c "from llm.ollama_client import OllamaClient" — imports cleanly
+   □ python -c "from llm.prompt_optimizer import caveman" — imports cleanly
+   □ No hardcoded secrets anywhere (grep -r "sk-\|api_key\s*=" --include="*.py")
+
+COMMIT MESSAGE FORMAT (Conventional Commits):
+   feat(llm): add OllamaClient with qwen2.5:3b vector-less RAG fallback
+   feat(code-graph): install code-review-graph and configure for Antigravity
+   feat(prompts): apply caveman optimization to all internal LLM prompts
+   refactor(structure): reorganize into canonical IA Agents project layout
+   docs: add CLAUDE.md, AGENTS.md, and updated README.md
+
+CONSTRAINTS:
+   - Do not modify existing test logic — only ADD new tests
+   - Do not change the HybridEngine waterfall logic
+   - Do not break backward compatibility of ExcelRow or read_excel()
+   - Keep all secrets in .env — never in committed files
+   - Use asyncio.to_thread() for any sync Ollama calls if needed
+   - Maximum function length: 50 lines (split if exceeded)
+
+OUTPUT EXPECTED:
+   After this refactoring, running "python main.py" must behave
+   identically to before. The improvements are additive:
+   better developer tooling, local LLM fallback, and leaner prompts.
+   Nothing in the user-facing processing pipeline changes behavior.
+═══════════════════════════════════════════════════════════════
+
+Gemma 4 via Ollama — transition plan
+Once Gemma 4 lands in the Ollama registry (expected mid-2025), switching requires a single .env change:
+bash# Current
+OLLAMA_MODEL=qwen2.5:3b
+
+# Future — zero code change needed
+ollama pull gemma4:latest
+OLLAMA_MODEL=gemma4:latest
+The OllamaClient created by the prompt above is model-agnostic by design. Your router in llm/router.py will automatically use whichever model OLLAMA_MODEL points to, with the Gemini path as a cloud fallback when Ollama is unreachable.
+The three integrations complement each other precisely: code-review-graph reduces the tokens Antigravity consumes reading your codebase, caveman reduces the tokens your internal agent prompts consume at runtime, and vector-less RAG eliminates the retrieval infrastructure entirely by leveraging the local model's context window directly.

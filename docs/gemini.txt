@@ -1,0 +1,284 @@
+---
+
+## What is GitAgent? (Two versions)
+
+There are two projects with the same name on GitHub. You should use the **open standard** version.
+
+### ✅ Open Standard GitAgent (recommended)
+- **What it does:** Turns any Git repository into an AI agent definition. Like "Docker for agents".
+- **Key files:** `agent.yaml` (config), `SOUL.md` (personality), `skills/` folder, `memory/` folder.
+- **Why it's good:** Framework‑agnostic – define once, run on LangChain, CrewAI, Claude Code, etc.
+- **GitHub repo:** [`open-gitagent/gitagent`](https://github.com/open-gitagent/gitagent)
+- **Status:** Active, modern (~727 stars)
+
+### ❌ Academic GitAgent (archived)
+- **What it does:** An older research project that let agents install libraries from GitHub.
+- **GitHub repo:** [`alexazhou/GitAgent`](https://github.com/alexazhou/GitAgent) (Archived)
+- **Status:** Read‑only, for reference only.
+
+**Use the open standard version.**
+
+---
+
+## How to integrate GitAgent into your AI Phone Hunter project
+
+Your project already has three pillars: **Environment (Conda+uv)**, **Containerisation (Docker+Xvfb+NVIDIA)**, **CI/CD (GitHub Actions)**. GitAgent adds a **fourth pillar**: **Agent Definition**.
+
+### Step 1: Install GitAgent CLI
+GitAgent is a Node.js tool. Install it inside your Conda environment:
+```bash
+npm install -g gitagent
+gitagent --version
+```
+Add Node.js installation to your environment setup instructions.
+
+### Step 2: Initialize GitAgent in your project
+```bash
+gitagent init --template standard
+```
+This creates the following folder structure:
+```
+your-project/
+├── agent.yaml       # Name, version, model, skills, tools
+├── SOUL.md          # Agent personality and role
+├── RULES.md         # Hard constraints
+├── skills/          # Reusable capabilities
+├── tools/           # Tool definitions
+├── knowledge/       # Reference documents
+├── memory/          # Cross‑session memory (very useful!)
+│   └── runtime/     # Live memory: dailylog.md, context.md
+├── workflows/       # Multi‑step procedures
+├── agents/          # Sub‑agents
+└── compliance/      # Compliance rules
+```
+
+### Step 3: Add GitAgent to your Docker container (Pillar 2)
+Update your Dockerfile:
+```dockerfile
+# Install Node.js and GitAgent
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    npm install -g gitagent
+```
+
+Update your `entrypoint.sh`:
+```bash
+# Start Xvfb (as before)
+Xvfb :99 -screen 0 1920x1080x24 &
+export DISPLAY=:99
+
+# Validate agent definition before running
+gitagent validate
+
+# Export to your actual framework (e.g., LangChain)
+gitagent export --format langchain > /tmp/agent_config.json
+python /app/run_agent.py --config /tmp/agent_config.json
+```
+
+### Step 4: Add validation to CI/CD (Pillar 3)
+In your GitHub Actions workflow, add a step after linting:
+```yaml
+- name: Validate GitAgent configuration
+  run: |
+    npm install -g gitagent
+    gitagent validate --compliance
+```
+
+### Step 5: Use GitAgent features that help your project
+- **Memory persistence** – The `memory/runtime/` folder stores context across runs. Your phone hunter agent can remember previous searches.
+- **Human‑in‑the‑loop** – When the agent wants to update its skills or memory, it creates a pull request. You review and merge. Safe for production.
+- **Modular skills** – Wrap your Patchright browser automation and Nodriver logic into separate `skills/` folders.
+- **Multi‑framework export** – Test your agent on LangChain, then switch to CrewAI with one command.
+
+---
+
+## Updated 4‑pillar architecture diagram
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              GitAgent Layer (Pillar 3)                  │
+│   agent.yaml + SOUL.md + memory/ + skills/              │
+└─────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│ Pillar 1        Pillar 2          Pillar 4              │
+│ Environment    Containerisation   CI/CD                 │
+│ Conda+uv       Docker+Xvfb+NVIDIA GitHub Actions        │
+│ +npm           +GitAgent CLI      +GitAgent validate    │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Final: The complete architecture `.md` file (English, clear, simple)
+
+Save this as `ARCHITECTURE.md` in your project.
+
+```markdown
+# AI Agent Cross-Platform Portability – 4 Pillars
+
+**Goal:** Run your AI agent on any OS (Linux, Windows, macOS) – with or without GPU, with headed browser, with exact dependencies, and with version‑controlled agent behavior.
+
+---
+
+## The Four Pillars
+
+| Pillar | Tools | What it solves |
+|--------|-------|----------------|
+| **1. Environment** | Conda + uv lock + npm | Exact same Python and Node packages on every machine |
+| **2. Containerisation** | Docker + NVIDIA + Xvfb + GitAgent CLI | Portable runtime with GPU, virtual display, and agent validation |
+| **3. Agent Definition** | GitAgent standard (agent.yaml, SOUL.md, memory/) | Define agent once, run on any framework, version‑controlled |
+| **4. CI/CD** | GitHub Actions + GitAgent validate | Lint → validate agent → test → build → push automatically |
+
+---
+
+## End‑to‑end flow
+
+```text
+git push
+   ↓
+ruff lint
+   ↓
+gitagent validate --compliance   ← NEW
+   ↓
+pytest (unit tests)
+   ↓
+docker build
+   ↓
+push to ghcr.io (SHA tag)
+   ↓
+docker compose up
+```
+
+---
+
+## Pillar 1 – Environment (Conda + uv + npm)
+
+- Create a Conda environment.
+- Inside it, use `uv` to generate a `requirements.lock` file (hash‑pinned).
+- Keep two requirement files:
+  - `requirements.txt` (dev) – includes CUDA, Patchright, Nodriver.
+  - `requirements-prod.txt` (Windows) – CPU‑only, no CUDA.
+- Install Node.js and GitAgent CLI: `npm install -g gitagent`
+- Commit the lock file. Everyone gets the same packages.
+
+## Pillar 2 – Containerisation (Docker + Xvfb + NVIDIA + GitAgent)
+
+**Dockerfile stages:**
+1. `base` – OS, system tools
+2. `deps` – Python packages, Node.js, GitAgent CLI
+3. `browsers` – Chrome binaries (expensive, cached)
+4. `runtime` – Application code + entrypoint
+
+**Key fixes inside the container:**
+- Start Xvfb on `:99` for headed Chrome.
+- Use NVIDIA Container Toolkit for GPU passthrough (falls back to CPU on Windows).
+- Run `gitagent validate` before starting the agent.
+- Use `gitagent export` to generate framework config.
+
+## Pillar 3 – Agent Definition (GitAgent)
+
+Your agent is defined as files in the repo:
+
+```
+├── agent.yaml      # name, version, model, skills, compliance
+├── SOUL.md         # personality, role, values
+├── RULES.md        # must‑do and must‑never rules
+├── skills/         # reusable capabilities (browser automation, etc.)
+├── tools/          # tool definitions
+├── knowledge/      # reference docs
+├── memory/         # persistent memory across sessions
+│   └── runtime/    # live state: dailylog.md, context.md
+├── workflows/      # multi‑step procedures
+├── agents/         # sub‑agents
+└── compliance/     # security & audit rules
+```
+
+**Why this helps:**
+- **Version control** – Roll back bad agent changes with `git revert`.
+- **Human‑in‑the‑loop** – Agent creates PRs for skill updates; you approve.
+- **Cross‑session memory** – Agent remembers past work.
+- **Framework‑agnostic** – Export to LangChain, CrewAI, Claude Code, etc.
+
+## Pillar 4 – CI/CD (GitHub Actions)
+
+**Workflow steps (in order):**
+1. `ruff lint` – check Python style.
+2. `gitagent validate --compliance` – check agent definition.
+3. `pytest` – run unit tests (skip browser tests in CI).
+4. `docker build` – build multi‑stage image.
+5. `push to ghcr.io` – use SHA tag, never `latest`.
+6. `docker compose up` – deploy with runtime secrets.
+
+**Secrets:** Inject proxy lists, API keys via GitHub secrets + docker compose. Never bake into the image.
+
+---
+
+## Summary (Senior‑level reasoning)
+
+- **Conda + uv** = deterministic dependencies, no "works on my machine".
+- **Docker + Xvfb + NVIDIA** = headed browser + GPU inside a container, works on any OS.
+- **GitAgent** = treat agent behavior like code – define once, version, audit, roll back.
+- **GitHub Actions + validation** = every change is tested, tagged, and auditable.
+
+Use this file as a blueprint. Copy the commands and folder structure into your actual project.
+```
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+---
+Absolutely. Let's break down exactly what these tools are, why we are adding them, and how beautifully simple the workflow becomes for you or any other developer joining the project.
+
+### 1. What are these tools?
+
+*   **`uv`**: Think of this as `pip` on steroids, written in Rust. `pip` is notoriously bad at handling complex dependencies across different operating systems. `uv` is incredibly fast and creates a **Lockfile** (`requirements.lock`). This ensures that if the agent works on my machine today, it will install the exact same byte-for-byte dependencies on a server a year from now. No more version conflicts.
+*   **Docker (`Dockerfile` / `docker-compose`)**: A containerization engine. Instead of trying to install Python, Node.js, and Chrome directly onto your Windows or Mac host, Docker creates a pristine, isolated "Linux box" (a container) inside your computer. The agent lives entirely inside this box.
+*   **Xvfb (X Virtual FrameBuffer)**: Browsers like Chrome usually require a physical screen to draw pixels. If they detect they are running on a server without a screen (Headless mode), Cloudflare and CAPTCHAs instantly flag them as bots. **Xvfb creates a "fake, invisible monitor"** (usually named Display `:99`). The browser *thinks* it's visible, massively increasing our stealth, but you never see annoying windows popping up.
+*   **GitAgent CLI (`agent.yaml`, `SOUL.md`)**: A Node.js framework that standardizes *what* your agent is. Instead of hiding the agent's prompt and rules deep inside Python code, GitAgent pulls them out into human-readable Markdown and YAML files. This makes it so you can version-control the agent's "brain" and even port it to other frameworks (like LangChain or CrewAI) later without rewriting the logic.
+*   **GitHub Actions**: A cloud CI/CD tool. Every time you push code to GitHub, it automatically spins up a server, checks your code for bugs (`ruff`), validates your AI prompts (`gitagent`), and builds your Docker container automatically.
+
+---
+
+### 2. What Environment is needed on a new machine?
+
+Because of Pillar 2 (Containerization), the requirements for a completely new machine (Windows, Mac, or Linux) drop dramatically. 
+
+**You literally only need:**
+1. **Git** (to clone the repo)
+2. **Docker Desktop** (or Docker Engine on Linux)
+3. Your `.env` file (for API keys)
+
+*That is it.* You do **not** need to install Python, Node.js, Conda, Google Chrome, or run any `pip install` commands on the host machine. All of that happens invisibly inside the container.
+
+---
+
+### 3. The Lifecycle: From `git clone` to Execution
+
+Here is exactly what happens when you bring this repo to a brand new machine:
+
+**Step 1: Pull & Config**
+```bash
+git clone <your-repo>
+cd ai_phone_hunter
+cp .env.example .env  # Add your keys here
+```
+
+**Step 2: The Magic Command**
+```bash
+docker compose up --build
+```
+
+**Step 3: What happens in the background? (The Automated Flow)**
+When you hit that command, Docker takes over and follows the receipt in our `Dockerfile`:
+1. It downloads a lightweight Linux OS.
+2. It installs Python 3.10 and Node.js *inside* the container.
+3. It uses `uv` to instantly install our locked Python libraries (Patchright, Pandas, etc.).
+4. It downloads the exact version of Chromium required for our stealth operations.
+5. It starts the invisible fake monitor (**Xvfb**).
+6. It runs `gitagent validate` to ensure `SOUL.md` and `RULES.md` are formatted correctly.
+7. Finally, it executes `python main.py`.
+
+The output streams directly to your terminal. If you ever want to stop it, you press `Ctrl+C`. Want to delete the whole thing? You delete the container, and no residue is left on your host machine.
+
+Does this clarify the value of moving to this architecture? Let me know if you would like me to begin executing the Implementation Plan to set this up!

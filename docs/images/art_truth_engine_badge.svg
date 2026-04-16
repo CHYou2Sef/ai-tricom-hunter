@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+    <rect width="100%" height="100%" fill="#0A192F" rx="20" ry="20" />
+    <defs>
+        <filter id="glow">
+            <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+            <feMerge>
+                <feMergeNode in="coloredBlur"/>
+                <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+        </filter>
+        <linearGradient id="brandGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#D22026"/>
+            <stop offset="100%" stop-color="#1E428A"/>
+        </linearGradient>
+    </defs>
+    
+    <!-- Outer concentric spinning element representation -->
+    <circle cx="200" cy="180" r="140" fill="none" stroke="rgba(210, 32, 38, 0.2)" stroke-width="4" stroke-dasharray="20,10"/>
+    <circle cx="200" cy="180" r="120" fill="none" stroke="rgba(79, 153, 214, 0.3)" stroke-width="2"/>
+    
+    <!-- Central Hexagon -->
+    <path d="M 200 80 L 286 130 L 286 230 L 200 280 L 114 230 L 114 130 Z" fill="rgba(10, 25, 47, 0.8)" stroke="url(#brandGradient)" stroke-width="6" filter="url(#glow)"/>
+    
+    <!-- Inner Core -->
+    <circle cx="200" cy="180" r="40" fill="#D22026" filter="url(#glow)"/>
+    <circle cx="200" cy="180" r="15" fill="#FFF"/>
+
+    <!-- Nodes mapping to the core -->
+    <line x1="200" y1="80" x2="200" y2="140" stroke="#4F99D6" stroke-width="3"/>
+    <line x1="286" y1="230" x2="235" y2="200" stroke="#4F99D6" stroke-width="3"/>
+    <line x1="114" y1="230" x2="165" y2="200" stroke="#4F99D6" stroke-width="3"/>
+    
+    <text x="200" y="340" fill="#FFF" font-family="'Montserrat', sans-serif" font-size="22" font-weight="900" text-anchor="middle" filter="url(#glow)">SEMANTIC TRUTH ENGINE</text>
+    <text x="200" y="360" fill="#4F99D6" font-family="'Inter', sans-serif" font-size="12" letter-spacing="2" text-anchor="middle">PROBABILISTIC VALIDATION</text>
+</svg>

@@ -1,0 +1,23 @@
+ai_tricom_hunter/
+│
+│
+├── WORK/ ← agent watches these
+|   |
+|   |──  active_processing.json
+|   |── INCOMING/ ← drop raw .xlsx/.csv here
+│   ├── STD/ ← SIREN + RS + Adresse (processed first)
+│   ├── SIREN/ ← SIREN + Adresse only
+│   ├── RS/ ← RS + Adresse only
+│   └── OTHERS/ ← partial data (Not to processed)
+|   ├── output/ ← live daily fusion .xlsx + SKIP rows (by folder name + date) 
+|   └── ARCHIVE/ ← permanent results
+|       ├── BACKUP/ ← original files before AI processing
+|       ├── SUCCEED/ ← rows where a phone number was found DONE
+|       └── FAILED/ ← NO TEL
+├── logs/ ← rotating log files
+├── browser_profiles/ ← Chromium persistent session data
+├── .crawl4ai_cache/ ← Crawl4AI page cache
+├── .env ← secrets (never commit)
+└── config.py ← single source of truth for all paths
+|
+...
