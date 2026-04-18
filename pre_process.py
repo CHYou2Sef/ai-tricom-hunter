@@ -22,7 +22,6 @@ import config
 from excel.reader import read_excel
 from excel.cleaner import clean_and_classify
 from utils.logger import get_logger
-from utils.lock_manager import acquire_lock, release_lock
 
 logger = get_logger("PreProcessor")
 
@@ -94,8 +93,9 @@ class RawFileHandler(FileSystemEventHandler):
                         os.remove(file_path)
                     logger.info(f"✅ [Phase 1] Done! Decomposed part deleted (not archived). Buckets updated.")
                 else:
-                    archive_dir = Path(config.ARCHIVE_DIR)
-                    archive_dir.mkdir(parents=True, exist_ok=True)
+                    from utils.fs import safe_mkdir
+                    archive_dir = config.ARCHIVE_BACKUP_DIR
+                    safe_mkdir(archive_dir)
                     dest_path = archive_dir / filename
                     
                     # Handle filename collisions in archive
@@ -115,30 +115,18 @@ class RawFileHandler(FileSystemEventHandler):
                 logger.error(f"  ❌ Error pre-processing {filename}: {e}", exc_info=True)
 
 def ensure_dirs():
-    """Ensure all required directories exist before starting."""
+    """Ensure minimal required directories exist before starting."""
+    from utils.fs import safe_mkdir
     dirs = [
         config.WORK_DIR,
         config.INCOMING_DIR,
-        config.INPUT_STD_DIR,
-        config.INPUT_RS_DIR,
-        config.INPUT_SIR_DIR,
-        config.INPUT_OTHER_DIR,
-        config.ARCHIVE_BACKUP_DIR,
-        config.LOG_DIR,
     ]
     for d in dirs:
-        if not os.path.exists(d):
-            os.makedirs(d, exist_ok=True)
-            logger.debug(f"[Setup] Created directory: {d}")
+        safe_mkdir(d)
+        logger.debug(f"[Setup] Created directory: {d}")
 
 if __name__ == "__main__":
     ensure_dirs()
-    
-    # ── SINGLETON LOCK (Conflict Prevention) ──
-    instance_name = "DOCKER-PRE" if getattr(config, "DOCKER_ENV", False) else f"LOCAL-PRE-{os.getlogin()}"
-    if not acquire_lock(instance_name):
-        print(f"\n🚨  CONFLICT: Pre-Processor is already running elsewhere.")
-        sys.exit(1)
     
     # Pre-process any existing files in incoming/
     logger.info("Scanning for existing files in incoming/...")
@@ -162,5 +150,4 @@ if __name__ == "__main__":
         observer.stop()
         logger.info("Stopped by user.")
     
-    release_lock()
     observer.join()

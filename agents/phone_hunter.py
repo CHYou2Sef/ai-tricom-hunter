@@ -162,44 +162,75 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
                 break
     return best
 
-async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Optional[int] = None) -> None:
-    if row.status == "DONE" or (row.status in ("SKIP", "NO TEL") and not config.REPROCESS_FAILED_ROWS):
+async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Optional[int] = None) -> List[dict]:
+    """
+    Harvests phones and stores them with confidence scores in enriched_fields.
+    Returns a list of dicts: {'num': ..., 'score': ..., 'source': ...}
+    """
+    if row.status == "DONE" and not config.REPROCESS_FAILED_ROWS:
         logger.info(f"[Agent] Row #{row.row_index} SKIPPED — status={row.status}.")
-        return
+        return []
 
     progress_str = f"{idx}/{total}" if idx and total else f"#{row.row_index}"
-    # 🔍 VERIFICATION LAYER: Shows exactly what data is being used for this run
     siren_log = row.siren if row.siren else "N/A"
     logger.info(f"🔍 [Verification] Row {progress_str} | Target: '{row.nom}' | SIREN: {siren_log} | Localité: '{row.adresse}'")
     
     row.processing_start_ts = time.perf_counter()
-    best_phone = None
+    harvested = [] # List of {'num', 'score', 'source'}
+
+    def add_unique(num, score, source):
+        norm = normalize_phone(num)
+        if not norm: return
+        # Avoid duplicate numbers in same row
+        if any(h['num'] == norm for h in harvested): return
+        harvested.append({"num": norm, "score": score, "source": source})
 
     nom, adr = (row.nom or row.siren or ""), (row.adresse or "")
+    
+    # Existing phones to avoid duplication
+    existing = set()
+    if row.phone: existing.add(normalize_phone(row.phone))
+
+    # 1. AI Mode Searches (High Confidence)
     for prompt_key, tag in [(config.AI_MODE_SEARCH_PROMPT, "ai_std"), (config.AI_MODE_EXPERT_PROMPT, "ai_expert")]:
         prompt = prompt_key.format(nom=nom, adresse=adr)
         ai_raw = await agent.search_google_ai_mode(prompt)
         if ai_raw:
             row.raw_ai_responses.append({"text": ai_raw, "source": tag, "query": prompt[:100]})
-            best_phone = _fill_row_from_ai_mode(ai_raw, row)
-            if best_phone: break
+            candidates = extract_phones(ai_raw, source_label=tag)
+            for p in candidates:
+                add_unique(p, 97, tag)
+            _fill_row_from_ai_mode(ai_raw, row)
 
-    if not best_phone:
-        if row.nom:
-            best_phone = await _search_knowledge_panel_phone(row, agent, f"{row.nom} {adr}")
-        if not best_phone:
-            q = build_search_query(row)
-            if q:
-                res, _ = await _search_and_extract_phone(row, agent, q, "google_scrap")
-                best_phone = res
+    # 2. Knowledge Panel (Highest Confidence)
+    if row.nom:
+        kp_phone = await _search_knowledge_panel_phone(row, agent, f"{row.nom} {adr}")
+        if kp_phone:
+            add_unique(kp_phone, 99, "google_kp")
 
-    row.phone = best_phone
-    row.status = "DONE" if best_phone else "NO TEL"
+    # 3. Web Scraping (Medium Confidence)
+    q = build_search_query(row)
+    if q:
+        res, content = await _search_and_extract_phone(row, agent, q, "google_scrap")
+        if content:
+            candidates = extract_phones(content, source_label="web_scrap")
+            for p in candidates:
+                add_unique(p, 85, "web_scrap")
+
+    # 4. Final results mapping
     row.processing_end_ts = time.perf_counter()
-
-    # 🚀 THE HARVEST LOG: Final explicit visibility for the user
     elapsed = round(row.processing_end_ts - row.processing_start_ts, 1)
-    if best_phone:
-        logger.info(f"🏆 [Row {progress_str}] HARVESTED: {best_phone} (Tier: {agent.__class__.__name__}) | Time: {elapsed}s")
+    
+    if harvested:
+        # Sort by score descending
+        harvested.sort(key=lambda x: x['score'], reverse=True)
+        row.phone = harvested[0]['num'] # Main phone
+        row.status = "DONE"
+        # Store full list in enriched_fields for column expansion
+        row.enriched_fields["phone_list"] = harvested
+        logger.info(f"🏆 [Row {progress_str}] HARVESTED {len(harvested)} numbers. Best: {row.phone} | Time: {elapsed}s")
     else:
-        logger.warning(f"🔦 [Row {progress_str}] DEPLETED: No phone found (Tier: {agent.__class__.__name__}) | Time: {elapsed}s")
+        row.status = "NO TEL"
+        logger.warning(f"🔦 [Row {progress_str}] DEPLETED: No phone found | Time: {elapsed}s")
+
+    return harvested

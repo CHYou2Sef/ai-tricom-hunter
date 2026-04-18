@@ -25,7 +25,8 @@ import gzip
 import shutil
 
 # Ensure the log directory exists
-os.makedirs(config.LOG_DIR, exist_ok=True)
+from utils.fs import safe_mkdir as _safe_mkdir
+_safe_mkdir(config.LOG_DIR)
 
 
 @contextlib.contextmanager
@@ -116,6 +117,15 @@ def _setup_root_logger() -> None:
     # Capture everything internally, handlers will filter
     root.setLevel(logging.DEBUG)
 
+    # ── Anti-Root Permission Guard (Execute BEFORE opening handlers) ──
+    error_file = os.path.join(config.LOG_DIR, "agent.log")
+    archive_file = os.path.join(config.LOG_DIR, "debug_archive.log")
+    
+    for f in [config.LOG_DIR, error_file, archive_file]:
+        if os.path.exists(f):
+            try: os.chmod(f, 0o777)
+            except: pass
+
     # ── 1. Console handler ──
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
@@ -125,7 +135,6 @@ def _setup_root_logger() -> None:
 
     # ── 2. "Clean" error log file (Only ERRORS and CRITICAL) ──
     # This prevents disk fill-up with trivial infologs
-    error_file = os.path.join(config.LOG_DIR, "agent.log")
     error_handler = RotatingFileHandler(
         error_file,
         maxBytes=10 * 1024 * 1024,  # 10 MB

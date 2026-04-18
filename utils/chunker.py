@@ -14,6 +14,8 @@ import csv
 from typing import List, Any, Dict, Optional, Tuple
 from pathlib import Path
 
+from openpyxl import Workbook
+
 import config
 from excel.reader import read_excel, ExcelRow
 from utils.logger import get_logger
@@ -27,8 +29,9 @@ class FileChunker:
     """
 
     def __init__(self, work_dir: Optional[str] = None):
+        from utils.fs import safe_mkdir
         self.work_dir = Path(work_dir) if work_dir else config.WORK_DIR / "CHUNKS"
-        self.work_dir.mkdir(parents=True, exist_ok=True)
+        safe_mkdir(self.work_dir)
 
     def _get_metadata_path(self, original_file: Path) -> Path:
         """Returns the path to the sidecar metadata file."""
@@ -76,17 +79,28 @@ class FileChunker:
                 end = start + chunk_size
                 chunk_data = rows[start:end]
                 
-                chunk_name = f"{p.stem}_batch_{i+1:03d}.csv"
+                chunk_name = f"{p.stem}_batch_{i+1:03d}{p.suffix.lower()}"
                 chunk_path = self.work_dir / chunk_name
                 
-                # Save as CSV for efficiency during the agent's run
-                with open(chunk_path, 'w', encoding='utf-8-sig', newline='') as f:
-                    writer = csv.DictWriter(f, fieldnames=original_headers, delimiter=';')
-                    writer.writeheader()
+                if p.suffix.lower() == ".csv":
+                    # Keep it as CSV
+                    with open(chunk_path, 'w', encoding='utf-8-sig', newline='') as f:
+                        writer = csv.DictWriter(f, fieldnames=original_headers, delimiter=';')
+                        writer.writeheader()
+                        for row in chunk_data:
+                            writer.writerow(row.raw)
+                else:
+                    # Keep it as Native XLSX
+                    wb = Workbook()
+                    ws = wb.active
+                    ws.append(original_headers)
                     for row in chunk_data:
-                        # Only write the original columns to keep chunks 'clean'
-                        writer.writerow(row.raw)
-                
+                        row_data = [row.raw.get(h, "") for h in original_headers]
+                        ws.append(row_data)
+                    wb.save(chunk_path)
+                    
+                from utils.fs import safe_touch
+                safe_touch(chunk_path)
                 chunk_paths.append(chunk_path)
 
             self._save_metadata(p, num_chunks, chunk_size)

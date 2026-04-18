@@ -14,26 +14,21 @@ import random
 import asyncio
 from typing import List, Optional
 from pathlib import Path
+import pandas as pd
 
 import config
 from excel.reader import ExcelRow, read_excel
 from excel.writer import save_results, save_subset_to_excel
 from utils.logger import get_logger
 from utils.metrics import PerformanceTracker
-from utils.progress_tracker import ProgressTracker
+from utils.progress_tracker import FileProgressTracker
+from search.phone_extractor import normalize_phone
 
 # Canonical Agent Imports
 from agents.phone_hunter import process_row
 from agents.enricher import enrich_row
 
 logger = get_logger(__name__)
-
-# Initialize global progress tracker
-progress = ProgressTracker(config.WORK_DIR / "active_processing.json")
-
-# Counter for consecutive CAPTCHA blocks
-_captcha_streak = 0
-_captcha_lock = asyncio.Lock()
 
 # Agent Pool for parallel workers
 _agent_pool = asyncio.Queue()
@@ -53,104 +48,117 @@ async def close_agent_pool():
         agent = await _agent_pool.get()
         await agent.close()
 
-async def human_delay_async(min_sec: float = config.MIN_DELAY_SECONDS, max_sec: float = config.MAX_DELAY_SECONDS):
-    delay = random.uniform(min_sec, max_sec)
-    await asyncio.sleep(delay)
-
-def sync_with_previous_results(rows: List[ExcelRow], filepath: str) -> int:
-    """Synchronize with today's previous results to avoid redundant scraping."""
-    from pathlib import Path
-    import openpyxl
+def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: FileProgressTracker) -> int:
+    """
+    Synchronize with today's previous results using Pandas.
+    Ensures data integrity: a row is only 'DONE' if we actually have its result data.
+    """
     import datetime
-    from utils.column_detector import detect_columns
-
     orig_path = Path(filepath)
     input_folder = orig_path.parent.name
     out_dir = config.get_output_dir(input_folder)
     date_str = datetime.date.today().strftime("%Y-%m-%d")
     fusion_path = out_dir / f"{input_folder}_{date_str}.xlsx"
     
-    file_key = f"{input_folder}/{orig_path.name}"
-    completed_rows = progress.get_completed_rows(file_key)
-    if completed_rows:
-        for r in rows:
-            if r.row_index in completed_rows:
-                r.status = "DONE"
-    
-    if not fusion_path.exists(): return 0
-    sync_count = 0
-    try:
-        wb = openpyxl.load_workbook(fusion_path, data_only=True)
-        ws = wb.active
-        headers = [str(cell.value) for cell in ws[1] if cell.value is not None]
-        col_map = {name: i for i, name in enumerate(headers)}
-        out_mapping = detect_columns(headers)
-        
-        lookup = {}
-        def get_val(row_data, concept):
-            col_name = out_mapping.get(concept)
-            if col_name and col_name in col_map:
-                val = row_data[col_map[col_name]].value
-                return str(val).strip() if val is not None else None
-            return None
+    # 1. Load Fusion Data for real-value synchronization
+    existing_data = {}
+    if fusion_path.exists():
+        try:
+            df_sync = pd.read_excel(fusion_path, dtype=str)
+            if "__fingerprint" in df_sync.columns:
+                # Create a lookup map: fingerprint -> (phone, agent_phone)
+                for _, row_data in df_sync.iterrows():
+                    fp = row_data["__fingerprint"]
+                    if pd.notna(fp):
+                        existing_data[fp] = {
+                            "phone": row_data.get("AI_Phone"),
+                            "agent_phone": row_data.get("AI_Agent_Phone")
+                        }
+        except Exception as e:
+            logger.warning(f"[Agent] Failed to read fusion file for sync: {e}")
 
-        for row_data in ws.iter_rows(min_row=2):
-            if all(c.value is None for c in row_data): continue
-            dummy = ExcelRow(raw={}, row_index=0, mapping={})
-            dummy.nom = get_val(row_data, "raison_sociale")
-            dummy.adresse = get_val(row_data, "adresse")
-            dummy.siren = get_val(row_data, "siren") or get_val(row_data, "siret")
-            
-            fp = dummy.get_fingerprint()
-            lookup[fp] = {
-                "status": (get_val(row_data, "Etat") or "DONE").upper(),
-                "phone": get_val(row_data, "AI_Phone") or get_val(row_data, "telephone"),
-                "agent_phone": get_val(row_data, "AI_Agent_Phone")
-            }
+    sync_count = 0
+
+    for r in rows:
+        fp = r.get_fingerprint()
         
-        for r in rows:
-            fp = r.get_fingerprint()
-            if fp in lookup:
-                entry = lookup[fp]
-                if entry["status"] in ("DONE", "NO TEL", "SKIP"):
-                    r.status, r.phone, r.agent_phone = entry["status"], entry["phone"], entry["agent_phone"]
-                    sync_count += 1
-        wb.close()
-    except Exception as e:
-        logger.warning(f"⚠️ [Sync] Link failed: {e}")
+        # Priority 1: Check File-Specific Checkpoint (NEW)
+        cp_data = progress.get_row_data(r.row_index)
+        if cp_data:
+            valid_p = normalize_phone(cp_data.get("phone"))
+            valid_a = normalize_phone(cp_data.get("agent_phone"))
+            if valid_p or valid_a:
+                r.phone = valid_p
+                r.agent_phone = valid_a
+                r.status = cp_data.get("status", "DONE")
+                # Restore all other enriched information (emails, linkedin, etc)
+                for k, v in cp_data.items():
+                    if k not in ["phone", "agent_phone", "status"]:
+                        r.enriched_fields[k] = v
+                sync_count += 1
+                continue
+
+        # Priority 2: Check if already in Daily Fusion (Global Sync)
+        if fp in existing_data:
+            res = existing_data[fp]
+            valid_p = normalize_phone(res.get("phone")) if pd.notna(res.get("phone")) else None
+            valid_a = normalize_phone(res.get("agent_phone")) if pd.notna(res.get("agent_phone")) else None
+            
+            if valid_p or valid_a:
+                r.phone = valid_p
+                r.agent_phone = valid_a
+                r.status = "DONE"
+                sync_count += 1
+                continue
+            
+    if sync_count > 0:
+        logger.info(f"[Agent] 🔄 Synced {sync_count} rows from checkpoint/fusion. Resuming...")
+        
     return sync_count
 
-async def _worker_process_row(row: ExcelRow, sem: asyncio.Semaphore, save_lock: asyncio.Lock, rows: List[ExcelRow], filepath: str, tracker: PerformanceTracker, idx: int, total: int) -> ExcelRow:
+async def _worker_process_row(row, sem, save_lock, rows, filepath, tracker, idx, total, progress):
     async with sem:
-        agent = await _agent_pool.get()
-        worker_id = getattr(agent, "worker_id", "?")
         row_start = time.perf_counter()
-
+        agent = None
         try:
-            # 1. PEFORM SEARCH (Specialized Agent)
-            await process_row(row, agent, idx=idx, total=total)
+            agent = await _agent_pool.get()
             
-            # 2. PERFORM ENRICHMENT (Specialized Agent)
-            if row.status != "SKIP":
-                await asyncio.to_thread(enrich_row, row)
-
-            # Mark progress
-            input_folder = Path(filepath).parent.name
-            file_key = f"{input_folder}/{Path(filepath).name}"
-            progress.mark_row_done(file_key, row.row_index)
-
+            # P0 Fix #1: Health check before use
+            if hasattr(agent, 'is_alive') and not await agent.is_alive():
+                logger.warning(f"[AgentPool] Worker dead, recreating...")
+                await agent.close()
+                from browser.hybrid_engine import HybridAutomationEngine
+                agent = HybridAutomationEngine(worker_id=getattr(agent, 'worker_id', idx))
+                await agent.start_tier(config.HYBRID_DEFAULT_TIER)
+            
+            extra_phones = []
+            if not row.phone:
+                extra_phones = await process_row(row, agent)
+            if row.phone and hasattr(config, 'ENRICH_ENABLED') and config.ENRICH_ENABLED:
+                await enrich_row(row, agent)
+            
+            # Atomic Save to per-file JSON tracker
+            progress.mark_row_done(
+                row.row_index, 
+                row.phone, 
+                row.agent_phone, 
+                row.status,
+                extra=row.enriched_fields
+            )
         except Exception as e:
-            logger.error(f"[Worker-{worker_id}] Error row #{row.row_index}: {e}")
+            logger.error(f"[Agent] Error on row {row.row_index}: {e}")
+            row.status = "ERROR"
         finally:
-            await _agent_pool.put(agent)
-
+            if agent:
+                # Keep it alive if possible, or close if dead
+                await _agent_pool.put(agent)
+        
         elapsed = time.perf_counter() - row_start
         tracker.track_row(elapsed, row.status)
-
+        
         if idx % config.SAVE_INTERVAL == 0 or idx == total:
             async with save_lock:
                 await asyncio.to_thread(save_results, rows, filepath)
-
     return row
 
 async def process_file_async(filepath: str) -> None:
@@ -158,34 +166,60 @@ async def process_file_async(filepath: str) -> None:
     rows, _ = await asyncio.to_thread(read_excel, filepath)
     if not rows: return
 
+    # Initialize per-file progress tracker
+    progress = FileProgressTracker(filepath)
+
+    # Disk cleanup integration
+    from utils.disk_cleanup import check_and_cleanup
+    check_and_cleanup()
+
     tracker = PerformanceTracker()
     tracker.start_file_processing()
-
-    await asyncio.to_thread(sync_with_previous_results, rows, filepath)
+    await asyncio.to_thread(sync_with_previous_results, rows, filepath, progress)
+    
     rows_to_process = [r for r in rows if r.status != "DONE"] if config.REPROCESS_FAILED_ROWS else [r for r in rows if r.status not in ("DONE", "NO TEL", "SKIP")]
-
     total = len(rows_to_process)
-    if total > 0:
+    
+    if total == 0:
+        logger.info(f"[Agent] ⏭️  Skipping '{os.path.basename(filepath)}' — 0 rows to process.")
+    else:
+        logger.info(f"[Agent] 🔄 Processing {total} rows from '{os.path.basename(filepath)}'...")
         save_lock, sem = asyncio.Lock(), asyncio.Semaphore(config.MAX_CONCURRENT_WORKERS)
-        tasks = [asyncio.create_task(_worker_process_row(r, sem, save_lock, rows, filepath, tracker, i, total)) for i, r in enumerate(rows_to_process, 1)]
+        tasks = [asyncio.create_task(_worker_process_row(r, sem, save_lock, rows, filepath, tracker, i, total, progress)) for i, r in enumerate(rows_to_process, 1)]
         await asyncio.gather(*tasks)
     
     await asyncio.to_thread(save_results, rows, filepath)
     tracker.end_file_processing()
-    await finalize_file_processing(rows, filepath)
+    await finalize_file_processing(rows, filepath, tracker, progress)
 
-async def finalize_file_processing(rows: List[ExcelRow], original_filepath: str) -> None:
+async def finalize_file_processing(
+    rows: List[ExcelRow], original_filepath: str, tracker: Optional[PerformanceTracker] = None, progress: FileProgressTracker = None
+) -> None:
     orig_path = Path(original_filepath)
     success_rows = [r for r in rows if r.phone or r.status == "DONE"]
-    retry_rows = [r for r in rows if r.status in ("NO TEL", "SKIP", "PENDING")]
+    retry_rows = [r for r in rows if r.status in ("NO TEL", "SKIP", "PENDING", "ERROR")]
+
+    total = len(rows)
+    duration_str = f"{tracker.get_metrics_summary()['total_execution_seconds']}s" if tracker else "N/A"
+
+    logger.info("")
+    logger.info(f"{'━' * 60}")
+    logger.info(f"📊  FILE COMPLETED: {orig_path.name}")
+    logger.info(f"   📁 Total: {total} | ⏱️ Duration: {duration_str}")
+    logger.info(f"   ✅ Success: {len(success_rows)} | 🔁 Retry: {len(retry_rows)}")
+    logger.info(f"{'━' * 60}")
 
     if success_rows:
-        config.OUTPUT_SUCCEED_DIR.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(save_subset_to_excel, success_rows, config.OUTPUT_SUCCEED_DIR / orig_path.name)
+        target = config.OUTPUT_SUCCEED_DIR / orig_path.name
+        await asyncio.to_thread(save_subset_to_excel, success_rows, target)
+        logger.info(f"   💾 Saved to SUCCEED/ folder")
+    
     if retry_rows:
-        config.OUTPUT_FAILED_DIR.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(save_subset_to_excel, retry_rows, config.OUTPUT_FAILED_DIR / orig_path.name)
+        target = config.OUTPUT_FAILED_DIR / orig_path.name
+        await asyncio.to_thread(save_subset_to_excel, retry_rows, target)
+        logger.info(f"   🔁 Saved to FAILED/ folder")
 
-    progress.clear_file(f"{orig_path.parent.name}/{orig_path.name}")
+    if progress:
+        progress.delete()
     try: os.remove(original_filepath)
     except: pass

@@ -1,54 +1,72 @@
 import json
 import os
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, Any, Optional
 
-class ProgressTracker:
+import config
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+class FileProgressTracker:
     """
-    Tracks the processing progress of files using a single JSON file.
-    This replaces the need to scan large Excel files for synchronization.
+    Persistent state tracker for a SPECIFIC file.
+    Saves results row-by-row into a JSON file for crash recovery.
     """
 
-    def __init__(self, state_file: Path):
-        self.state_file = state_file
-        self.state: Dict[str, List[int]] = {}  # file_key -> list of completed row_indices
+    def __init__(self, original_filepath: str):
+        self.original_path = Path(original_filepath)
+        # Checkpoint name: File_Name.xlsx -> File_Name.xlsx.json
+        self.checkpoint_path = config.CHECKPOINTS_DIR / f"{self.original_path.name}.json"
+        self.data: Dict[str, Any] = {} # row_index (str) -> {phone, agent_phone, status, etc}
         self.load()
 
     def load(self):
-        """Load state from the JSON file."""
-        if self.state_file.exists():
+        """Load the checkpoint if it exists."""
+        if self.checkpoint_path.exists():
             try:
-                with open(self.state_file, 'r', encoding='utf-8') as f:
-                    self.state = json.load(f)
-            except Exception:
-                self.state = {}
+                with open(self.checkpoint_path, 'r', encoding='utf-8') as f:
+                    self.data = json.load(f)
+                logger.info(f"[Progress] Loaded {len(self.data)} rows from checkpoint: {self.checkpoint_path.name}")
+            except Exception as e:
+                logger.warning(f"[Progress] Failed to load checkpoint {self.checkpoint_path.name}: {e}")
+                self.data = {}
         else:
-            self.state = {}
+            self.data = {}
 
     def save(self):
-        """Save current state to the JSON file."""
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.state_file, 'w', encoding='utf-8') as f:
-            json.dump(self.state, f, indent=2)
+        """Save current state to JSON."""
+        try:
+            with open(self.checkpoint_path, 'w', encoding='utf-8') as f:
+                json.dump(self.data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[Progress] Failed to save checkpoint: {e}")
 
-    def mark_row_done(self, file_key: str, row_index: int):
-        """Mark a specific row index as completed for a given file."""
-        if file_key not in self.state:
-            self.state[file_key] = []
-        if row_index not in self.state[file_key]:
-            self.state[file_key].append(row_index)
-            self.save()
+    def mark_row_done(self, row_index: int, phone: Optional[str], agent_phone: Optional[str], status: str, extra: dict = None):
+        """Record the full result for a row."""
+        entry = {
+            "phone": phone,
+            "agent_phone": agent_phone,
+            "status": status,
+        }
+        if extra:
+            entry.update(extra)
+        
+        self.data[str(row_index)] = entry
+        self.save()
 
-    def get_completed_rows(self, file_key: str) -> Set[int]:
-        """Return the set of completed row indices for a file."""
-        return set(self.state.get(file_key, []))
+    def get_row_data(self, row_index: int) -> Optional[dict]:
+        """Retrieve cached data for a row."""
+        return self.data.get(str(row_index))
 
-    def clear_file(self, file_key: str):
-        """Remove progress tracking for a file (e.g., after archiving)."""
-        if file_key in self.state:
-            del self.state[file_key]
-            self.save()
+    def is_row_done(self, row_index: int) -> bool:
+        """Check if a row is already recorded in checkpoint."""
+        return str(row_index) in self.data
 
-    def is_row_done(self, file_key: str, row_index: int) -> bool:
-        """Check if a row has already been processed."""
-        return row_index in self.get_completed_rows(file_key)
+    def delete(self):
+        """Remove the checkpoint file (cleanup after final export)."""
+        if self.checkpoint_path.exists():
+            try:
+                os.remove(self.checkpoint_path)
+            except Exception as e:
+                logger.error(f"[Progress] Cleanup failed for {self.checkpoint_path.name}: {e}")

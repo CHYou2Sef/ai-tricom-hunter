@@ -1,240 +1,161 @@
-"""
-excel/writer.py
-
-Saves processed rows to EXCEL and rich JSON.
-Excel: original columns + AI_Phone + AI_Agent_Phone + Etat
-JSON:  full audit record per row.
-"""
-
 import os
-import json
+import datetime
+import pandas as pd
+import numpy as np
 from pathlib import Path
-from openpyxl import Workbook
+from typing import List
 import config
 from utils.logger import get_logger
+from utils.fs import safe_mkdir, safe_touch
 
 logger = get_logger(__name__)
 
-# save_rich_json entirely removed to stop .json creation
+def _apply_pro_formatting(writer, df, sheet_name="Results"):
+    """Apply professional XlsxWriter formatting to the output."""
+    workbook  = writer.book
+    worksheet = writer.sheets[sheet_name]
 
-def save_results(rows: list, original_filepath: str) -> None:
-    """
-    Save results to EXCEL.
-    Excel: original columns + AI_Phone + AI_Agent_Phone + Etat
-           + one column per enriched field that was filled.
-    
-    Fusion: if a file with the same date exists in Extraction_{folder}, append to it.
-    """
-    import datetime
-    import openpyxl
-    
-    orig_path = Path(original_filepath)
-    filename    = orig_path.name
-    name_no_ext = orig_path.stem
-    
-    # Get the name of the folder where the input file was found
-    input_folder = orig_path.parent.name
-    out_dir = config.get_output_dir(input_folder)
-    
-    date_str = datetime.date.today().strftime("%Y-%m-%d")
-    fusion_path = out_dir / f"{input_folder}_{date_str}.xlsx"
-    
-    # ── Discover Enriched Headers ──
-    enriched_keys = set()
-    for r in rows:
-        enriched_keys.update(getattr(r, "enriched_fields", {}).keys())
-    enriched_keys = sorted(enriched_keys)
-    
-    base_headers = list(rows[0].raw.keys()) if rows else []
-    ai_status_header = config.STATUS_COLUMN_NAME
-    
-    # AI Results columns (only add if not in base headers to avoid duplicates)
-    candidate_ai_headers = ["AI_Phone", "AI_Agent_Phone", ai_status_header]
-    ai_headers = [h for h in candidate_ai_headers if h not in base_headers]
-    
-    # Enriched Fields columns
-    candidate_enr_headers = [f"AI_{k.upper()}" for k in enriched_keys]
-    enr_headers = [h for h in candidate_enr_headers if h not in base_headers]
-    
-    all_headers = base_headers + ai_headers + enr_headers
+    # --- 1. Formats ---
+    header_fmt = workbook.add_format({
+        'bold': True,
+        'text_wrap': False,
+        'valign': 'top',
+        'fg_color': '#2F5597',  # Dark Blue
+        'font_color': 'white',
+        'border': 1
+    })
 
-    # ── Excel Workbook ──
-    existing_fps = set()
-    try:
-        if fusion_path.exists():
-            wb = openpyxl.load_workbook(fusion_path)
-            ws = wb.active
-            # Read existing headers to map correctly and not shift columns
-            existing_headers = [str(cell.value) for cell in ws[1] if cell.value is not None]
-            
-            # --- Progress Optimization: Pre-scan for duplicates ---
-            from utils.column_detector import detect_columns
-            out_mapping = detect_columns(existing_headers)
-            col_map = {name: i for i, name in enumerate(existing_headers)}
-            
-            def get_cell_val(row_cells, concept):
-                col_name = out_mapping.get(concept)
-                if col_name and col_name in col_map:
-                    val = row_cells[col_map[col_name]].value
-                    return str(val).strip() if val is not None else None
-                return None
+    ai_col_fmt = workbook.add_format({
+        'bg_color': '#DDEBF7',  # Light Blue
+        'border': 1
+    })
 
-            for row_cells in ws.iter_rows(min_row=2):
-                o_nom = get_cell_val(row_cells, "raison_sociale")
-                o_adr = get_cell_val(row_cells, "adresse")
-                o_siren = get_cell_val(row_cells, "siren") or get_cell_val(row_cells, "siret")
-                
-                # Fingerprint reconstruction
-                import re
-                n = str(o_nom or "").strip().lower()
-                a = str(o_adr or "").strip().lower()
-                n = re.sub(r'[^a-z0-9]', '', n)
-                a = re.sub(r'[^a-z0-9]', '', a)
-                if o_siren:
-                    o_siren = str(o_siren).replace(".0", "").replace(" ", "").zfill(9)
-                if o_siren and len(o_siren) >= 9:
-                    fp = f"SIREN:{o_siren}"
-                else:
-                    fp = f"NA:{n}|{a}"
-                existing_fps.add(fp)
+    # --- 2. Freeze Panes (Header row) ---
+    worksheet.freeze_panes(1, 0)
 
-            # Expanded headers logic
-            new_cols_found = [h for h in all_headers if h not in existing_headers]
-            if new_cols_found:
-                next_col = len(existing_headers) + 1
-                for new_h in new_cols_found:
-                    ws.cell(row=1, column=next_col).value = new_h
-                    existing_headers.append(new_h)
-                    next_col += 1
-                logger.info(f"[Writer] Expanded headers with: {new_cols_found}")
-        else:
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "Results"
-            ws.append(all_headers)
-            existing_headers = all_headers
-    except Exception as exc:
-        logger.error(f"[Writer] CRITICAL: File {fusion_path.name} is CORRUPTED. Skipping. Error: {exc}")
-        # Automatically move corrupted file to a safe subfolder
-        recovery_dir = fusion_path.parent / "CORRUPTED_FILES"
-        recovery_dir.mkdir(parents=True, exist_ok=True)
-        import os
-        try:
-            os.rename(fusion_path, recovery_dir / fusion_path.name)
-        except: pass
-        return
+    # --- 3. Auto-Filter ---
+    worksheet.autofilter(0, 0, len(df), len(df.columns) - 1)
+
+    # --- 4. Column Widths & Header Style ---
+    for i, col_name in enumerate(df.columns):
+        # Handle duplicate column names: df.iloc[:, i] ensures we get a single Series
+        col_data = df.iloc[:, i]
         
-    rows_added = 0
-    for r in rows:
-        # Check if row is already in the daily fusion file
-        if r.get_fingerprint() in existing_fps:
-            continue
-
-        # Determine Status accurately
-        status_to_write = ""
-        if r.phone:
-            status_to_write = "Done"
-        elif r.status == "NO TEL":
-            status_to_write = "No Tel"
-        elif r.status == "DONE":
-            status_to_write = "Done"
-
-        # Map data by column name to prevent sliding
-        row_dict = {}
-        # 1. Fill base data
-        for h in base_headers:
-            row_dict[h] = r.raw.get(h, "")
-        # 2. Fill AI Core
-        row_dict["AI_Phone"] = r.phone or ""
-        row_dict["AI_Agent_Phone"] = r.agent_phone or ""
-        row_dict[ai_status_header] = status_to_write
-        # 3. Fill Enriched
-        for k in enriched_keys:
-            info = getattr(r, "enriched_fields", {}).get(k, {})
-            row_dict[f"AI_{k.upper()}"] = info.get("value", "")
-
-        # Write ordered data based on actual worksheet headers
-        ordered_data = []
-        for h in existing_headers:
-            val = row_dict.get(h, "")
-            if isinstance(val, (list, dict)):
-                val = str(val)
-            ordered_data.append(val)
+        try:
+            # Flatten data to strings and find max length
+            max_data_len = col_data.astype(str).map(len).max()
+            if pd.isna(max_data_len): max_data_len = 0
+        except:
+            max_data_len = 0
             
-        ws.append(ordered_data)
-        rows_added += 1
+        max_len = max(float(max_data_len), len(str(col_name))) + 2
+        width = min(max_len, 50)
+        
+        # Apply special color if it's an AI column
+        if str(col_name).startswith("AI_") or str(col_name) == config.STATUS_COLUMN_NAME:
+            worksheet.set_column(i, i, width, ai_col_fmt)
+        else:
+            worksheet.set_column(i, i, width)
+        
+        # Write header with format
+        worksheet.write(0, i, str(col_name), header_fmt)
 
-    if rows_added > 0:
-        wb.save(fusion_path)
-        logger.info(f"[Writer] Results fused/saved: {fusion_path} (+{rows_added} new rows)")
-    else:
-        logger.info(f"[Writer] All rows already exist in the fusion file. No changes saved.")
-
+def _deduplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure all column names are unique, keeping the last occurrence (the newest data)."""
+    if df.columns.duplicated().any():
+        # Logic: ~df.columns.duplicated(keep='last') returns True for the last occurrence
+        # and for unique columns.
+        df = df.loc[:, ~df.columns.duplicated(keep='last')]
+    return df
 
 def save_subset_to_excel(rows: list, target_path: Path) -> None:
-    """
-    Save a list of ExcelRow objects to a NEW Excel file.
-    Uses dictionary mapping to avoid column sliding.
-    """
-    import openpyxl
-    if not rows:
-        return
+    """Save a list of ExcelRow objects using Pandas with Pro formatting."""
+    if not rows: return
+    
+    # 1. Prepare Data
+    data = [r.to_dict() for r in rows]
+    df = pd.DataFrame(data)
+    
+    # Reorder/Rename status header to user's config
+    if "__status" in df.columns:
+        df = df.rename(columns={
+            "__status": config.STATUS_COLUMN_NAME, 
+            "__phone": "AI_Phone", 
+            "__agent_phone": "AI_Agent_Phone"
+        })
+    
+    # 2. Protection against duplicate columns (e.g. if re-processing an output file)
+    df = _deduplicate_columns(df)
 
-    # Discover Enriched Headers
-    enriched_keys = set()
+    safe_mkdir(target_path.parent)
+    suffix = target_path.suffix.lower()
+
+    if suffix == ".csv":
+        # Professional CSV: UTF-8-SIG (Excel friendly) + Semicolon
+        df.to_csv(target_path, sep=";", index=False, encoding="utf-8-sig")
+        logger.info(f"[Writer] Subset saved as CSV (Pandas): {target_path}")
+    else:
+        # Professional Excel: XlsxWriter engine
+        with pd.ExcelWriter(target_path, engine='xlsxwriter') as writer:
+            df.to_excel(writer, sheet_name="Results", index=False)
+            _apply_pro_formatting(writer, df)
+        logger.info(f"[Writer] Subset saved as Pro Excel (Pandas): {target_path}")
+    
+    safe_touch(target_path)
+
+def save_results(rows: list, original_filepath: str) -> None:
+    """Daily Fusion Handler using Pandas."""
+    if not rows: return
+    
+    orig_path = Path(original_filepath)
+    input_folder = orig_path.parent.name
+    out_dir = config.get_output_dir(input_folder)
+    date_str = datetime.date.today().strftime("%Y-%m-%d")
+    fusion_path = out_dir / f"{input_folder}_{date_str}.xlsx"
+
+    # 1. Convert new rows to DF
+    new_data = []
     for r in rows:
-        enriched_keys.update(getattr(r, "enriched_fields", {}).keys())
-    enriched_keys = sorted(enriched_keys)
-
-    base_headers = list(rows[0].raw.keys())
-    ai_status_header = config.STATUS_COLUMN_NAME
+        d = r.to_dict()
+        d["__fingerprint"] = r.get_fingerprint()
+        new_data.append(d)
+    new_df = pd.DataFrame(new_data)
     
-    # AI Results columns
-    candidate_ai_headers = ["AI_Phone", "AI_Agent_Phone", ai_status_header]
-    ai_headers = [h for h in candidate_ai_headers if h not in base_headers]
+    # Standardize column names
+    new_df = new_df.rename(columns={
+        "__status": config.STATUS_COLUMN_NAME, 
+        "__phone": "AI_Phone", 
+        "__agent_phone": "AI_Agent_Phone"
+    })
     
-    # Enriched Fields columns
-    candidate_enr_headers = [f"AI_{k.upper()}" for k in enriched_keys]
-    enr_headers = [h for h in candidate_enr_headers if h not in base_headers]
-    
-    all_headers = base_headers + ai_headers + enr_headers
+    # Deduplicate columns in new_df
+    new_df = _deduplicate_columns(new_df)
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Results"
-    ws.append(all_headers)
-
-    for r in rows:
-        status_to_write = ""
-        if r.phone:
-            status_to_write = "Done"
-        elif r.status == "NO TEL":
-            status_to_write = "No Tel"
-        elif r.status == "DONE":
-            status_to_write = "Done"
-
-        # Map data by column name
-        row_dict = {}
-        for h in base_headers:
-            row_dict[h] = r.raw.get(h, "")
-        
-        row_dict["AI_Phone"] = r.phone or ""
-        row_dict["AI_Agent_Phone"] = r.agent_phone or ""
-        row_dict[ai_status_header] = status_to_write
-        
-        for k in enriched_keys:
-            info = getattr(r, "enriched_fields", {}).get(k, {})
-            row_dict[f"AI_{k.upper()}"] = info.get("value", "")
+    # 2. Merge with existing if available
+    if fusion_path.exists():
+        try:
+            old_df = pd.read_excel(fusion_path, dtype=str)
             
-        ordered_data = []
-        for h in all_headers:
-            val = row_dict.get(h, "")
-            if isinstance(val, (list, dict)):
-                val = str(val)
-            ordered_data.append(val)
+            # Combine and deduplicate rows by (fingerprint + phone) to allow one-to-many
+            final_df = pd.concat([old_df, new_df], ignore_index=True, sort=False)
+            if "__fingerprint" in final_df.columns and "AI_Phone" in final_df.columns:
+                final_df = final_df.drop_duplicates(subset=["__fingerprint", "AI_Phone"], keep='last')
             
-        ws.append(ordered_data)
+            # Final protection for columns
+            final_df = _deduplicate_columns(final_df)
+            final_df = final_df.reset_index(drop=True)
+        except Exception as e:
+            logger.error(f"[Writer] Failed to fuse with existing file: {e}. Starting fresh.")
+            final_df = new_df
+    else:
+        final_df = new_df
 
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(target_path)
-    logger.info(f"[Writer] Subset saved: {target_path}")
+    # 3. Final Save with Pro Formatting
+    try:
+        with pd.ExcelWriter(fusion_path, engine='xlsxwriter') as writer:
+            final_df.to_excel(writer, sheet_name="Results", index=False)
+            _apply_pro_formatting(writer, final_df)
+        safe_touch(fusion_path)
+        logger.info(f"[Writer] Daily fusion updated: {fusion_path.name}")
+    except Exception as e:
+        logger.error(f"[Writer] Critical failure during fusion save: {e}")

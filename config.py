@@ -46,7 +46,6 @@ WORK_DIR = Path(os.getenv("WORK_DIR", str(BASE_DIR / "WORK")))
 # ── Force Crawl4AI to use a writable workspace directory ──
 CRAWL4AI_HOME = Path(os.getenv("CRAWL4AI_HOME", str(BASE_DIR / ".crawl4ai_cache")))
 os.environ["CRAWL4AI_HOME"] = str(CRAWL4AI_HOME)
-CRAWL4AI_HOME.mkdir(parents=True, exist_ok=True)
 
 # The entry point for ALL raw files. Place your dirty/new Excel files here.
 INCOMING_DIR = Path(os.getenv("INCOMING_DIR", str(WORK_DIR / "INCOMING")))
@@ -68,6 +67,10 @@ OUTPUT_DEFAULT = OUTPUT_ROOT / "Results"
 ARCHIVE_BACKUP_DIR = WORK_DIR / "ARCHIVE" / "BACKUP"
 OUTPUT_SUCCEED_DIR = WORK_DIR / "ARCHIVE" / "SUCCEED"
 OUTPUT_FAILED_DIR  = WORK_DIR / "ARCHIVE" / "FAILED"
+CHECKPOINTS_DIR    = WORK_DIR / "CHECKPOINTS"
+
+from utils.fs import safe_mkdir as _safe_mkdir_cfg
+_safe_mkdir_cfg(CHECKPOINTS_DIR)
 
 # Compatibility aliases
 ARCHIVE_DIR        = ARCHIVE_BACKUP_DIR
@@ -75,7 +78,8 @@ OUTPUT_ARCHIVE_DIR = OUTPUT_SUCCEED_DIR
 
 # Log files go here
 LOG_DIR = Path(os.getenv("LOG_DIR", str(BASE_DIR / "logs")))
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+from utils.fs import safe_mkdir as _safe_mkdir_cfg
+_safe_mkdir_cfg(LOG_DIR)
 
 # ── OUTPUT SETTINGS ──
 STATUS_COLUMN_NAME = os.getenv("STATUS_COLUMN_NAME", "Etat_IA")
@@ -93,8 +97,9 @@ READY_DIR       = WORK_DIR / "READY"
 
 def get_output_dir(input_folder_name: str) -> Path:
     """Returns {WORK_DIR}/output/{input_folder_name}"""
+    from utils.fs import safe_mkdir
     path = OUTPUT_ROOT / input_folder_name
-    path.mkdir(parents=True, exist_ok=True)
+    safe_mkdir(path)
     return path
 
 
@@ -112,7 +117,7 @@ SAVE_INTERVAL = int(os.getenv("SAVE_INTERVAL", "50"))
 RETRY_CHUNK_SIZE = int(os.getenv("RETRY_CHUNK_SIZE", "50"))
 
 # ── File Decomposition (Chunking) ──
-DECOMPOSITION_CHUNK_SIZE = int(os.getenv("DECOMPOSITION_CHUNK_SIZE", "1000"))
+DECOMPOSITION_CHUNK_SIZE = int(os.getenv("DECOMPOSITION_CHUNK_SIZE", "500"))
 
 # ── Recovery & Second Chance ──
 REPROCESS_FAILED_ROWS = os.getenv("REPROCESS_FAILED_ROWS", "true").lower() == "true"
@@ -255,7 +260,6 @@ if DOCKER_ENV and os.path.exists("/dev/shm"):
     _default_profile = "/dev/shm/ai_hunter_profile"
     
 CHROMIUM_PROFILE_PATH = os.path.expanduser(os.getenv("CHROMIUM_PROFILE_PATH", _default_profile))
-Path(CHROMIUM_PROFILE_PATH).parent.mkdir(parents=True, exist_ok=True)
 
 # The specific profile folder name inside the profile path
 # (usually "Default" unless you created multiple profiles)

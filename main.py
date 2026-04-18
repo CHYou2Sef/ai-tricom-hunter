@@ -39,7 +39,6 @@ import config
 from agent import process_file_async, init_agent_pool, close_agent_pool
 from utils.logger import get_logger
 from utils.health_check import check_all
-from utils.lock_manager import acquire_lock, release_lock
 
 logger = get_logger(__name__)
 
@@ -48,26 +47,15 @@ logger = get_logger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def ensure_directories() -> None:
-    """Create all required directories if they don't already exist."""
+    """Create only essential directories at startup with world-writable permissions."""
+    from utils.fs import safe_mkdir
     dirs = [
         config.WORK_DIR,
         config.INCOMING_DIR,
-        config.INPUT_STD_DIR,
-        config.INPUT_SIR_DIR,
-        config.INPUT_RS_DIR,
-        config.INPUT_OTHER_DIR,
-        config.READY_DIR,
-        config.OUTPUT_ROOT,
-        config.OUTPUT_RS_ADR,
-        config.OUTPUT_SIR_ADR,
-        config.OUTPUT_DEFAULT,
-        config.ARCHIVE_BACKUP_DIR,
-        config.OUTPUT_SUCCEED_DIR,
-        config.OUTPUT_FAILED_DIR,
         config.LOG_DIR,
     ]
     for d in dirs:
-        os.makedirs(d, exist_ok=True)
+        safe_mkdir(d)
         logger.debug(f"[Setup] Verified directory: {d}")
 
 def cleanup_input_folders() -> None:
@@ -172,14 +160,6 @@ async def main_async() -> None:
 
     ensure_directories()
     
-    # ── SINGLETON LOCK (Conflict Prevention) ──
-    instance_name = "DOCKER-AGENT" if getattr(config, "DOCKER_ENV", False) else f"LOCAL-{os.getlogin()}"
-    if not acquire_lock(instance_name):
-        logger.critical(f"🛑 SHUTDOWN: Conflict detected. Another agent is already using the {config.WORK_DIR} directory.")
-        print(f"\n🚨  CONFLICT ALERT: Only ONE agent can manage the WORK directory at a time.")
-        print(f"    Please stop the other instance before starting this one.\n")
-        return
-
     # Initialize the agent pool for true parallelism
     await init_agent_pool(config.MAX_CONCURRENT_WORKERS)
 
@@ -217,15 +197,19 @@ async def main_async() -> None:
                 await asyncio.sleep(config.WATCHDOG_POLL_INTERVAL * 2)
         asyncio.create_task(poll_files())
 
-    print(f"\n📡 Agent is LIVE. Browsing mode active.")
-    print("   Press Ctrl+C to stop.\n")
+    print(f"\n{'━' * 60}")
+    print(f"📡 Agent is LIVE. Browsing mode active.")
+    print(f"   Workers: {config.MAX_CONCURRENT_WORKERS} | Save interval: every {config.SAVE_INTERVAL} rows")
+    print(f"   Watching: {', '.join(os.path.basename(str(d)) for d in watch_dirs if os.path.exists(d))}")
+    print(f"   Press Ctrl+C to stop.")
+    print(f"{'━' * 60}\n")
 
     try:
         while True:
             filepath = await file_queue.get()
             
             if not os.path.exists(filepath):
-                logger.warning(f"[Main] File no longer exists: {filepath}")
+                logger.warning(f"[Main] ⚠️  File vanished before processing: {os.path.basename(filepath)}")
                 file_queue.task_done()
                 continue
             
@@ -233,32 +217,47 @@ async def main_async() -> None:
                 # ── Search & Enrich Phase ──
                 # At this point, the file is already classfied (and decomposed if needed) by pre_process.py
                 await process_file_async(filepath)
+            except PermissionError as e:
+                logger.error(
+                    f"[Main] 🔒 PERMISSION DENIED on '{os.path.basename(filepath)}': {e}\n"
+                    f"       → Fix: run 'sudo chown -R $USER:$USER WORK/' on host"
+                )
             except Exception as e:
-                logger.error(f"[Main] Error processing {os.path.basename(filepath)}: {e}", exc_info=True)
+                logger.error(f"[Main] ❌ Error processing '{os.path.basename(filepath)}': {e}", exc_info=True)
             
             file_queue.task_done()
+
+            # Show idle status when queue is empty
+            if file_queue.empty():
+                logger.info("[Main] 💤 Queue empty. Waiting for new files...")
             
     except asyncio.CancelledError:
-        logger.info("[Main] Shutdown signalled.")
+        logger.info("[Main] 🛑 Shutdown signal received.")
     except Exception as e:
-        logger.error(f"[Main] Unexpected loop error: {e}", exc_info=True)
+        logger.error(f"[Main] 💥 Unexpected loop error: {e}", exc_info=True)
     finally:
         observer.stop()
         observer.join()
         await close_agent_pool()
-        logger.info("[Main] Browser pool closed.")
-        
-        release_lock()
+
+        print(f"\n{'━' * 60}")
+        print(f"🏁  SESSION TERMINÉE")
+        print(f"{'─' * 60}")
+        print(f"   🌐 Browser pool closed.")
+        print(f"   🧹 Cleanup finished.")
+        print(f"   📂 Results in: {config.OUTPUT_ROOT}")
+        print(f"{'━' * 60}\n")
         
         cleanup_input_folders()
-        logger.info("[Main] Cleanup finished. Goodbye!")
 
 
 def main():
     try:
         asyncio.run(main_async())
     except KeyboardInterrupt:
-        print("\n\n⏹️  Agent stopped by user.\n")
+        print(f"\n\n{'━' * 60}")
+        print(f"⏹️   Agent arrêté par l'utilisateur.")
+        print(f"{'━' * 60}\n")
 
 if __name__ == "__main__":
     main()

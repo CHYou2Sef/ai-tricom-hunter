@@ -24,14 +24,15 @@ def check_disk() -> bool:
 
 def check_directories() -> bool:
     required_dirs = [
+        config.WORK_DIR.parent, # The project root
         config.WORK_DIR,
-        config.INCOMING_DIR,
-        config.LOG_DIR
+        config.INCOMING_DIR
     ]
     for d in required_dirs:
         if not d.exists():
             try:
-                d.mkdir(parents=True, exist_ok=True)
+                from utils.fs import safe_mkdir
+                safe_mkdir(d)
             except Exception:
                 return False
     return True

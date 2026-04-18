@@ -27,10 +27,10 @@ from typing import Optional
 COLUMN_KEYWORDS = {
 
     # ── Company name (Raison Sociale) ──
-    # Could appear as: "Raison sociale", "Dénomination", "Nom commercial", etc.
     "raison_sociale": [
         "raison sociale", "raison_sociale",
         "denomination", "dénomination",
+        "denominationunite",       # INSEE: denominationUniteLegale
         "nom commercial", "nomcommercial",
         "nom de l'entreprise", "nom entreprise",
         "societe", "société",
@@ -38,14 +38,22 @@ COLUMN_KEYWORDS = {
         "enseigne",
     ],
 
-    # ── Full address ──
+    # ── Full address (single-field) ──
     "adresse": [
-        "adresse", "address",
-        "siege", "siège",
-        "localisation", "location",
-        "voie", "rue",
-        "complement", "complément",
-        "adresse du siege",
+        "adresse complete", "adresse du siege", "adresse du siège",
+        "adresse siege", "full address",
+    ],
+
+    # ── Address components (split-field, INSEE format) ──
+    "adresse_numero": [
+        "numerovoie", "numero voie", "numvoie", "num_voie",
+    ],
+    "adresse_typevoie": [
+        "typevoie", "type voie", "type_voie", "indice",
+    ],
+    "adresse_libellevoie": [
+        "libellevoie", "libelle voie", "libelle_voie",
+        "libellerue", "libelle rue",
     ],
 
     # ── SIREN (9-digit company identifier) ──
@@ -66,12 +74,16 @@ COLUMN_KEYWORDS = {
     # ── City ──
     "ville": [
         "ville", "city", "commune", "localite", "localité",
+        "libellecommune", "libelle commune",
     ],
 
     # ── Phone number (if one already exists in the file) ──
+    # CRITICAL: Do NOT include generic words like 'numero' or 'contact'
+    # that could match street numbers or status fields.
     "telephone": [
-        "telephone", "téléphone", "tel", "tél", "phone", "contact",
-        "num tel", "numéro", "numero",
+        "telephone", "téléphone", "tel", "tél", "phone",
+        "portable", "mobile", "fax", "fixe",
+        "num tel", "numtel",
     ],
 
     # ── First name (Prénom) ──
@@ -86,7 +98,7 @@ COLUMN_KEYWORDS = {
 
     # ── Legal form ──
     "forme_juridique": [
-        "forme juridique", "formejuridique", "forme", "legal",
+        "forme juridique", "formejuridique", "legal",
     ],
 
     # ── Activity / APE code ──
@@ -98,7 +110,7 @@ COLUMN_KEYWORDS = {
     # ── Registration date ──
     "date_immatriculation": [
         "immatriculation", "creation", "création", "debut", "début",
-        "date", "rne",
+        "rne",
     ],
 }
 
@@ -107,17 +119,15 @@ def _normalize(text: str) -> str:
     """
     Normalize a string for comparison:
     - Lowercase everything
-    - Remove accents by converting common accented chars
+    - Remove accents
+    - Replace separators (_ and -) with spaces
     - Remove extra whitespace
-
-    BEGINNER NOTE:
-        We normalize so that "Adresse Du Siège" and "adresse du siege"
-        both become "adresse du siege" and match the same keywords.
     """
     if not isinstance(text, str):
         return ""
 
     text = text.lower().strip()
+    text = text.replace("_", " ").replace("-", " ")
 
     # Replace common accented characters
     replacements = {
@@ -141,14 +151,20 @@ def _normalize(text: str) -> str:
 def _score_column(col_header: str, keywords: list) -> int:
     """
     Score a single column header against a list of keywords.
-    Returns the number of matching keywords found.
-
-    A higher score = better match.
+    Uses word boundaries for short keywords to prevent false positives (e.g. 'tel' in 'etablissement').
     """
     normalized = _normalize(col_header)
     score = 0
     for kw in keywords:
-        if _normalize(kw) in normalized:
+        kw_norm = _normalize(kw)
+        if not kw_norm:
+            continue
+            
+        if len(kw_norm) <= 3:
+            # Word boundary check for short keywords
+            if re.search(rf'\b{re.escape(kw_norm)}\b', normalized):
+                score += 1
+        elif kw_norm in normalized:
             score += 1
     return score
 
@@ -158,20 +174,8 @@ def detect_columns(headers: list) -> dict:
     Given a list of Excel column headers, return a mapping of
     concept → column_name (the best matching header for each concept).
 
-    Returns a dict like:
-    {
-        "raison_sociale": "Dénomination / Nom",
-        "adresse":        "Adresse du siège",
-        "siren":          "SIREN (siège)",
-        ...
-    }
-
-    If no column matches a concept above the minimum threshold,
-    that concept maps to None.
-
-    BEGINNER NOTE:
-        We iterate over every concept, then over every header,
-        and pick the header with the highest keyword score.
+    Supports both single-field addresses ("Adresse du siège") and
+    split-field addresses (INSEE: numeroVoie + typeVoie + libelleVoie + codePostal + commune).
     """
 
     # Minimum score required to consider a match valid
@@ -192,6 +196,20 @@ def detect_columns(headers: list) -> dict:
         # Only assign if score meets minimum threshold
         result[concept] = best_header if best_score >= MIN_SCORE else None
 
+    # ── Composite Address Builder ──
+    # If no single "adresse" column was found, check if we have split components
+    if not result.get("adresse"):
+        has_components = (
+            result.get("adresse_numero") or
+            result.get("adresse_typevoie") or
+            result.get("adresse_libellevoie") or
+            result.get("code_postal") or
+            result.get("ville")
+        )
+        if has_components:
+            # Set a virtual marker so ExcelRow knows to assemble from parts
+            result["adresse"] = "__COMPOSITE__"
+
     return result
 
 
@@ -202,19 +220,12 @@ def validate_mapping(mapping: dict) -> dict:
         2. siren / siret   → we can do a SIREN+Adresse search
         3. adresse         → required for BOTH search types
 
-    Returns a dict with validation results:
-    {
-        "has_raison_sociale": True/False,
-        "has_siren_or_siret": True/False,
-        "has_adresse": True/False,
-        "can_search_rs": True/False,
-        "can_search_siren": True/False,
-    }
+    Returns a dict with validation results.
     """
     has_rs    = mapping.get("raison_sociale") is not None
     has_siren = (mapping.get("siren") is not None or
                  mapping.get("siret") is not None)
-    has_adr   = mapping.get("adresse") is not None
+    has_adr   = mapping.get("adresse") is not None  # includes __COMPOSITE__
 
     return {
         "has_raison_sociale":  has_rs,
@@ -223,3 +234,4 @@ def validate_mapping(mapping: dict) -> dict:
         "can_search_rs":       has_rs and has_adr,
         "can_search_siren":    has_siren and has_adr,
     }
+

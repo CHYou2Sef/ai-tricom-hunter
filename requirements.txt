@@ -41,6 +41,7 @@ lxml>=5.1.0
 # Excel File Handling
 openpyxl>=3.1.2
 pandas>=2.2.0
+xlsxwriter>=3.1.9
 
 
 # ── System & Utilities ────────────────────────────────────────────────
