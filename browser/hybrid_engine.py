@@ -317,7 +317,15 @@ class HybridAutomationEngine:
             self._stats[tier]["attempts"] += 1
 
             try:
-                result = await method(*args, **kwargs)
+                # ── 2.2 THE SAFETY NET: TIMEOUT GUARD (P0 FIX) ────────────
+                # Prevents a single hung browser from blocking the whole agent loop.
+                # We use a 90s timeout which is generous for even slow AI searches.
+                try:
+                    result = await asyncio.wait_for(method(*args, **kwargs), timeout=90.0)
+                except asyncio.TimeoutError:
+                    logger.error(f"[HybridEngine] Tier {tier} TIMEOUT in '{method_name}' after 90s.")
+                    result = None # Force escalation
+
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms
 
@@ -346,7 +354,7 @@ class HybridAutomationEngine:
                     return result
 
                 logger.warning(
-                    f"[HybridEngine] Tier {tier} method '{method_name}' returned empty. Assuming failure."
+                    f"[HybridEngine] Tier {tier} method '{method_name}' returned empty or Timed out. Assuming failure."
                 )
             except Exception as exc:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)

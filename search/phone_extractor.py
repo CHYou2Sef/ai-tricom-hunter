@@ -172,14 +172,17 @@ def _dedupe_and_log(phones: List[str], source_label: Optional[str] = None) -> Li
     return unique
 
 
-def normalize_phone(phone: str) -> Optional[str]:
+def normalize_phone(phone: Optional[str]) -> Optional[str]:
     """
     Normalise a raw phone string:
       - Remove spaces, dots, dashes
       - Validate length (9–15 digits)
       - Format French numbers as 'XX XX XX XX XX'
     """
-    digits_only = re.sub(r'[\s\.\-\(\)]', '', phone).strip()
+    if not phone:
+        return None
+    
+    digits_only = re.sub(r'[\s\.\-\(\)]', '', str(phone)).strip()
 
     if not re.match(r'^\+?\d{9,15}$', digits_only):
         return None

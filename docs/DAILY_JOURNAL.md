@@ -7,6 +7,37 @@ Ce document trace l'historique complet de l'évolution du projet **AI Phone Hunt
 analyser agent.log et debug_archive.log et @terminal:python puis expliquer dans un rapport techniques les problemes , les bugs , les erreurs , .. puis proposer des solution stable et robust .. ;
 Repondre aux questions : - combien de foix le playwriter est success de lancer apres qu'il soit bloquer ? comment il etait bloquer ?; combien de foix les autre tier sont success ?; pourquoi l'agent est maintenant bloquer ?
 
+## 2026-04-19: Real-Time Synchronization & Null-Safety Hardening
+
+### 🔄 Real-Time "Worker File" Sync
+- **Live Updates**: Refactored `excel/writer.py` to ensure every detected phone number is written back to the **original batch file** (`_batch_00X.xlsx`) in real-time. Previously, results only appeared in the global daily fusion file, leaving the current worker file "empty" to the user's eye.
+- **Dual-Stream Saving**: The system now simultaneously maintains:
+    1. The **Atomic JSON Checkpoint** (for resume integrity).
+    2. The **Local Worker File** (for user visibility).
+    3. The **Global Daily Fusion** (for reporting).
+
+### 🛡️ Null-Safety & Crash Resilience
+- **TypeError P0 Fix**: Patched `search/phone_extractor.py` to handle `NoneType` inputs in `normalize_phone`. This prevents the agent from crashing when processing incomplete or corrupted data entries during a recovery/resume phase.
+- **Multi-Batch Checkpoint Recovery**: Upgraded the internal recovery tools to handle data restoration across multiple chunks (`batch_001`, `batch_002`, etc.) simultaneously from a single log stream.
+
+---
+
+## 2026-04-18: Maximum Stability & Data Recovery
+
+### ⏱️ 90-Second "Hard Timeout" Guardian
+- **Anti-Hang Orchestration**: Implemented a mandatory `asyncio.wait_for` timeout in `browser/hybrid_engine.py`. If a browser tier (Patchright, Nodriver, etc.) hangs for more than 90 seconds due to network lag or process locks, the engine now forcefully kills the attempt and escalates to the next tier.
+- **Indefinite Block Resolution**: This eliminates the issue where a single unresponsive Chromium instance would stall the entire 24/7 pipeline.
+
+### 💾 Data Integrity & Recovery
+- **Checkpoint Protection**: Fixed a bug in `main.py` where the `WORK/CHECKPOINTS` directory was being deleted during the shutdown cleanup routine. Added `CHECKPOINTS` to the persistence whitelist.
+- **Log-Based Reconstruction**: Developed `scratch/rebuild_checkpoint.py` to perform an "autopsy" on `logs/debug_archive.log`. Successfully reconstructed lost progress for **293+ rows**, allowing the agent to resume without re-scraping previously harvested data.
+
+### 🧹 Resource Hygiene
+- **Zombie Process Reaper**: Performed a deep system purge of orphaned `chrome`, `chromium`, and `playwright` processes that were hoarding system PIDs and filling `/tmp` memory.
+- **Disk Health**: Stabilized the workflow against `/tmp` saturation errors which previously caused browser profile corruption.
+
+---
+
 ## 2026-10-XX: BLACKBOXAI Senior Engineer Audit & Fixes
 
 **By BLACKBOXAI (15yrs exp IA Agent Expert)**

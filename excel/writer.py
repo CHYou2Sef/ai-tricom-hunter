@@ -104,10 +104,19 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
     safe_touch(target_path)
 
 def save_results(rows: list, original_filepath: str) -> None:
-    """Daily Fusion Handler using Pandas."""
+    """Daily Fusion Handler + Local File Synchronizer."""
     if not rows: return
     
     orig_path = Path(original_filepath)
+    
+    # ── Part A: Save back to the ORIGINAL WORKING FILE ──
+    # This keeps the current batch file updated in real-time.
+    try:
+        save_subset_to_excel(rows, orig_path)
+    except Exception as e:
+        logger.error(f"[Writer] Failed to update local worker file {orig_path.name}: {e}")
+
+    # ── Part B: Daily Fusion Handler ──
     input_folder = orig_path.parent.name
     out_dir = config.get_output_dir(input_folder)
     date_str = datetime.date.today().strftime("%Y-%m-%d")

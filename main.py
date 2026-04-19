@@ -63,7 +63,7 @@ def cleanup_input_folders() -> None:
     import shutil
     # List of folder basenames we must NEVER delete
     keep_dirs = [
-        "INCOMING", "STD", "SIREN", "RS", "OTHERS", "READY", "output", "ARCHIVE"
+        "INCOMING", "STD", "SIREN", "RS", "OTHERS", "READY", "output", "ARCHIVE", "CHECKPOINTS"
     ]
     
     input_root = config.INPUT_DIR
