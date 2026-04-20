@@ -1,9 +1,17 @@
+import os
 from fastapi import FastAPI
 import config
 from utils.health_check import check_all
 from utils.observability import setup_observability
 
-app = FastAPI(title="AI Phone Hunter Monitor")
+# Disable docs in production environments for security
+show_docs = os.getenv("DOCKER_ENV", "false").lower() != "true"
+
+app = FastAPI(
+    title="AI Phone Hunter Monitor",
+    docs_url="/docs" if show_docs else None,
+    redoc_url="/redoc" if show_docs else None
+)
 
 # Apply Metrics & Tracing
 setup_observability(app)

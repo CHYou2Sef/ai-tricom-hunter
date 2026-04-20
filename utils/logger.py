@@ -131,7 +131,7 @@ def _setup_root_logger() -> None:
     
     for f in [config.LOG_DIR, error_file, archive_file]:
         if os.path.exists(f):
-            try: os.chmod(f, 0o777)
+            try: os.chmod(f, 0o755)
             except: pass
 
     # ── 1. Console handler ──

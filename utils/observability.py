@@ -33,6 +33,8 @@ class TracingMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         
         duration = time.perf_counter() - start_time
+        
+        # Log structured request info
         log.info(
             "http_request",
             method=request.method,
@@ -41,6 +43,11 @@ class TracingMiddleware(BaseHTTPMiddleware):
             duration=f"{duration:.4f}s",
             request_id=request_id
         )
+
+        # Add Security Headers (DAST Compliance)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = "default-src 'self'"
         response.headers["X-Request-ID"] = request_id
         return response
 
