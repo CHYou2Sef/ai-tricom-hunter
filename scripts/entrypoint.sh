@@ -15,9 +15,14 @@ mkdir -p /app/logs /app/WORK /app/browser_profiles
 # Forcefully remove Chrome Singleton locks that cause "Profile in use" errors
 # on container restarts (very common on Linux/Fedora).
 echo "🧹 Cleaning stale Chrome profile locks..."
+# Cleanup in persistent volume
 find /app/browser_profiles -name "SingletonLock" -delete 2>/dev/null || true
 find /app/browser_profiles -name "SingletonSocket" -delete 2>/dev/null || true
 find /app/browser_profiles -name "SingletonCookie" -delete 2>/dev/null || true
+# Cleanup in RAM disk (Docker-specific speed boost)
+find /dev/shm -name "SingletonLock" -delete 2>/dev/null || true
+find /dev/shm -name "SingletonSocket" -delete 2>/dev/null || true
+find /dev/shm -name "SingletonCookie" -delete 2>/dev/null || true
 
 # Don't fail if we can't chmod (e.g. read-only mounts), but try to ensure write access.
 chmod 777 /app/logs /app/WORK /app/browser_profiles /tmp || true

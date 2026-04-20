@@ -205,6 +205,12 @@ class HybridAutomationEngine:
         elif tier == 3: self._tier3 = None
         elif tier == 4: self._tier4 = None
 
+        # 🧹 PROACTIVE CLEANUP (Bug #5 fix)
+        try:
+            from utils.disk_cleanup import check_and_cleanup
+            check_and_cleanup(threshold_pct=90)
+        except: pass
+
     async def stop_all(self) -> None:
         for tier in [0, 1, 2, 3, 4]:
             await self.stop_tier(tier)
@@ -319,57 +325,44 @@ class HybridAutomationEngine:
             try:
                 # ── 2.2 THE SAFETY NET: TIMEOUT GUARD (P0 FIX) ────────────
                 # Prevents a single hung browser from blocking the whole agent loop.
-                # We use a 90s timeout which is generous for even slow AI searches.
                 try:
                     result = await asyncio.wait_for(method(*args, **kwargs), timeout=90.0)
                 except asyncio.TimeoutError:
-                    logger.error(f"[HybridEngine] Tier {tier} TIMEOUT in '{method_name}' after 90s.")
-                    result = None # Force escalation
-
+                    logger.error(f"🛑 [HybridEngine] Tier {tier} HANG/TIMEOUT in '{method_name}' after 90s.")
+                    await self.stop_tier(tier) # KILL IMMEDIATELY
+                    continue # Try next tier
+                
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms
 
                 if result:
                     self._stats[tier]["successes"] += 1
-                    # ✅ Success — reset circuit breaker and SET sticky tier
                     self._consecutive_failures = 0
                     self._last_successful_tier = tier
                     
-                    # Track last URL if this was a navigation
+                    # Track last URL logic...
                     if method_name in ["goto_url", "submit_google_search", "search_google_ai_mode"]:
                         try:
                             if tier == 0 and hasattr(agent, "_driver") and agent._driver:
                                 self._last_target_url = await asyncio.to_thread(lambda: agent._driver.current_url)
-                            elif tier == 1 and hasattr(agent, "_page") and agent._page:
-                                self._last_target_url = agent._page.url
-                            elif tier == 2 and hasattr(agent, "_page") and agent._page:
-                                self._last_target_url = agent._page.url # Nodriver tab.url
-                            elif tier == 3 and "query" in locals():
-                                import urllib.parse
-                                self._last_target_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(locals()['query'])}"
-                            elif tier == 4 and hasattr(agent, "_page") and agent._page:
-                                self._last_target_url = agent._page.url
+                            elif tier == 1 and hasattr(agent, "page") and agent.page:
+                                self._last_target_url = agent.page.url
+                            elif tier in [2, 4] and hasattr(agent, "page") and agent.page:
+                                self._last_target_url = agent.page.url
                         except: pass
-
                     return result
 
                 logger.warning(
-                    f"[HybridEngine] Tier {tier} method '{method_name}' returned empty or Timed out. Assuming failure."
+                    f"[HybridEngine] Tier {tier} method '{method_name}' returned empty. Escalating..."
                 )
             except Exception as exc:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms
                 logger.error(f"[HybridEngine] Tier {tier} exception in '{method_name}': {exc}")
 
-            # Waterfall Escalate
-            next_tier = tier + 1
-            if next_tier > 4:
-                # 🔴 IMPORTANT: Close the last tier if we are about to return None
-                await self.stop_tier(tier)
-                break
-            logger.warning(f"[HybridEngine] Escalating Tier {tier} → Tier {next_tier}...")
+            # Waterfall Escalate - KILL CURRENT TIER FIRST
             await self.stop_tier(tier)
-
+            
             # Cool-down between tiers to let WAF sessions partially reset
             logger.info(f"[HybridEngine] 🕒 Cool-down delay: 5s...")
             await asyncio.sleep(5)

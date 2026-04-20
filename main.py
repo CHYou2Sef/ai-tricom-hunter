@@ -160,6 +160,12 @@ async def main_async() -> None:
 
     ensure_directories()
     
+    # ── SINGLETON LOCK ──
+    # Prevents "Opening in existing browser session" errors by ensuring
+    # only one agent instance runs at a time.
+    from utils.singleton import ensure_singleton
+    _lock_handle = ensure_singleton("agent", config.WORK_DIR)
+    
     # Initialize the agent pool for true parallelism
     await init_agent_pool(config.MAX_CONCURRENT_WORKERS)
 

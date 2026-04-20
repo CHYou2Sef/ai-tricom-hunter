@@ -1,167 +1,66 @@
-"""
-utils/disk_cleanup.py
-
-Proactive disk space management (Bug #5 fix from rapport_technique_webdrivers).
-
-Why this exists:
-    The AI Tricom Hunter launches many browser sessions in sequence.
-    Each session creates temporary Chrome profiles in /tmp/ and accumulates
-    Playwright/Crawl4AI cache in ~/.cache/ms-playwright and ~/.crawl4ai_cache.
-    When these fill the disk quota, ALL Python processes fail to write anything
-    (even log rotation), freezing the entire agent.
-
-Integration:
-    Called automatically at the top of HybridEngine._execute_with_waterfall()
-    before every extraction attempt. It is a "best-effort" check (never raises).
-
-Usage (standalone):
-    from utils.disk_cleanup import check_and_cleanup
-    check_and_cleanup(threshold_pct=85)
-"""
-
-import glob
-import logging
 import os
 import shutil
+import glob
 from pathlib import Path
+from utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
-
-def _get_disk_usage_pct(path: str = "/") -> float:
-    """Return the percentage of disk space used on the partition containing `path`."""
+def check_and_cleanup(threshold_pct: int = 80):
+    """
+    Checks disk usage on /tmp and performs deep cleanup if it exceeds threshold.
+    Also cleans up known zombie browser directories.
+    """
+    tmp_path = "/tmp"
+    
+    # 1. Check Disk Usage
     try:
-        usage = shutil.disk_usage(path)
-        return usage.used / usage.total * 100
-    except Exception:
-        return 0.0
+        usage = shutil.disk_usage(tmp_path)
+        percent_used = (usage.used / usage.total) * 100
+        
+        if percent_used > threshold_pct:
+            logger.warning(f"⚠️  Disk space critical in /tmp ({percent_used:.1f}% used). Performing Deep Recovery...")
+            _deep_purge()
+        else:
+            # Always do a light purge of known zombie folders
+            _light_purge()
+    except Exception as e:
+        logger.debug(f"Disk check failed: {e}")
 
-
-def _safe_remove(path: Path) -> int:
-    """
-    Remove a file or directory tree safely.
-    Returns the number of bytes freed (best-effort approximation).
-    """
-    freed = 0
-    try:
-        if path.is_dir():
-            freed = sum(
-                f.stat().st_size
-                for f in path.rglob("*")
-                if f.is_file()
-            )
-            shutil.rmtree(path, ignore_errors=True)
-        elif path.is_file():
-            freed = path.stat().st_size
-            path.unlink(missing_ok=True)
-    except Exception as exc:
-        logger.debug(f"[DiskCleanup] Could not remove {path}: {exc}")
-    return freed
-
-
-def cleanup_browser_caches() -> int:
-    """
-    Remove ephemeral browser caches created by Playwright and Crawl4AI.
-
-    Targets (all safe to delete — session data only, no user profiles):
-      - /tmp/patchright_chromium*   ← Patchright temp profiles
-      - /tmp/playwright_chromium*   ← Playwright temp profiles (legacy/fallback)
-      - /tmp/uc_*                   ← Nodriver (UC) temp profiles
-      - ~/.crawl4ai_cache/          ← Crawl4AI page cache
-      - /tmp/crawl4ai_*             ← Crawl4AI temp data
-      - /tmp/camoufox_*             ← Camoufox temp data
-      - /tmp/.com.google.Chrome*    ← Generic Chrome temp files
-
-    Does NOT touch:
-      - ~/.cache/ms-playwright/     ← Patchright/Playwright browser binaries (essential!)
-      - ~/.cache/camoufox/          ← Camoufox browser binaries (essential!)
-      - Any file in the project workspace
-
-    Returns:
-        Total bytes freed.
-    """
-    total_freed = 0
-
-    # --- Patchright / Playwright temp Chrome profiles ---
+def _light_purge():
+    """Wipes known temporary browser directories that are often left behind."""
     patterns = [
-        "/tmp/patchright_chromium*", 
-        "/tmp/playwright_chromium*", 
-        "/tmp/playwright_chromiumdev*",
-        "/tmp/uc_*",
-        "/tmp/crawl4ai_*",
-        "/tmp/camoufox_*",
-        "/tmp/.com.google.Chrome*"
+        "/tmp/uc_*",           # undetected-chromedriver profiles
+        "/tmp/puppeteer_*",     # playwright/patchright artifacts
+        "/tmp/.org.chromium.*", # chromium lock files
+        "/tmp/antigravity-nsjail-sandbox-*", # sandbox artifacts
     ]
     
+    cleaned_count = 0
     for pattern in patterns:
-        for path_str in glob.glob(pattern):
-            freed = _safe_remove(Path(path_str))
-            if freed > 0:
-                logger.debug(f"[DiskCleanup] Removed engine cache: {path_str} ({freed // 1024}KB)")
-            total_freed += freed
+        for folder in glob.glob(pattern):
+            try:
+                if os.path.isdir(folder):
+                    shutil.rmtree(folder, ignore_errors=True)
+                else:
+                    os.remove(folder)
+                cleaned_count += 1
+            except:
+                pass
+    
+    if cleaned_count > 0:
+        logger.info(f"🧹 Cleaned up {cleaned_count} zombie temporary directories.")
 
-    # --- Crawl4AI persistent cache ---
-    # Try the project-local one first as defined in config
-    try:
-        import config
-        crawl4ai_cache = config.CRAWL4AI_HOME
-    except (ImportError, AttributeError):
-        crawl4ai_cache = Path.home() / ".crawl4ai_cache"
-
-    if crawl4ai_cache.exists():
-        freed = _safe_remove(crawl4ai_cache)
-        if freed > 0:
-            logger.info(f"[DiskCleanup] Cleared Crawl4AI persistent cache: {freed // 1024 // 1024}MB freed")
-        total_freed += freed
-
-    return total_freed
-
-
-def check_and_cleanup(threshold_pct: float = 85.0) -> bool:
-    """
-    Check disk usage. If it exceeds `threshold_pct`, run cleanup.
-
-    This is the main entry point called by HybridEngine before each waterfall.
-
-    Args:
-        threshold_pct : Percentage at which cleanup is triggered (default 85%).
-
-    Returns:
-        True  if cleanup was triggered (disk was above threshold).
-        False if disk is still within acceptable limits.
-    """
-    pct = _get_disk_usage_pct()
-
-    if pct < threshold_pct:
-        return False
-
-    logger.warning(
-        f"[DiskCleanup] ⚠️  Disk usage at {pct:.1f}% — above {threshold_pct}% threshold. "
-        f"Running automatic cache cleanup..."
-    )
-
-    freed = cleanup_browser_caches()
-    freed_mb = freed // 1024 // 1024
-
-    pct_after = _get_disk_usage_pct()
-    logger.info(
-        f"[DiskCleanup] ✅ Cleanup complete — freed ~{freed_mb}MB. "
-        f"Disk usage: {pct:.1f}% → {pct_after:.1f}%"
-    )
-
-    # Emergency: if disk is still critically full (>95%), emit a CRITICAL alert
-    if pct_after > 95:
+def _deep_purge():
+    """More aggressive cleanup for emergency space recovery."""
+    _light_purge()
+    # Handle older log files or core dumps if necessary
+    for core_file in glob.glob("/tmp/core.*"):
         try:
-            from utils.logger import alert
-            alert(
-                "CRITICAL",
-                f"Disk still critically full after cleanup: {pct_after:.1f}%",
-                {"freed_mb": freed_mb, "disk_pct": pct_after},
-            )
-        except Exception:
-            logger.critical(
-                f"[DiskCleanup] 🔴 Disk critically full at {pct_after:.1f}% "
-                f"even after cleanup. Manual intervention required."
-            )
+            os.remove(core_file)
+        except:
+            pass
 
-    return True
+if __name__ == "__main__":
+    # Manual trigger
+    check_and_cleanup(threshold_pct=0) # Force cleanup

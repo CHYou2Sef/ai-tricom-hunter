@@ -87,11 +87,14 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: Fi
         if cp_data:
             valid_p = normalize_phone(cp_data.get("phone"))
             valid_a = normalize_phone(cp_data.get("agent_phone"))
-            if valid_p or valid_a:
+            status = cp_data.get("status")
+            
+            # If we have data OR a definitive finish status, sync it
+            if valid_p or valid_a or status in ["DONE", "NO TEL", "SKIP"]:
                 r.phone = valid_p
                 r.agent_phone = valid_a
-                r.status = cp_data.get("status", "DONE")
-                # Restore all other enriched information (emails, linkedin, etc)
+                r.status = status or "DONE"
+                # Restore all other enriched information
                 for k, v in cp_data.items():
                     if k not in ["phone", "agent_phone", "status"]:
                         r.enriched_fields[k] = v

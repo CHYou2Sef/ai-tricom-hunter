@@ -128,6 +128,10 @@ def ensure_dirs():
 if __name__ == "__main__":
     ensure_dirs()
     
+    # ── SINGLETON LOCK ──
+    from utils.singleton import ensure_singleton
+    _lock_handle = ensure_singleton("preprocessor", config.WORK_DIR)
+    
     # Pre-process any existing files in incoming/
     logger.info("Scanning for existing files in incoming/...")
     handler = RawFileHandler()

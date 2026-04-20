@@ -57,32 +57,21 @@ class UniversalExtractor:
                         
             # --- 2. Heuristic Layer (Google Knowledge Panel & Local Pack locators) ---
             kg_phone_selectors = [
-                 "[data-dtype='d3ph'] span", 
-                 "a[data-dtype='d3ph']", 
-                 "[data-attrid='kc:/local:phone'] span",
-                 "[data-attrid='tel'] span"
+                 "[data-dtype='d3ph'] span", "a[data-dtype='d3ph']", 
+                 "[data-attrid='kc:/local:phone'] span", "[data-attrid='tel'] span",
+                 ".rllt__details", ".vlist", ".LGOjhe span", ".zS8pY"
             ]
             for selector in kg_phone_selectors:
-                elements = soup.select(selector)
-                for el in elements:
-                    text_content = el.get_text(strip=True)
-                    if text_content and len(text_content) > 5:
-                         result["heuristic_phones"].append(text_content)
-                         
-                    # Check aria-label
-                    aria = el.get("aria-label")
-                    if aria and "Call phone number" in aria:
-                        phone = aria.replace("Call phone number", "").strip()
-                        if phone:
-                             result["heuristic_phones"].append(phone)
+                for el in soup.select(selector):
+                    txt = el.get_text(" ", strip=True).replace("Téléphone :", "").replace("Appeler", "").strip()
+                    if txt and len(txt) > 5: result["heuristic_phones"].append(txt)
             
             # Generic aria-label search in the whole DOM
-            for el in soup.select("[aria-label*='Call phone number']"):
+            for el in soup.select("[aria-label*='phone'], [aria-label*='téléphone'], [aria-label*='Call']"):
                  aria = el.get("aria-label")
                  if aria:
-                      phone = aria.replace("Call phone number", "").strip()
-                      if phone and len(phone) > 5:
-                           result["heuristic_phones"].append(phone)
+                      match = re.search(r"(\+?\d[\d\s\.\-]{8,}\d)", aria)
+                      if match: result["heuristic_phones"].append(match.group(1))
 
             # --- 3. Visual Layer (HREFs) ---
             for a_tag in soup.find_all("a", href=True):

@@ -1,124 +1,130 @@
-# 🤖 AI Phone Hunter — Industrial B2B Autonomous Agent
+# 🤖 AI Tricom Hunter — Industrial B2B Autonomous Agent
 
 High-performance asynchronous agent for automated company data enrichment. Designed for **24/7 autonomous operation** on Windows, macOS, and Linux with a fully resilient multi-tier browser waterfall engine.
 
 ---
 
-## 🏛️ The 4-Pillar Architecture
+## 🚀 Getting Started (Pre-flight Checklist)
 
-This project is built on a highly portable, cross-platform architecture:
-1. **Environment:** Powered by `uv` for lightning-fast, deterministic dependency resolution.
-2. **Containerization:** Deployed via Docker with an embedded `Xvfb` display server to maintain browser stealth in headless environments without memory leakages from VNCs.
-3. **Agent Definition:** Built on the `open-gitagent` standard (`agent.yaml`, `SOUL.md`, `RULES.md`) so agent behaviors are declarative and framework-agnostic.
-4. **Continuous Delivery:** GitHub Actions CI/CD automatically lints, validates agent logic, and builds container images dynamically.
+1. **Clone the Project:**
+   ```bash
+   git clone https://github.com/youssef/ai_tricom_hunter.git
+   cd ai_tricom_hunter
+   ```
+
+2. **Configure Environment:**
+   Copy the example environment file and fill in your API keys (Google AI, Proxy settings, etc.):
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Prepare Work Directory:**
+   Ensure the `WORK/INCOMING` folder exists (this is where you will drop your Excel files):
+   ```bash
+   mkdir -p WORK/INCOMING
+   ```
 
 ---
 
-## ⚡ Quick Start
+## 🐳 Option 1: Docker Deployment (Recommended for All OS)
+The easiest way to run the agent. It handles all system dependencies, headless displays (`Xvfb`), and browser binaries automatically.
 
-### Option A: Effortless Windows Target Deployment (Recommended)
-The production target requires absolutely ZERO setups. No Python, no Node.js, no environments. Just Docker.
+### Prerequisites
+- **Windows/Mac:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running.
+- **Linux:** Docker + Docker Compose installed.
 
-1. Ensure Docker Desktop is installed.
-2. Put your `.env` in the root folder.
-3. Launch with the performance/security flags (Fedora/Linux aware):
+### Commands
 ```bash
+# 1. Build and start the agent in background
 docker compose up -d --build
-```
-The agent starts in the background, handles SELinux/Permissions automatically, and watches your `WORK/INCOMING/` folder.
 
-### ⚙️ Multi-Worker Scaling
-To double your speed, update `.env`:
-```bash
-MAX_CONCURRENT_WORKERS=3  # Launch 3 browsers in parallel
+# 2. View the live agent output (Recommended)
+docker logs -f tricom_ai_agent
+
+# 3. Stop the agent
+docker compose down
 ```
 
-### Option B: Local Developer setup (Linux/macOS)
-If you wish to develop and test locally, use the one-shot dev script.
-*100% Native Python. Zero Node.js required.*
-
-```bash
-# Installs uv, python requirements, and stealth browsers
-bash scripts/setup_dev.sh
-```
+*Note: In Docker, `pre_process.py` and `main.py` are managed automatically by the container entrypoint.*
 
 ---
 
-## 🛡️ Agent Validation Operations
+## 💻 Option 2: Local Developer Setup (Win / Mac / Linux)
+Follow these steps if you want to run the code natively on your host machine.
 
-To modify the AI's core behavior, edit `SOUL.md` or `RULES.md`. After any edits, validate the logic to prevent pipeline crashes:
+### 1. Requirements
+- **Python 3.10 or 3.11** (Recommended)
+
+### 2. Installation
 ```bash
-python scripts/validator.py
+# Create and activate virtual environment
+# Windows:
+python -m venv venv
+venv\Scripts\activate
+
+# Linux / Mac:
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies (use 'uv' for 10x faster install if you have it)
+pip install -r requirements.txt
+
+# Install Stealth Browser Binaries (CRITICAL)
+patchright install chromium
 ```
 
----
+### 3. Running the Pipeline
+The agent runs in a two-stage 24/7 pipeline. **Open two terminal windows:**
 
-## 🎮 Running the Agent (Locally)
-
-If not using Docker, the pipeline runs in two decoupled stages:
-
-**Stage 1 — Pre-processor** (watches for new files in `WORK/INCOMING/`):
+#### **Terminal 1: Pre-Processor**
+Watches the `INCOMING` folder, cleans data, and splits large files into manageable chunks.
 ```bash
 python pre_process.py
 ```
 
-**Stage 2 — Main Agent** (browses & enriches data autonomously):
+#### **Terminal 2: Main Agent**
+Picks up cleaned files and starts the autonomous browsing/enrichment process.
 ```bash
 python main.py
 ```
 
 ---
 
-## 🧪 Architecture Testing
-
-To verify the Docker container, GitAgent validation, and test suite on your local development machine:
-
-```bash
-bash scripts/test_architecture.sh
-```
+## 🏛️ Pipeline Flow
+1. **Drop File:** Put your `.xlsx` or `.csv` in `WORK/INCOMING/`.
+2. **Pre-Process:** `pre_process.py` detects it, normalizes data, and moves chunks to `WORK/STD/` (or `RS/`, `SIREN/`).
+3. **Enrichment:** `main.py` workers pick up the chunks and enrichment begins using the Waterfall engine (Patchright → Nodriver → Crawl4AI).
+4. **Results:** Final enriched files appear in `WORK/output/`.
 
 ---
 
-## 🔬 Engine Benchmark Arena
+## 🛠️ Maintenance & Troubleshooting
 
-Before deploying a configuration for production, run the **standalone benchmark** to determine the superior engine for your environment. 
+### ❌ "Another instance is already running"
+The agent uses a **Singleton Pattern** to prevent data corruption. If you see this error:
+- **Docker:** You are likely trying to run `python main.py` manually while the container is already running it. Use `docker logs -f tricom_ai_agent`.
+- **Local:** Check if a previous script is still hanging in the background and kill it.
 
+### 🧹 Cleaning Stale Locks
+If the browser fails to start because of a profile lock:
+- **Docker:** The `entrypoint.sh` automatically cleans these on restart. Run `docker compose restart`.
+- **Local:** Delete any `SingletonLock` files found in the `browser_profiles/` directory.
+
+### 📁 Permissions (Linux/Fedora)
+If you get `Permission Denied` on the `WORK/` folder inside Docker:
 ```bash
-python scripts/benchmark_engines.py \
-    --input WORK/INCOMING/your_1000_lines.xlsx \
-    --engines selenium patchright nodriver \
-    --rows 1000
+sudo chown -R $USER:$USER WORK/ logs/
 ```
-
-**Available engines:** `selenium` | `patchright` | `nodriver` | `crawl4ai` | `camoufox`
-
-**Output:**
-- `WORK/telemetry.json` — Machine-readable ranked metrics payload
-- Console — Formatted MTTI ranking report
 
 ---
 
 ## 📂 Project Structure
+- `agent.yaml`: Core agent definition & model settings.
+- `config.py`: The "Control Panel" for all settings (delays, workers, paths).
+- `browser/`: The hybrid engine logic and browser agents.
+- `excel/`: High-performance pandas handlers for reading/writing results.
+- `utils/`: Anti-bot logic, singleton management, and logging.
+- `WORK/`: The persistent data wormhole (Input -> Processing -> Output).
 
-```
-ai_phone_hunter/
-├── agent.yaml               ← GitAgent definition
-├── SOUL.md                  ← Agent Personality/Role
-├── RULES.md                 ← Hard Constraints
-├── Dockerfile               ← Multi-stage container recipe
-├── requirements-prod.txt    ← Production dependencies
-├── main.py                  ← Orchestrator entry
-├── config.py                ← Master settings
-├── agents/                  ← Specialized agents
-├── browser/                 ← Browser engines
-│   ├── hybrid_engine.py     ← Multi-tier router
-│   ├── selenium_agent.py    
-│   ├── patchright_agent.py  
-│   └── nodriver_agent.py    
-├── scripts/
-│   ├── benchmark_engines.py
-│   ├── setup_dev.sh         ← Dev environment bootstrapper
-│   ├── entrypoint.sh        ← Docker entrypoint (Xvfb)
-│   └── test_architecture.sh ← Validation suite
-└── WORK/                    ← Runtime data (gitignored)
-```
+---
+*Built for industrial-grade stability and 24/7 autonomy.*
