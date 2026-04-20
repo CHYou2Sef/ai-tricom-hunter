@@ -15,14 +15,23 @@ services:
       - CHROMIUM_BINARY_PATH=/usr/bin/google-chrome
       - DOCKER_ENV=true
 
+    # ── Windows/Mac Performance Hack ──────────────────────────────────
+    # Prevents slow I/O on host-mounted volumes for browser profiles
+    tmpfs:
+      - /app/browser_profiles:size=1G
+    
     env_file:
       - .env.prod
     volumes:
       # Direct Wormhole: Map your Windows Host folder to the Container's WORK directory
       - ${HOST_WORK_DIR:-./WORK}:/app/WORK:Z
       - ${HOST_LOG_DIR:-./logs}:/app/logs:Z
-      # Map browser profiles to a hidden folder to avoid host pollution
-      - ./browser_profiles:/app/browser_profiles:Z
+      # browser_profiles is handled by tmpfs above for speed
+    
+    # ── Manual Launch Mode ──────────────────────────────────────────
+    # Prevents the agent from starting automatically. 
+    # Use 'docker exec -it tricom_ai_agent python main.py' to start.
+    command: tail -f /dev/null
     
     deploy:
       resources:

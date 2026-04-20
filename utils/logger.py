@@ -52,12 +52,20 @@ def verbose_logging(level: int = logging.DEBUG):
 # COLOR FORMATTER (for console output only)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── Custom Log Levels ──
+TRACE = 5
+FATAL = 60
+logging.addLevelName(TRACE, "TRACE")
+logging.addLevelName(FATAL, "FATAL")
+
 COLORS = {
+    "TRACE":    "\033[90m",   # Gray
     "DEBUG":    "\033[94m",   # Blue
     "INFO":     "\033[92m",   # Green
     "WARNING":  "\033[93m",   # Yellow
     "ERROR":    "\033[91m",   # Red
     "CRITICAL": "\033[95m",   # Magenta
+    "FATAL":    "\033[41m\033[97m", # White on Red background
     "RESET":    "\033[0m",    # Reset to default
 }
 
@@ -179,17 +187,18 @@ def _setup_root_logger() -> None:
 
 def get_logger(name: str) -> logging.Logger:
     """
-    Get a named logger.  Call this at the top of every module:
-        logger = get_logger(__name__)
-
-    Args:
-        name : Usually __name__ (the module's own name)
-
-    Returns:
-        A configured Logger instance
+    Get a named logger with support for TRACE and FATAL levels.
     """
     _setup_root_logger()
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    
+    # Add helper methods for custom levels if they don't exist
+    if not hasattr(logger, 'trace'):
+        logger.trace = lambda msg, *args, **kwargs: logger.log(TRACE, msg, *args, **kwargs)
+    if not hasattr(logger, 'fatal'):
+        logger.fatal = lambda msg, *args, **kwargs: logger.log(FATAL, msg, *args, **kwargs)
+        
+    return logger
 
 
 # ─────────────────────────────────────────────────────────────────────────────

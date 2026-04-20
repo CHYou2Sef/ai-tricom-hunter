@@ -42,6 +42,35 @@ jobs:
         run: |
           python scripts/validator.py
 
+  security-scan:
+    needs: validate-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Dependencies
+        run: |
+          pip install bandit httpx fastapi uvicorn prometheus-fastapi-instrumentator structlog opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi opentelemetry-exporter-otlp
+
+      - name: SAST - Static Analysis (Bandit)
+        run: |
+          python scripts/security_sast.py
+
+      - name: DAST - Dynamic Probe (Mock API Scan)
+        run: |
+          # Start the API in the background for testing
+          PYTHONPATH=. uvicorn api.app:app --host 127.0.0.1 --port 8000 &
+          sleep 5
+          python scripts/security_dast.py
+          # Clean up
+          kill $(jobs -p) || true
+
   docker-build-push:
     needs: validate-and-test
     runs-on: ubuntu-latest

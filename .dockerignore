@@ -11,6 +11,7 @@ __pycache__/
 
 # Local Data and Logs
 WORK/
+docs/
 logs/
 browser_profiles/
 .env

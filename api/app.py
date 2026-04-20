@@ -1,14 +1,20 @@
 from fastapi import FastAPI
 import config
 from utils.health_check import check_all
+from utils.observability import setup_observability
 
 app = FastAPI(title="AI Phone Hunter Monitor")
 
+# Apply Metrics & Tracing
+setup_observability(app)
+
 @app.get("/health")
 async def health():
+    """Endpoint for Liveness/Readiness probes."""
     return await check_all()
 
 @app.get("/stats")
 async def stats():
-    # Placeholder for performance stats
+    """Exposes high-level agent performance metrics."""
+    # Placeholder for actual agent throughput stats
     return {"status": "active", "workers": config.MAX_CONCURRENT_WORKERS}

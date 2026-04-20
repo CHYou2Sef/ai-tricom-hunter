@@ -7,6 +7,58 @@ Ce document trace l'historique complet de l'évolution du projet **AI Phone Hunt
 analyser agent.log et debug_archive.log et @terminal:python puis expliquer dans un rapport techniques les problemes , les bugs , les erreurs , .. puis proposer des solution stable et robust .. ;
 Repondre aux questions : - combien de foix le playwriter est success de lancer apres qu'il soit bloquer ? comment il etait bloquer ?; combien de foix les autre tier sont success ?; pourquoi l'agent est maintenant bloquer ?
 
+## 2026-04-20: Advanced Observability & CI/CD Security Integration
+
+### 🪵 Expanded Logging Levels
+- **Multi-Level Precision**: Implemented support for the full spectrum of log levels: `TRACE`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `FATAL`.
+- **Custom Integration**: Modified `utils/logger.py` to inject these levels into the standard Python `logging` module and added `.trace()` / `.fatal()` convenience methods to all logger instances.
+- **Visual Feedback**: Updated console formatting with distinct color schemes for `TRACE` (Gray) and `FATAL` (White on Red).
+
+### 🛰️ OpenTelemetry & Distributed Tracing
+- **OTEL Integration**: Replaced basic tracing with a full **OpenTelemetry (OTEL)** stack. 
+- **OTLP Exporter**: The agent is now configured to export traces via OTLP (OpenTelemetry Line Protocol) to a collector (like Jaeger or Honeycomb).
+- **Auto-Instrumentation**: Integrated `opentelemetry-instrumentation-fastapi` for automatic tracing of all API endpoints.
+
+### ⛓️ Industrial CI/CD Pipeline
+- **Security-First Workflow**: Enhanced `.github/workflows/ci.yml` with a dedicated `security-scan` job.
+- **Automated Gates**: Every push now triggers:
+    1. **SAST**: Automated Bandit scan for static vulnerabilities.
+    2. **DAST**: A dynamic runtime probe that launches a temporary API instance and verifies its security surface.
+
+---
+
+## 2026-04-20: Industrial Observability & Security Hardening
+
+### 📊 Observability Strategy
+- **Metrics**: Integrated `prometheus-fastapi-instrumentator`. The API now exposes live performance metrics (request count, latency) at `/metrics` for Prometheus/Grafana.
+- **Structured Logging**: Replaced standard print/logging with `structlog` (JSON format). Logs are now machine-readable and contain `request_id`, `path`, and `duration`.
+- **Request Tracing**: Implemented a custom FastAPI middleware for Tracing. Every request is now tagged with a unique `X-Request-ID` (Correlation ID) preserved across logs and headers.
+
+### 🛡️ Security Engineering (SAST/DAST)
+- **SAST (Static Analysis)**: Integrated `bandit` for automated security scanning. Created `scripts/security_sast.py` to identify common Python vulnerabilities (hardcoded secrets, insecure imports).
+- **DAST (Dynamic Analysis)**: Created `scripts/security_dast.py`. This probe checks the running API for missing security headers, documentation exposure, and info leaks.
+- **Dependency Audit**: Added `bandit` and `structlog` to `requirements-prod.txt` to ensure these quality gates are part of the production environment.
+
+---
+
+## 2026-04-20: Industrial Stability, Windows Optimizations & Singleton Protection
+
+### 🔒 Singleton Process Protection
+- **Issue**: Running multiple instances of the agent (e.g., in background + manual exec) was causing "Profile in use" and browser lock errors.
+- **Fix**: Implemented `utils/singleton.py` using absolute file locks (`.main.lock`). The agent now detects if it's already running and aborts with a clear safety warning.
+- **Cleanup**: Updated `entrypoint.sh` to forcefully purge stale Chromium locks from `/dev/shm` and host profiles during container startup.
+
+### 🪟 Windows + Docker Desktop Performance Hack
+- **Performance**: Standard Vitual Volume mounts in Windows/Mac are notoriously slow for browser I/O (thousands of tiny profile files).
+- **Solution**: Implemented `tmpfs` for `/app/browser_profiles` in `docker-compose.yml`. This moves all browser profile activity to RAM (Lightning speed) while keeping the binary logic inside the container.
+- **Manual Launch**: Disabled the auto-start feature in Docker. The container now stays idle (`tail -f /dev/null`), allowing the user to start the agent manually for better control and debugging.
+
+### 📦 Dependency & Runtime Guard
+- **xlsxwriter Fix**: Added missing production dependency to `requirements-prod.txt` to enable high-performance formatted Excel exports.
+- **Industrial Setup**: Rewrote `README.md` to provide a triple-platform (Win/Mac/Linux) deployment guide, covering both Docker and Native `venv` workflows.
+
+---
+
 ## 2026-04-19: Real-Time Synchronization & Null-Safety Hardening
 
 ### 🔄 Real-Time "Worker File" Sync
