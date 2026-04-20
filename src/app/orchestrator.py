@@ -119,8 +119,39 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: Fi
         
     return sync_count
 
-async def _worker_process_row(row, sem, save_lock, rows, filepath, tracker, idx, total, progress):
-    async with sem:
+from dataclasses import dataclass
+
+@dataclass
+class WorkerContext:
+    """Context holding all dependencies to process a single row."""
+    row: ExcelRow
+    sem: asyncio.Semaphore
+    save_lock: asyncio.Lock
+    all_rows: List[ExcelRow]
+    filepath: str
+    tracker: PerformanceTracker
+    idx: int
+    total: int
+    progress: FileProgressTracker
+
+async def _execute_agent_task(ctx: WorkerContext, agent) -> None:
+    """Isolated task that performs extraction and enrichment using a verified healthy agent."""
+    if not ctx.row.phone:
+        await process_row(ctx.row, agent)
+    if ctx.row.phone and hasattr(config, 'ENRICH_ENABLED') and config.ENRICH_ENABLED:
+        await enrich_row(ctx.row, agent)
+    
+    # Atomic Save to per-file JSON tracker
+    ctx.progress.mark_row_done(
+        ctx.row.row_index, 
+        ctx.row.phone, 
+        ctx.row.agent_phone, 
+        ctx.row.status,
+        extra=ctx.row.enriched_fields
+    )
+
+async def _worker_process_row(ctx: WorkerContext):
+    async with ctx.sem:
         row_start = time.perf_counter()
         agent = None
         try:
@@ -131,38 +162,26 @@ async def _worker_process_row(row, sem, save_lock, rows, filepath, tracker, idx,
                 logger.warning(f"[AgentPool] Worker dead, recreating...")
                 await agent.close()
                 from infra.browsers.hybrid_engine import HybridAutomationEngine
-                agent = HybridAutomationEngine(worker_id=getattr(agent, 'worker_id', idx))
+                agent = HybridAutomationEngine(worker_id=getattr(agent, 'worker_id', ctx.idx))
                 await agent.start_tier(config.HYBRID_DEFAULT_TIER)
             
-            extra_phones = []
-            if not row.phone:
-                extra_phones = await process_row(row, agent)
-            if row.phone and hasattr(config, 'ENRICH_ENABLED') and config.ENRICH_ENABLED:
-                await enrich_row(row, agent)
+            await _execute_agent_task(ctx, agent)
             
-            # Atomic Save to per-file JSON tracker
-            progress.mark_row_done(
-                row.row_index, 
-                row.phone, 
-                row.agent_phone, 
-                row.status,
-                extra=row.enriched_fields
-            )
         except Exception as e:
-            logger.error(f"[Agent] Error on row {row.row_index}: {e}")
-            row.status = "ERROR"
+            logger.error(f"[Agent] Error on row {ctx.row.row_index}: {e}")
+            ctx.row.status = "ERROR"
         finally:
             if agent:
                 # Keep it alive if possible, or close if dead
                 await _agent_pool.put(agent)
         
         elapsed = time.perf_counter() - row_start
-        tracker.track_row(elapsed, row.status)
+        ctx.tracker.track_row(elapsed, ctx.row.status)
         
-        if idx % config.SAVE_INTERVAL == 0 or idx == total:
-            async with save_lock:
-                await asyncio.to_thread(save_results, rows, filepath)
-    return row
+        if ctx.idx % config.SAVE_INTERVAL == 0 or ctx.idx == ctx.total:
+            async with ctx.save_lock:
+                await asyncio.to_thread(save_results, ctx.all_rows, ctx.filepath)
+    return ctx.row
 
 async def process_file_async(filepath: str) -> None:
     logger.info(f"[Agent] Starting file: {os.path.basename(filepath)}")
@@ -188,7 +207,13 @@ async def process_file_async(filepath: str) -> None:
     else:
         logger.info(f"[Agent] 🔄 Processing {total} rows from '{os.path.basename(filepath)}'...")
         save_lock, sem = asyncio.Lock(), asyncio.Semaphore(config.MAX_CONCURRENT_WORKERS)
-        tasks = [asyncio.create_task(_worker_process_row(r, sem, save_lock, rows, filepath, tracker, i, total, progress)) for i, r in enumerate(rows_to_process, 1)]
+        tasks = []
+        for i, r in enumerate(rows_to_process, 1):
+            ctx = WorkerContext(
+                row=r, sem=sem, save_lock=save_lock, all_rows=rows, 
+                filepath=filepath, tracker=tracker, idx=i, total=total, progress=progress
+            )
+            tasks.append(asyncio.create_task(_worker_process_row(ctx)))
         await asyncio.gather(*tasks)
     
     await asyncio.to_thread(save_results, rows, filepath)

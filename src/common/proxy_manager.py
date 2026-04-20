@@ -159,6 +159,10 @@ class ProxyManager:
                     f"[ProxyManager] ⚠️ WARN — proxy {address} "
                     f"({record.error_count} errors, last HTTP {status_code})"
                 )
+                
+            if getattr(config, 'PROXY_PREEMPTIVE_ROTATE_ON_WARN', True):
+                logger.warning(f"[ProxyManager] Preemptive rotation triggered for {address} to preserve health.")
+                self._ban_proxy(record)
         else:
             logger.debug(
                 f"[ProxyManager] Error #{record.error_count} on {address} "
@@ -234,6 +238,33 @@ class ProxyManager:
         if not self._active_pool:
             self._refill_pool()
 
+def _validate_proxy_url(self, url: str) -> bool:
+    """
+    Validate proxy URL format to prevent SSRF/injection.
+    Blocks local addresses, invalid schemes/ports.
+    """
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+        ALLOWED_SCHEMES = ('http', 'https')  # socks blocked for security
+        if parsed.scheme not in ALLOWED_SCHEMES:
+            return False
+        if not parsed.hostname or len(parsed.hostname) > 253:
+            return False
+        if parsed.port and not (1 <= parsed.port <= 65535):
+            return False
+        # Block RFC-1918 private ranges + loopback
+        PRIVATE_RANGES = ('localhost', '127.0.0.1', '0.0.0.0', '::1', 
+                         '10.', '172.16.', '172.17.', '172.18.', '172.19.', 
+                         '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', 
+                         '172.25.', '172.26.', '172.27.', '172.28.', '172.29.', 
+                         '172.30.', '172.31.', '192.168.')
+        if any(parsed.hostname.startswith(r) for r in PRIVATE_RANGES):
+            return False
+        return True
+    except Exception:
+        return False
+
     def _refill_pool(self) -> None:
         """Fetch fresh proxies from all public sources and reset the pool."""
         logger.info("🔄 [ProxyManager] Loading proxy pool...")
@@ -244,7 +275,7 @@ class ProxyManager:
             logger.info("💎 [ProxyManager] Loading Premium Residential Proxies from .env...")
             for proxy_url in RESIDENTIAL_PROXIES_ENV.split(","):
                 clean_url = proxy_url.strip()
-                if clean_url:
+                if clean_url and self._validate_proxy_url(clean_url):
                     fetched.add(clean_url)
         else:
             # 2. 🏴‍☠️ FREE PROXIES (Fallback if no Premium setup)
@@ -252,7 +283,7 @@ class ProxyManager:
             for url in FREE_PROXY_SOURCES:
                 try:
                     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                    with urllib.request.urlopen(req, timeout=10) as resp:
+with urllib.request.urlopen(req, timeout=5, context=ssl.create_default_context()) as resp:
                         content = resp.read().decode("utf-8")
 
                         if "geonode.com" in url:
@@ -261,13 +292,17 @@ class ProxyManager:
                                 ip   = item.get("ip")
                                 port = item.get("port")
                                 if ip and port:
-                                    fetched.add(f"http://{ip}:{port}")
+                                    proxy_str = f"http://{ip}:{port}"
+                                    if self._validate_proxy_url(proxy_str):
+                                        fetched.add(proxy_str)
 
                         else:  # proxyscrape or GitHub plain text
                             for line in content.splitlines():
                                 line = line.strip()
                                 if line and ":" in line:
-                                    fetched.add(f"http://{line}" if "http" not in line else line)
+                                    proxy_str = f"http://{line}" if "http" not in line else line
+                                    if self._validate_proxy_url(proxy_str):
+                                        fetched.add(proxy_str)
 
                 except Exception as exc:
                     logger.debug(f"[ProxyManager] Source failed ({url}): {exc}")

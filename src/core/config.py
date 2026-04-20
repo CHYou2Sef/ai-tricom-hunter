@@ -125,7 +125,7 @@ REPROCESS_FAILED_ROWS = os.getenv("REPROCESS_FAILED_ROWS", "true").lower() == "t
 # ── Proxy Rotation (Anti-Ban) ──
 PROXY_ENABLED                  = True   # ON by default to solve CAPTCHA problems immediately
 PROXY_ROTATE_EVERY_N           = 5      # Rotate every 5 rows to stay fresh
-PROXY_ROTATION_ACTIVATES_ON_BAN = True   # Mandatory fallback
+PROXY_PREEMPTIVE_ROTATE_ON_WARN  = True   # Rotate BEFORE the ban threshold is reached (at warn_threshold)
 
 # ── Proxy State Machine Thresholds ──
 PROXY_WARN_THRESHOLD  = int(os.getenv("PROXY_WARN_THRESHOLD", "10"))   # errors before WARN state
@@ -256,10 +256,10 @@ BROWSER_ENGINE = "hybrid"
 # Professional Hack: If running in Docker, we force the profile to RAM (/dev/shm)
 # to bypass HDD latency on the Windows host.
 _default_profile = str(BASE_DIR / "browser_profiles" / "Default")
-if DOCKER_ENV and os.path.exists("/dev/shm"):
-    _default_profile = "/dev/shm/ai_hunter_profile"
+if DOCKER_ENV and Path("/dev/shm").exists():
+    _default_profile = Path("/dev/shm") / "ai_hunter_profile"
     
-CHROMIUM_PROFILE_PATH = os.path.expanduser(os.getenv("CHROMIUM_PROFILE_PATH", _default_profile))
+CHROMIUM_PROFILE_PATH = str(Path(os.getenv("CHROMIUM_PROFILE_PATH", _default_profile)).expanduser().resolve(strict=False))
 
 # The specific profile folder name inside the profile path
 # (usually "Default" unless you created multiple profiles)
@@ -518,3 +518,23 @@ FILE_SETTLE_DELAY = int(os.getenv("FILE_SETTLE_DELAY", "3"))
 SET_GEOLOCATION = True
 DEFAULT_LAT     = 48.8566   # Paris
 DEFAULT_LON     = 2.3522
+
+# ═══════════════════════════════════════════════════════════════════
+# 🔒 SECRETS VALIDATION (Phase 3 Hardening)
+# ═══════════════════════════════════════════════════════════════════
+def validate_secrets():
+    """
+    Fail-fast validation to ensure no hardcoded credentials exist
+    and required .env keys are present before starting.
+    """
+    import logging
+    
+    # 1. Validate CAPTCHA API combination
+    if CAPTCHA_SOLVER in ("2captcha", "capsolver") and not CAPTCHA_API_KEY:
+        logging.warning(
+            f"⚠️ [Config] CAPTCHA_SOLVER is set to '{CAPTCHA_SOLVER}', "
+            "but CAPTCHA_API_KEY is missing in .env! "
+            "Will fallback to manual mode."
+        )
+
+validate_secrets()

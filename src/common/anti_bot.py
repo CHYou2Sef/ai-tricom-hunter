@@ -148,17 +148,11 @@ def short_delay() -> None:
 def human_type(element, text: str) -> None:
     """
     Type `text` into a Selenium WebElement, one character at a time,
-    with a small random delay between keystrokes.
-
-    This mimics a real person typing at ~300 characters/minute.
+    with a Gaussian human-like delay between keystrokes.
 
     Args:
         element : Selenium WebElement (e.g. the search input box)
         text    : The string to type
-
-    BEGINNER NOTE:
-        We import selenium here only if Selenium is being used.
-        The 'element' can be any object with a .send_keys() method.
     """
     if not config.HUMAN_TYPING:
         # If human typing is disabled, just send everything at once
@@ -167,37 +161,49 @@ def human_type(element, text: str) -> None:
 
     for char in text:
         element.send_keys(char)
-        delay = random.uniform(
-            config.TYPING_MIN_DELAY_SEC,
-            config.TYPING_MAX_DELAY_SEC
-        )
-        time.sleep(delay)
+        action_delay("type_char")
 
 
 async def human_type_async(page, selector: str, text: str) -> None:
     """
-    Same as human_type() but for Playwright (async version).
-
-    In Playwright we use page.type() which already supports delay,
-    but we add our own timing for more control.
+    Same as human_type() but for Playwright / Nodriver (async version).
+    Types text one character at a time with a Gaussian distribution delay.
 
     Args:
-        page     : Playwright Page object
+        page     : Playwright / Nodriver Page object
         selector : CSS selector of the input element
         text     : The string to type
     """
     if not config.HUMAN_TYPING:
-        await page.fill(selector, text)
+        # Fallback to instantaneous fill
+        if hasattr(page, 'fill'):
+            await page.fill(selector, text)
+        else:
+            # Nodriver logic or generic fallback
+            el = await page.wait_for(selector=selector)
+            await el.type(text)
         return
 
-    # Playwright's built-in type() with delay in milliseconds
-    delay_ms = int(
-        random.uniform(
-            config.TYPING_MIN_DELAY_SEC,
-            config.TYPING_MAX_DELAY_SEC
-        ) * 1000
-    )
-    await page.type(selector, text, delay=delay_ms)
+    # Focus the element first
+    if hasattr(page, 'focus'):
+        await page.focus(selector)
+    elif hasattr(page, 'wait_for'):
+        # For nodriver, select element then focus
+        el = await page.wait_for(selector=selector)
+        await el.focus()
+
+    # Type char by char
+    for char in text:
+        if hasattr(page, 'keyboard'):
+            # Playwright
+            await page.keyboard.type(char)
+        else:
+            # Nodriver: elements have send_keys or we use page.keyboard
+            # By default nodriver elements have .send_keys
+            el = await page.select(selector)
+            await el.send_keys(char)
+            
+        await action_delay_async("type_char")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
