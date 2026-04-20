@@ -6,7 +6,7 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-from browser.hybrid_engine import HybridAutomationEngine
+from infra.browsers.hybrid_engine import HybridAutomationEngine
 
 def test_hybrid_engine_explicitly_closes_tier_on_escalation():
     """

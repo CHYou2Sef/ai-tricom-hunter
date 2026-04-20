@@ -15,7 +15,7 @@ import openpyxl
 # Make sure the project root is on the import path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from excel.cleaner import (
+from domain.excel.cleaner import (
     CAT_STD, CAT_RS, CAT_SIR, CAT_OTHER, CAT_DISCARD,
     classify_row, clean_and_classify,
 )
@@ -44,6 +44,10 @@ class MockRow:
             self.raw["adresse"] = adresse
         if siren and "siren" not in self.raw:
             self.raw["siren"] = siren
+
+    def to_dict(self):
+        """Mock to_dict for save_subset_to_excel."""
+        return self.raw
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -95,8 +99,9 @@ class TestClassifyRow:
         assert classify_row(row) == CAT_DISCARD
 
     def test_discard_but_has_tel_saved(self):
-        """Row with only a phone column → other_input (not discarded)"""
+        """Row with only a phone column → OTHERS (not discarded)"""
         row = MockRow(raw={"telephone": "01 23 45 67 89"})
+        row.phone = "01 23 45 67 89" # Set the attribute that classify_row checks
         assert classify_row(row) == CAT_OTHER
 
 
@@ -119,7 +124,7 @@ class TestCleanAndClassify:
 
     def test_files_created_in_correct_dirs(self, tmp_path, monkeypatch):
         """clean_and_classify should write files into the right sub-dirs."""
-        import config
+        from core import config
 
         # Redirect config dirs to tmp_path
         monkeypatch.setattr(config, "INPUT_STD_DIR",   str(tmp_path / "std_input"))
@@ -153,7 +158,7 @@ class TestCleanAndClassify:
 
     def test_discard_row_not_written(self, tmp_path, monkeypatch):
         """Rows with no fields should be discarded (no file for DISCARD)."""
-        import config
+        from core import config
 
         monkeypatch.setattr(config, "INPUT_STD_DIR",   str(tmp_path / "std_input"))
         monkeypatch.setattr(config, "INPUT_RS_DIR",    str(tmp_path / "RS_input"))

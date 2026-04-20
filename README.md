@@ -52,24 +52,19 @@ docker compose down
 ## 💻 Option 2: Local Developer Setup (Win / Mac / Linux)
 Follow these steps if you want to run the code natively on your host machine.
 
-### 1. Requirements
-- **Python 3.10 or 3.11** (Recommended)
+### 1. Prerequisites
+- **Python 3.10+**
+- **uv** (Recommended: `curl -LsSf https://astral.sh/uv/install.sh | sh`)
 
 ### 2. Installation
 ```bash
-# Create and activate virtual environment
-# Windows:
-python -m venv venv
-venv\Scripts\activate
+# Setup environment using the setup script (recommended)
+bash scripts/setup_dev.sh
 
-# Linux / Mac:
-python3 -m venv venv
+# OR manually:
+uv venv
 source venv/bin/activate
-
-# Install dependencies (use 'uv' for 10x faster install if you have it)
-pip install -r requirements.txt
-
-# Install Stealth Browser Binaries (CRITICAL)
+uv pip install -r requirements.txt
 patchright install chromium
 ```
 
@@ -119,12 +114,13 @@ sudo chown -R $USER:$USER WORK/ logs/
 ---
 
 ## 📂 Project Structure
-- `agent.yaml`: Core agent definition & model settings.
-- `config.py`: The "Control Panel" for all settings (delays, workers, paths).
-- `browser/`: The hybrid engine logic and browser agents.
-- `excel/`: High-performance pandas handlers for reading/writing results.
-- `utils/`: Anti-bot logic, singleton management, and logging.
+- `agent.yaml`: Core agent definition (Pillar 3).
+- `src/core/config.py`: The "Control Panel" for all settings.
+- `src/infra/browsers/`: The hybrid engine logic (Pillar 2).
+- `src/domain/excel/`: High-performance data handlers.
+- `src/common/`: Anti-bot logic and shared utilities.
 - `WORK/`: The persistent data wormhole (Input -> Processing -> Output).
+- `scripts/`: Validation and CI/CD tools (Pillar 4).
 
 ---
 *Built for industrial-grade stability and 24/7 autonomy.*

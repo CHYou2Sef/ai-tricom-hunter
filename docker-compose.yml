@@ -1,4 +1,4 @@
-version: '3.8'
+# Industrial AI Hunter Stack
 
 services:
   agent:
@@ -28,9 +28,9 @@ services:
       - ${HOST_LOG_DIR:-./logs}:/app/logs:Z
       # browser_profiles is handled by tmpfs above for speed
     
-    # ── Manual Launch Mode ──────────────────────────────────────────
+    # ── Manual Launch Mode ───────────────────────────────────────────
     # Prevents the agent from starting automatically. 
-    # Use 'docker exec -it tricom_ai_agent python main.py' to start.
+    # Use 'docker exec -it tricom_ai_agent python run/worker.py' to start.
     command: tail -f /dev/null
     
     ports:
@@ -47,7 +47,7 @@ services:
     image: prom/prometheus:latest
     container_name: tricom_prometheus
     volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:z
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'

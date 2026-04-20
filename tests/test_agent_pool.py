@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 import pytest
 
-from agent import init_agent_pool, close_agent_pool, _agent_pool
+from app.orchestrator import init_agent_pool, close_agent_pool, _agent_pool
 
 @pytest.mark.asyncio
 async def test_pool_init_close():
