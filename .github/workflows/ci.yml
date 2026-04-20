@@ -65,7 +65,7 @@ jobs:
       - name: DAST - Dynamic Probe (Mock API Scan)
         run: |
           # Start the API in the background for testing
-          PYTHONPATH=. uvicorn api.app:app --host 127.0.0.1 --port 8000 &
+          PYTHONPATH=src uvicorn app.monitoring.app:app --host 127.0.0.1 --port 8000 &
           sleep 5
           python scripts/security_dast.py
           # Clean up

@@ -13,12 +13,18 @@
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
-import bootstrap
-import os
 import sys
+import os
+from pathlib import Path
+
+# Ensure the root directory is in sys.path so we can import from the project root
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+import bootstrap
 import time
 import asyncio
-from pathlib import Path
 
 try:
     from watchdog.observers import Observer

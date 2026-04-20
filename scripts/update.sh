@@ -14,10 +14,11 @@ git pull origin main
 
 # 2. Re-build and Re-deploy
 echo "🐳 [Docker] Re-building and replacing container..."
+
+docker compose up -d --build --remove-orphans
 # -d: background mode
 # --build: force rebuild of image
 # --remove-orphans: clean up old stale containers
-docker compose up -d --build --remove-orphans
 
 # 3. Cleanup stale images to save HDD space
 echo "🧹 [Cleanup] Removing dangling images (HDD optimization)..."
