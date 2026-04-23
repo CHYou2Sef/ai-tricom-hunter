@@ -17,10 +17,9 @@ import sys
 import os
 from pathlib import Path
 
-# Ensure the root directory is in sys.path so we can import from the project root
+# Ensure src/ is on sys.path (current project layout)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 import time
 import asyncio

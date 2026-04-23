@@ -106,7 +106,7 @@ BROWSER_USE_SANDBOX    = os.getenv("BROWSER_USE_SANDBOX", "true").lower() == "tr
 # ── HDD OPTIMIZATION ──
 # How often (in rows) the agent saves the Excel file back to disk.
 # High values (50-100) are recommended for HDDs to reduce write operations.
-SAVE_INTERVAL = int(os.getenv("SAVE_INTERVAL", "50"))
+SAVE_INTERVAL = int(os.getenv("SAVE_INTERVAL", "10"))
 
 # Number of rows per RETRY chunk file sent back to incoming/.
 RETRY_CHUNK_SIZE = int(os.getenv("RETRY_CHUNK_SIZE", "50"))
@@ -517,6 +517,14 @@ TYPING_MAX_DELAY_SEC  = 0.16   # max seconds per character
 # Maximum consecutive CAPTCHA blocks before the agent pauses everything
 # and sends an alert to the log + console
 MAX_CONSECUTIVE_CAPTCHA = 8
+
+# ── Contact discovery keywords (Industrialized for French B2B) ──
+CONTACT_KEYWORDS = ["contact", "propos", "about", "mentions", "siège", "adresse", "téléphone", "equipe", "legal"]
+SOCIAL_ABOUT_PATTERNS = {
+    "facebook": "/about",
+    "linkedin": "/about/",
+    "instagram": "/", # Bio is on main page
+}
 
 
 # ═══════════════════════════════════════════════════════════════════

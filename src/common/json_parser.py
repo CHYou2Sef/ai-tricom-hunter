@@ -8,7 +8,7 @@ logger = get_logger(__name__)
 def _deep_strip(data: Any) -> Any:
     """Recursively strip all strings in a dictionary or list, including keys."""
     if isinstance(data, dict):
-        return {str(k).strip(): _deep_strip(v) for k, v in data.items()}
+        return {str(k).strip(' "\''): _deep_strip(v) for k, v in data.items()}
     elif isinstance(data, list):
         return [_deep_strip(i) for i in data]
     elif isinstance(data, str):

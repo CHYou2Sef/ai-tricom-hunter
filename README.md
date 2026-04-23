@@ -57,9 +57,10 @@ python scripts/benchmark_engines.py --rows 100
 **Key Components**:
 
 - **Orchestrator**: Async pool (`MAX_CONCURRENT_WORKERS=4`), WorkerContext dataclass
-- **Hybrid Waterfall**: Tiered browsers w/ auto-escalation
-- **Proxy Circuit Breaker**: HEALTHY→WARN→BAN→ROTATE (13 errors threshold)
-- **Anti-Detection**: 10-property CDP fingerprint + Gaussian delays
+- 🤖 **Intelligence Waterfall:** Hybrid engine (SeleniumBase ➔ Patchright ➔ Nodriver ➔ Deep Discovery).
+- 🧬 **Deep Discovery:** Proactive social media & official site navigation for hidden phone extraction.
+- 🛡️ **Schema Hardening:** Resilient to quoted CSV headers, malformed AI JSON, and whitespace issues.
+- ⚡ **24/7 Autonomy:** Checkpoint-based recovery, proxy rotation, and human-like anti-detection.
 - **Data Layer**: Pandas pro-formatted Excel + atomic JSON checkpoints
 
 ## ✨ Features Matrix
@@ -126,22 +127,6 @@ python -m src.app.orchestrator
 2. `ruff check . && pytest`
 3. Edit → `git commit -m "feat: ..."`
 4. Push → CI auto-runs
-
-## 📚 Child-Friendly Guide
-
-See [docs/README_child_guide.md](docs/README_child_guide.md) + SVGs for **kid explanations**!
-
-```
-🦁 Like Pokémon but finds business phones!
-🤖 Boss Robot → Worker Robots → Google Ninja → 📱 Treasure!
-```
-
-## 🔮 Roadmap
-
-- [ ] GitHub CLI PR automation (`blackboxai/` branches)
-- [ ] Ollama local LLM integration
-- [ ] Telegram alerts (CAPTCHA, bans)
-- [ ] Grafana dashboard (`/metrics` Prometheus)
 
 ---
 

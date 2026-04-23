@@ -161,7 +161,8 @@ def read_excel(filepath: str) -> Tuple[List[ExcelRow], dict]:
     if df.empty:
         return [], {}
 
-    df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
+    # Clean headers: remove newlines, strip spaces, AND strip literal quotes
+    df.columns = [str(c).replace('\n', ' ').strip(' "\'') for c in df.columns]
     headers = list(df.columns)
     mapping = detect_columns(headers)
     validation = validate_mapping(mapping)

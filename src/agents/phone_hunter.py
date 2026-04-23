@@ -214,19 +214,37 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
 
     # 1. AI Mode Searches (High Confidence)
     # Waterfall: Try Standard -> if fail -> Try Expert
+    last_meta = None
     for prompt_key, tag in [(config.AI_MODE_SEARCH_PROMPT, "ai_std"), (config.AI_MODE_EXPERT_PROMPT, "ai_expert")]:
-        # Check if we already have a 90%+ confidence phone from a previous prompt iteration
-        if any(h['score'] >= 90 for h in harvested):
-            break
+        if any(h['score'] >= 90 for h in harvested): break
             
         prompt = prompt_key.format(nom=nom, adresse=adr, siren=siren, category=category, extra=extra)
         ai_raw = await agent.search_google_ai_mode(prompt)
+        last_meta = getattr(agent, "last_metadata", None)
+        
         if ai_raw:
             row.raw_ai_responses.append({"text": ai_raw, "source": tag, "query": prompt[:100]})
             candidates = extract_phones(ai_raw, source_label=tag)
-            for p in candidates:
-                add_unique(p, 97, tag)
+            for p in candidates: add_unique(p, 97, tag)
             _fill_row_from_ai_mode(ai_raw, row)
+
+    # 1.5 DEEP DISCOVERY (Official Site & Social Media "About")
+    if not any(h['score'] >= 90 for h in harvested) and last_meta:
+        discovery_links = last_meta.get("social_links", {})
+        # Target: Top Website + Facebook About + LinkedIn About
+        targets = []
+        if discovery_links.get("website"): targets.append((discovery_links["website"][0], "discovery_web"))
+        if discovery_links.get("facebook"): targets.append((discovery_links["facebook"][0].rstrip("/") + "/about", "discovery_fb"))
+        if discovery_links.get("linkedin"): targets.append((discovery_links["linkedin"][0].rstrip("/") + "/about/", "discovery_li"))
+        
+        for url, source_tag in targets[:3]: # Cap at 3 discovery visits
+            if any(h['score'] >= 90 for h in harvested): break
+            logger.info(f"🔎 [DeepDiscovery] Opening: {url}")
+            if await agent.goto_url(url):
+                page_meta = await agent.extract_universal_data()
+                if page_meta and page_meta.get("heuristic_phones"):
+                    for p in page_meta["heuristic_phones"]:
+                        add_unique(p, 95 if "fb" in source_tag or "li" in source_tag else 90, source_tag)
 
     # 2. Knowledge Panel (Highest Confidence)
     if not any(h['score'] >= 90 for h in harvested) and row.nom:

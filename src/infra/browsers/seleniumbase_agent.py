@@ -301,14 +301,10 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
             # ── 3. Extract data using UUE (Universal Unified Extractor) ──
             metadata = await self.extract_universal_data()
-            if metadata:
-                # Prioritize heuristic phones (from Knowledge Panel)
-                if metadata.get("heuristic_phones"):
-                    logger.info("✨ [SeleniumBase-AI-Mode] Phone found via UUE Heuristics.")
-                    return metadata["heuristic_phones"][0]
-                
-                # Fallback to AI mode response stability wait if UUE found nothing
-                # (This covers the case where AI Mode is still typing)
+            self.last_metadata = metadata # Persist for Deep Discovery
+            
+            # Fallback to AI mode response stability wait 
+            # (We always want the full text response for enrichment)
             
             text = await self._wait_for_stable_response(timeout_sec=25)
             if text:

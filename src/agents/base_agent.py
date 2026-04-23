@@ -54,7 +54,14 @@ class BaseBrowserAgent:
         metadata = UniversalExtractor.extract_all(source)
         
         # If the Universal Extractor found NO data, return None so the HybridEngine properly escalates
-        if not metadata.get("aeo_data") and not metadata.get("heuristic_phones") and not metadata.get("heuristic_emails"):
+        has_data = any([
+            metadata.get("aeo_data"),
+            metadata.get("heuristic_phones"),
+            metadata.get("heuristic_emails"),
+            metadata.get("semantic_phones"),
+            any(metadata.get("social_links", {}).values()) # Found social links or website
+        ])
+        if not has_data:
             return None
             
         return metadata

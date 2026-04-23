@@ -94,6 +94,37 @@ class UniversalExtractor:
                 if regex_phones:
                     result["heuristic_phones"] = regex_phones[:5] # Take top 5
                     
+            # --- 5. Social & Discovery Layer ---
+            result["social_links"] = {
+                "facebook": [],
+                "linkedin": [],
+                "instagram": [],
+                "website": []
+            }
+            
+            # Identify potential official website and social profiles
+            for a_tag in soup.find_all("a", href=True):
+                href = a_tag["href"].strip()
+                href_lower = href.lower()
+                
+                # Social detection
+                if "facebook.com" in href_lower and "/sharer" not in href_lower:
+                    result["social_links"]["facebook"].append(href)
+                elif "linkedin.com/company" in href_lower:
+                    result["social_links"]["linkedin"].append(href)
+                elif "instagram.com" in href_lower:
+                    result["social_links"]["instagram"].append(href)
+                
+                # Official Website detection (heuristics from top results)
+                # Look for links in search results that don't belong to known directories
+                KNOWN_DIRECTORIES = ["societe.com", "pappers.fr", "pagesjaunes.fr", "infogreffe.fr", "verif.com", "manageo.fr"]
+                if href.startswith("http") and not any(dir in href_lower for dir in KNOWN_DIRECTORIES + ["google.com", "facebook.com", "linkedin.com", "instagram.com", "twitter.com"]):
+                    result["social_links"]["website"].append(href)
+
+            # Deduplicate social links
+            for k in result["social_links"]:
+                result["social_links"][k] = list(set(result["social_links"][k]))
+                    
             # --- Deduplicate ---
             result["heuristic_phones"] = list(set([p for p in result["heuristic_phones"] if p]))
             result["heuristic_emails"] = list(set([e for e in result["heuristic_emails"] if e]))
