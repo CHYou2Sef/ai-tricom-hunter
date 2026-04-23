@@ -5,29 +5,35 @@
 # ║      pip install -r requirements.txt                             ║
 # ║                                                                  ║
 # ║  After installing, also run:                                     ║
-# ║      patchright install chromium   (Tier 1 — Chrome patché)     ║
-# ║      python -m camoufox fetch      (Tier 4 — Firefox custom)    ║
+# ║      seleniumbase install chromedriver  (Tier 1 — UC Driver)    ║
+# ║      patchright install chromium        (Tier 2 — Chrome)       ║
+# ║      python -m camoufox fetch           (Tier 5 — Firefox)      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 # ── Browser Automation (The Hybrid Engines) ───────────────────────────
-# Tier 0: Selenium + Undetected-ChromeDriver (Benchmark Arena Engine)
+# Tier 0: Legacy Selenium + Undetected-ChromeDriver (Benchmark Arena)
 selenium>=4.18.0
 webdriver-manager>=4.0.1
 undetected-chromedriver>=3.5.5
 setuptools>=69.0.0  # Required for undetected-chromedriver in Python 3.12+
-# Tier 1: Patchright — Drop-in replacement for Playwright, patched for stealth.
+
+# Tier 1: SeleniumBase UC Driver — PRIMARY entry point (docs/Gemini.md)
+#   Driver(uc=True, headless=False) — stealth binary renaming + CDP
+#   After install: seleniumbase install chromedriver  (auto-managed)
+seleniumbase>=4.29.0
+# Tier 2: Patchright — Drop-in replacement for Playwright, patched for stealth.
 #   Passes: Cloudflare, Kasada, Akamai, Datadome, Fingerprint.com, Sannysoft.
 #   API: 100% identical to Playwright — only the import line changed.
 patchright
 
-# Tier 2: Nodriver (Stealth CDP-only agent, zero WebDriver fingerprints)
+# Tier 3: Nodriver (Stealth CDP-only agent, zero WebDriver fingerprints)
 nodriver>=0.34
 websockets>=13.0
 
-# Tier 3: Crawl4AI (Managed scraper, bypasses WAF, markdown support)
+# Tier 4: Crawl4AI (Managed scraper, bypasses WAF, markdown support)
 crawl4ai>=0.4.0
 
-# Tier 4: Camoufox — Patched Firefox anti-detect browser (last resort, Firefox engine)
+# Tier 5: Camoufox — Patched Firefox anti-detect browser (last resort, Firefox engine)
 #   After install: python -m camoufox fetch  (downloads the custom Firefox binary ~200MB)
 # camoufox (Removed for light version)
 
@@ -64,8 +70,9 @@ pytest-asyncio>=0.24.0
 
 # ── Quick Setup Commands ──────────────────────────────────────────────
 # Step 1: pip install -r requirements.txt
-# Step 2: patchright install chromium       ← Tier 1 (Chrome stealth)
-# Step 3: python -m camoufox fetch          ← Tier 4 (Firefox anti-detect)
+# Step 2: seleniumbase install chromedriver  ← Tier 1 (SeleniumBase UC)
+# Step 3: patchright install chromium        ← Tier 2 (Chrome stealth)
+# Step 4: python -m camoufox fetch           ← Tier 5 (Firefox anti-detect)
 # ──────────────────────────────────────────────────────────────────────
 
 # ollama (Removed for light version)

@@ -11,6 +11,14 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from prometheus_client import Counter
+
+# Custom Metrics for Industrial Agent
+SCRAPING_RESULTS = Counter(
+    "scraping_results_total",
+    "Total number of scraping attempts by tier, method, and outcome status",
+    ["tier", "scrap_method", "status"]
+)
 
 # Configure structured logging with all levels
 structlog.configure(

@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tricom-agent
+  labels:
+    app: tricom-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tricom-agent
+  template:
+    metadata:
+      labels:
+        app: tricom-agent
+    spec:
+      containers:
+      - name: agent
+        image: ghcr.io/youssef/ai_tricom_hunter:latest
+        imagePullPolicy: Always
+        resources:
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+        envFrom:
+        - configMapRef:
+            name: tricom-agent-config
+        - secretRef:
+            name: tricom-agent-secrets
+        volumeMounts:
+        - name: work-dir
+          mountPath: /app/WORK
+        - name: shm
+          mountPath: /dev/shm
+        command: ["python", "run/worker.py"]
+      volumes:
+      - name: work-dir
+        persistentVolumeClaim:
+          claimName: tricom-work-pvc
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tricom-agent-metrics
+spec:
+  selector:
+    app: tricom-agent
+  ports:
+  - protocol: TCP
+    port: 8000
+    targetPort: 8000
+  type: ClusterIP

@@ -8,34 +8,33 @@ from typing import Optional
 def generate_google_ai_url(query: str, region: str = "fr") -> str:
     """
     Generates a Google Search URL optimized for triggering the 
-    AI Overview (Search Generative Experience).
+    AI Overview (Search Generative Experience / Gemini in Search).
     
-    Parameters:
-    - udm=14: Forces 'AI Overview' or 'Search Labs' layout.
-    - aep=42: Advanced experimental parameter for generative UI.
-    - q: The encoded search query.
+    Parameters (Updated for user request):
+    - udm=50: Direct AI Overview / Gemini variant.
+    - aep=22: Experimental generative UI parameter.
     """
     base_url = f"https://www.google.com/search"
     params = {
         "q": query,
-        "udm": "14",    # The 'AI Overview' magic flag
-        "aep": "42",    # Experimental generative flag
-        "gl": region,   # Geo-location for accuracy (e.g., 'fr')
-        "hl": "fr",     # Interface language
+        "udm": "50",    # Requested: Gemini/AI specific
+        "aep": "22",    # Requested: Experimental generative
+        "gl": region,
+        "hl": "fr",
     }
     
     return f"{base_url}?{urllib.parse.urlencode(params)}"
 
 def build_b2b_query(company_name: str, address: Optional[str] = None) -> str:
     """
-    Constructs a high-precision B2B query to find contact details.
+    Constructs a simple, human-like search phrase for the search bar.
+    Avoids complex prompts/operators to prevent triggering anti-bot UI.
     """
-    query = f'"{company_name}"'
+    query = f"{company_name}"
     if address:
-        query += f' "{address}"'
+        query += f" {address}"
     
-    # "Caveman" style keyword additives for phone extraction
-    query += ' ("téléphone" OR "contact" OR "siège social")'
-    query += ' site:pappers.fr OR site:societe.com OR site:societe.ninja OR site:linkedin.com'
+    # Just a simple intent hint instead of complex OR logic
+    query += " téléphone contact"
     
     return query

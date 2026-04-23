@@ -73,7 +73,6 @@ class Crawl4AIAgent(BaseBrowserAgent):
         from crawl4ai import BrowserConfig, CrawlerRunConfig  # type: ignore
         browser_cfg = BrowserConfig(
             headless=True,
-            extra_args=["--no-sandbox"] if not config.BROWSER_USE_SANDBOX else []
         )
         self._crawler = AsyncWebCrawler(config=browser_cfg)
         await self._crawler.__aenter__()

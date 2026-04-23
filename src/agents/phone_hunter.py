@@ -15,14 +15,12 @@ from infra.intelligence.ollama_client import ollama_client
 
 logger = get_logger(__name__)
 
+from common.search_engine import build_b2b_query
+
 def build_search_query(row: ExcelRow) -> str:
-    if row.nom:
-        keywords = config.SQO_CONTACT_KEYWORDS
-        trusted  = config.SQO_TRUSTED_DOMAINS
-        return f'"{row.nom}" "{row.adresse or ""}" {keywords} {trusted}'
-    elif row.siren:
-        return config.SIREN_SEARCH_TEMPLATE.format(siren=row.siren)
-    return ""
+    nom = row.get_search_name()
+    adr = row.adresse or ""
+    return build_b2b_query(nom, adr)
 
 def build_agent_query(row: ExcelRow) -> str:
     nom     = row.get_search_name()
@@ -31,49 +29,37 @@ def build_agent_query(row: ExcelRow) -> str:
 
 async def _search_knowledge_panel_phone(row: ExcelRow, agent, query: str) -> Optional[str]:
     row.search_queries_used.append(f"KP: {query}")
-    logger.info(f"    ├─ [Tier 0] Knowledge Panel Search: '{query}'")
+    logger.info(f"    ├─ [UUE] Knowledge Panel Search: '{query}'")
 
     success = await agent.submit_google_search(query)
     if not success:
         return None
 
-    await asyncio.sleep(3)
+    await asyncio.sleep(2)
     
     metadata = await agent.extract_universal_data() or {}
     best_phone = None
     
     if metadata.get("heuristic_phones"):
         best_phone = metadata["heuristic_phones"][0]
-    elif metadata.get("aeo_data"):
-        for block in metadata["aeo_data"]:
-            tel = block.get("telephone") or block.get("contactPoint", {}).get("telephone")
-            if tel:
-                best_phone = tel
-                break
                 
     if best_phone:
         normalized = normalize_phone(best_phone)
         if normalized:
             row.raw_ai_responses.append({
-                "text":   f"Knowledge Panel/UUE Phone Found: {normalized}",
+                "text":   f"UUE Heuristic Phone Found: {normalized}",
                 "source": "google_kp",
                 "query":  query,
             })
+            # Enrich other fields from UUE if found
             for block in metadata.get("aeo_data", []):
-                email = block.get("email")
-                if email and "email" not in row.enriched_fields:
-                    row.enriched_fields["email"] = {"value": email, "source": "JSON-LD"}
-                
-                url = block.get("url") or block.get("sameAs")
-                if url:
-                    if isinstance(url, list): url = url[0]
-                    if "website" not in row.enriched_fields:
-                        row.enriched_fields["website"] = {"value": url, "source": "JSON-LD"}
+                for field, key in [("email", "email"), ("website", "url")]:
+                    val = block.get(key)
+                    if val and field not in row.enriched_fields:
+                        if isinstance(val, list): val = val[0]
+                        row.enriched_fields[field] = {"value": val, "source": "JSON-LD"}
             
-            if metadata.get("heuristic_emails") and "email" not in row.enriched_fields:
-                row.enriched_fields["email"] = {"value": metadata["heuristic_emails"][0], "source": "UUE-Visual"}
-
-            logger.info(f"✨ [Tier 0/UUE] Method SUCCESS: {normalized}")
+            logger.info(f"✨ [UUE] Method SUCCESS: {normalized}")
             return normalized
     return None
 
@@ -108,14 +94,8 @@ async def _search_and_extract_phone(row: ExcelRow, agent, query: str, source_tag
         row.raw_ai_responses.append({"text": content, "source": source_tag, "query": query})
     
     metadata = await agent.extract_universal_data() or {}
-    phone = None
-    for block in metadata.get("aeo_data", []):
-        tel = block.get("telephone") or block.get("contactPoint", {}).get("telephone")
-        if tel:
-            phone = tel
-            break
-    if not phone and metadata.get("heuristic_phones"):
-        phone = metadata["heuristic_phones"][0]
+    phone = metadata.get("heuristic_phones")[0] if metadata.get("heuristic_phones") else None
+    
     if not phone and content:
         phones = extract_phones(content, source_label=source_tag)
         phone = get_best_phone(phones)
@@ -139,15 +119,18 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
     field_map = {
         "email": ["email"], "linkedin": ["linkedin", "linkedin_url"],
         "website": ["website", "website_url"], "siren": ["siren"],
-        "siret": ["siret"], "legal_form": ["legal_form", "legal_name"],
+        "siret": ["siret"], "legal_form": ["legal_form", "legal_name", "forme_juridique"],
         "naf": ["activity_code_naf", "naf"], "address": ["headquarters_address", "address"],
-        "dirigeant": ["director", "dirigeant", "ceo"], "capital": ["capital"],
+        "dirigeant": ["director", "dirigeant", "ceo", "responsable_person", "responsable"], "capital": ["capital"],
         "ville": ["city", "ville"], "code_postal": ["postal_code", "code_postal"],
+        "facebook": ["facebook", "facebook_url"], "instagram": ["instagram", "instagram_url"],
+        "direct_phone": ["director_direct_phone", "tel_direct", "mobile"],
     }
     attr_map = {
         "email": "email", "linkedin": "linkedin", "website": "website", "siren": "siren",
         "siret": "siret", "legal_form": "forme_juridique", "naf": "naf",
         "dirigeant": "dirigeant", "capital": "capital", "ville": "ville", "code_postal": "code_postal",
+        "facebook": "facebook", "instagram": "instagram", "direct_phone": "phone_agent"
     }
     for row_key, json_keys in field_map.items():
         for jk in json_keys:
@@ -160,7 +143,34 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
                 attr = attr_map.get(row_key)
                 if attr and not getattr(row, attr, None): setattr(row, attr, clean_val)
                 break
+    
+    # --- 3. Consistency Validation (Best Practice) ---
+    extracted_siren = data.get("siren")
+    if extracted_siren and row.siren:
+        # Normalize for comparison
+        clean_ext = "".join(filter(str.isdigit, str(extracted_siren)))
+        clean_row = "".join(filter(str.isdigit, str(row.siren)))
+        if clean_ext != clean_row:
+            logger.warning(f"🚩 [Validation] SIREN Mismatch! Expected {clean_row}, got {clean_ext}. High risk of hallucination.")
+            row.enriched_fields["validation_error"] = "SIREN_MISMATCH"
+            
     return best
+
+def _calculate_row_confidence(row: ExcelRow) -> int:
+    """Aggregates confidence based on source and validation."""
+    if not row.phone: return 0
+    
+    # Base on source
+    phone_list = row.enriched_fields.get("phone_list", [])
+    if not phone_list: return 50
+    
+    best_score = max(h.get('score', 0) for h in phone_list)
+    
+    # Penalize if SIREN mismatch
+    if row.enriched_fields.get("validation_error") == "SIREN_MISMATCH":
+        best_score -= 30
+        
+    return max(0, best_score)
 
 async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Optional[int] = None) -> List[dict]:
     """
@@ -185,15 +195,31 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
         if any(h['num'] == norm for h in harvested): return
         harvested.append({"num": norm, "score": score, "source": source})
 
-    nom, adr = (row.nom or row.siren or ""), (row.adresse or "")
+    # ── 1. Target Identification ──────────────────────────────────────────
+    # Priority: Raison Sociale > Enseigne > SIREN identifier
+    nom_base = row.nom or "Entreprise"
+    if not row.nom and row.siren:
+        nom = f"Entreprise (SIREN {row.siren})"
+    else:
+        nom = row.nom or row.siren or "Inconnue"
+        
+    adr = row.adresse or "France"
+    siren = row.siren or "NOT_PROVIDED"
+    category = row.category or "B2B"
+    extra = row.raw_context[:200]
     
     # Existing phones to avoid duplication
     existing = set()
     if row.phone: existing.add(normalize_phone(row.phone))
 
     # 1. AI Mode Searches (High Confidence)
+    # Waterfall: Try Standard -> if fail -> Try Expert
     for prompt_key, tag in [(config.AI_MODE_SEARCH_PROMPT, "ai_std"), (config.AI_MODE_EXPERT_PROMPT, "ai_expert")]:
-        prompt = prompt_key.format(nom=nom, adresse=adr)
+        # Check if we already have a 90%+ confidence phone from a previous prompt iteration
+        if any(h['score'] >= 90 for h in harvested):
+            break
+            
+        prompt = prompt_key.format(nom=nom, adresse=adr, siren=siren, category=category, extra=extra)
         ai_raw = await agent.search_google_ai_mode(prompt)
         if ai_raw:
             row.raw_ai_responses.append({"text": ai_raw, "source": tag, "query": prompt[:100]})
@@ -203,19 +229,20 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
             _fill_row_from_ai_mode(ai_raw, row)
 
     # 2. Knowledge Panel (Highest Confidence)
-    if row.nom:
+    if not any(h['score'] >= 90 for h in harvested) and row.nom:
         kp_phone = await _search_knowledge_panel_phone(row, agent, f"{row.nom} {adr}")
         if kp_phone:
             add_unique(kp_phone, 99, "google_kp")
 
     # 3. Web Scraping (Medium Confidence)
-    q = build_search_query(row)
-    if q:
-        res, content = await _search_and_extract_phone(row, agent, q, "google_scrap")
-        if content:
-            candidates = extract_phones(content, source_label="web_scrap")
-            for p in candidates:
-                add_unique(p, 85, "web_scrap")
+    if not any(h['score'] >= 90 for h in harvested):
+        q = build_search_query(row)
+        if q:
+            res, content = await _search_and_extract_phone(row, agent, q, "google_scrap")
+            if content:
+                candidates = extract_phones(content, source_label="web_scrap")
+                for p in candidates:
+                    add_unique(p, 85, "web_scrap")
 
     # 4. Final results mapping
     row.processing_end_ts = time.perf_counter()
@@ -225,10 +252,17 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
         # Sort by score descending
         harvested.sort(key=lambda x: x['score'], reverse=True)
         row.phone = harvested[0]['num'] # Main phone
-        row.status = "DONE"
+        
+        # Calculate final aggregated confidence
+        final_conf = _calculate_row_confidence(row)
+        row.status = "DONE" if final_conf >= 70 else "LOW_CONF"
+        
         # Store full list in enriched_fields for column expansion
         row.enriched_fields["phone_list"] = harvested
-        logger.info(f"🏆 [Row {progress_str}] HARVESTED {len(harvested)} numbers. Best: {row.phone} | Time: {elapsed}s")
+        row.enriched_fields["final_confidence"] = final_conf
+        
+        icon = "🏆" if row.status == "DONE" else "⚠️"
+        logger.info(f"{icon} [Row {progress_str}] Status: {row.status} (Conf: {final_conf}%) | Best: {row.phone} | Time: {elapsed}s")
     else:
         row.status = "NO TEL"
         logger.warning(f"🔦 [Row {progress_str}] DEPLETED: No phone found | Time: {elapsed}s")

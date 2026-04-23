@@ -92,9 +92,6 @@ class NodriverAgent(BaseBrowserAgent):
             "--no-default-browser-check",
             "--disable-infobars",
             "--disable-notifications",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-            "--no-dbus-config",
         ]
 
         if self._proxy:
@@ -118,7 +115,6 @@ class NodriverAgent(BaseBrowserAgent):
             browser_executable_path=nd_path,
             browser_args=browser_args,
             headless=False,               # Headed mode is more stealthy
-            no_sandbox=not config.BROWSER_USE_SANDBOX,  # Industrial stability
         )
         
         # Safety wait for CDP to stabilize

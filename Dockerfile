@@ -53,8 +53,12 @@ COPY requirements-prod.txt .
 RUN uv pip install --system -r requirements-prod.txt
 
 # ── 5. Install Stealth Browsers ───────────────────────────────────────
-# Patchright requires custom Chromium binaries to bypass Kasada/Cloudflare
+# Patchright requires custom Chromium binaries
 RUN patchright install chromium
+
+# SeleniumBase Tier 1 requires chromedriver (UC Mode)
+# We use the built-in installer to ensure version compatibility
+RUN seleniumbase install chromedriver
 
 # ── 6. Copy Application Source Code ───────────────────────────────────
 # First, copy and fix entrypoint specifically to prevent Windows 'file not found' errors

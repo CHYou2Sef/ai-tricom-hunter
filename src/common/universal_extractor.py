@@ -59,7 +59,10 @@ class UniversalExtractor:
             kg_phone_selectors = [
                  "[data-dtype='d3ph'] span", "a[data-dtype='d3ph']", 
                  "[data-attrid='kc:/local:phone'] span", "[data-attrid='tel'] span",
-                 ".rllt__details", ".vlist", ".LGOjhe span", ".zS8pY"
+                 ".LGOjhe span", ".zS8pY", "span[data-dtype='d3ph']",
+                 ".kno-rdesc span", ".yDYNvb.lyLwlc",
+                 "div[data-attrid='wa:/description'] span", "[data-chunk-index='0']",
+                 ".wDYxhc .VwiC3b", ".rllt__details", ".vlist"
             ]
             for selector in kg_phone_selectors:
                 for el in soup.select(selector):

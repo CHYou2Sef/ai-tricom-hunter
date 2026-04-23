@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-╔══════════════════════════════════════════════════════════════════════════╗
+╔════════════════════════════════════════════════════════════════════════╗
 ║  scripts/benchmark_engines.py                                            ║
 ║                                                                          ║
 ║  STANDALONE BENCHMARK ARENA — Multi-Engine Continuity Stress Test        ║
 ║                                                                          ║
-║  Feeds the same 1000-line dataset to each browser engine independently   ║
+║  Feeds the same dataset to each browser engine independently              ║
 ║  (one engine at a time, no hybrid fallback). Measures per-engine:        ║
 ║                                                                          ║
 ║    ✓ MTTI   — Mean Time To Interruption (primary continuity KPI)         ║
@@ -21,17 +21,18 @@
 ║  Usage:                                                                  ║
 ║    python scripts/benchmark_engines.py --input WORK/INCOMING/your.xlsx   ║
 ║    python scripts/benchmark_engines.py --input WORK/INCOMING/your.xlsx   ║
-║                    --engines selenium patchright nodriver                ║
+║                    --engines seleniumbase patchright nodriver            ║
 ║    python scripts/benchmark_engines.py --input WORK/INCOMING/your.xlsx   ║
-║                    --rows 100  --engines selenium                         ║
+║                    --rows 50  --engines seleniumbase                     ║
 ║                                                                          ║
-║  Available engine names:                                                 ║
-║    selenium   →  Selenium 4 + undetected-chromedriver (new)              ║
-║    patchright →  Patchright stealth Chromium (Tier 1)                   ║
-║    nodriver   →  Nodriver UC-Mode CDP stealth (Tier 2)                  ║
-║    crawl4ai   →  Crawl4AI managed scraper (Tier 3)                      ║
-║    camoufox   →  Camoufox patched Firefox (Tier 4, heavy)               ║
-╚══════════════════════════════════════════════════════════════════════════╝
+║  Available engine names (sorted by tier):                                ║
+║    seleniumbase →  SeleniumBase UC Driver  (⭐ Tier 1 — PRIMARY)          ║
+║    selenium     →  Selenium 4 + undetected-chromedriver (Tier 0 legacy)  ║
+║    patchright   →  Patchright stealth Chromium (Tier 2)                 ║
+║    nodriver     →  Nodriver UC-Mode CDP stealth (Tier 3)                ║
+║    crawl4ai     →  Crawl4AI managed scraper (Tier 4)                    ║
+║    camoufox     →  Camoufox patched Firefox (Tier 5, heavy)             ║
+╚════════════════════════════════════════════════════════════════════════╝
 """
 
 import sys
@@ -41,26 +42,48 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-# ── Ensure project root is on sys.path ────────────────────────────────────
+# ── Ensure src/ is on sys.path (current project layout) ────────────────────
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
-import config
-from excel.reader import ExcelRow, read_excel
-from utils.metrics import BenchmarkTelemetry
-from utils.logger import get_logger
+from core import config
+from core.logger import get_logger
+from domain.excel.reader import ExcelRow, read_excel
+from common.metrics import BenchmarkTelemetry
 
 logger = get_logger("benchmark")
 
-# ── Engine registry — maps CLI name → lazy import factory ─────────────────
+# ── Lightweight telemetry helpers (graceful if BenchmarkTelemetry API differs) ─────
+
+def _record(engine: str, row_idx: int, status: str, latency: float,
+            interruption: str | None, telemetry) -> None:
+    """Route a row result to telemetry, tolerating different API versions."""
+    try:
+        telemetry.record(engine, row_idx, status, latency, interruption)
+    except TypeError:
+        try:
+            telemetry.record(engine, row_idx, status, latency)
+        except Exception:
+            pass
+
+
+def _record_error(engine: str, row_idx: int, telemetry) -> None:
+    _record(engine, row_idx, "ERROR", 0.0, "startup_failure", telemetry)
+
+# ── Engine registry — maps CLI name → lazy import factory ────────────────────
 ENGINE_REGISTRY = {
-    "selenium":   lambda: _import("browser.selenium_agent",   "SeleniumAgent"),
-    "patchright": lambda: _import("browser.patchright_agent", "PatchrightAgent"),
-    "nodriver":   lambda: _import("browser.nodriver_agent",   "NodriverAgent"),
-    "crawl4ai":   lambda: _import("browser.crawl4ai_agent",   "Crawl4AIAgent"),
-    "camoufox":   lambda: _import("browser.camoufox_agent",   "CamoufoxAgent"),
+    # ⭐ Tier 1: PRIMARY benchmark target (docs/Gemini.md)
+    "seleniumbase": lambda: _import("infra.browsers.seleniumbase_agent", "SeleniumBaseAgent"),
+    # Tier 0: Legacy undetected-chromedriver (kept for baseline comparison)
+    "selenium":     lambda: _import("infra.browsers.selenium_agent",     "SeleniumAgent"),
+    # Tier 2–5: existing agents
+    "patchright":   lambda: _import("infra.browsers.patchright_agent",   "PatchrightAgent"),
+    "nodriver":     lambda: _import("infra.browsers.nodriver_agent",     "NodriverAgent"),
+    "crawl4ai":     lambda: _import("infra.browsers.crawl4ai_agent",     "Crawl4AIAgent"),
+    "camoufox":     lambda: _import("infra.browsers.camoufox_agent",     "CamoufoxAgent"),
 }
-DEFAULT_ENGINES = ["selenium", "patchright", "nodriver"]
+# Default: run SeleniumBase first, then Patchright and Nodriver for comparison
+DEFAULT_ENGINES = ["seleniumbase", "patchright", "nodriver"]
 
 
 def _import(module_path: str, class_name: str):
@@ -79,12 +102,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--input", required=True,
-        help="Path to the Excel/CSV input file (1000 lines recommended).",
+        help="Path to the Excel/CSV input file (50–1000 rows recommended).",
     )
     parser.add_argument(
         "--engines", nargs="+", default=DEFAULT_ENGINES,
         choices=list(ENGINE_REGISTRY.keys()),
-        help=f"Engines to benchmark. Default: {DEFAULT_ENGINES}",
+        help=(
+            f"Engines to benchmark. Default: {DEFAULT_ENGINES}. "
+        ),
     )
     parser.add_argument(
         "--rows", type=int, default=1000,
@@ -113,9 +138,18 @@ async def run_engine_benchmark(
     AgentClass = ENGINE_REGISTRY[engine_name]()
     agent = AgentClass(worker_id=0)
 
-    logger.info(f"\n{'═'*60}")
-    logger.info(f"🚀  BENCHMARKING: {engine_name.upper()}  ({len(rows)} rows)")
-    logger.info(f"{'═'*60}")
+    tier_label = {
+        "seleniumbase": "⭐ Tier 1 (SeleniumBase UC)",
+        "selenium":     "Tier 0 (SeleniumUCD legacy)",
+        "patchright":   "Tier 2 (Patchright)",
+        "nodriver":     "Tier 3 (Nodriver)",
+        "crawl4ai":     "Tier 4 (Crawl4AI)",
+        "camoufox":     "Tier 5 (Camoufox)",
+    }.get(engine_name, engine_name)
+
+    logger.info(f"\n{'\u2550'*64}")
+    logger.info(f"🚀  BENCHMARKING: {engine_name.upper()}  [{tier_label}]  ({len(rows)} rows)")
+    logger.info(f"{'\u2550'*64}")
 
     try:
         await agent.start()
@@ -130,29 +164,40 @@ async def run_engine_benchmark(
         interruption_reason: Optional[str] = None
 
         try:
-            nom = row.nom or row.siren or ""
-            adr = row.adresse or ""
-            prompt = config.AI_MODE_SEARCH_PROMPT.format(nom=nom, adresse=adr)
+            nom, adr = (row.nom or row.siren or ""), (row.adresse or "")
+            siren = getattr(row, "siren", "NOT_PROVIDED")
+            category = getattr(row, "category", "NOT_PROVIDED")
+            extra = getattr(row, "raw_context", "")[:200]
+            
+            prompt = config.AI_MODE_SEARCH_PROMPT.format(
+                nom=nom, adresse=adr, siren=siren, category=category, extra=extra
+            )
 
-            # Primary search
+            # ── 1. Standard AI Search ─────────────────────────────────────
             result = await agent.search_google_ai_mode(prompt)
+            from domain.search.phone_extractor import extract_phones
+            phones = extract_phones(result if result else "", source_label=engine_name)
+            phone = phones[0] if phones else None
+
+            # ── 2. Expert AI Retry (Waterfall) ──────────────────────────
+            if not phone:
+                logger.info(f"🔄 [{engine_name.upper()}] No phone in standard mode. Retrying with EXPERT prompt...")
+                expert_prompt = config.AI_MODE_EXPERT_PROMPT.format(
+                    nom=nom, adresse=adr, siren=siren, category=category, extra=extra
+                )
+                result = await agent.search_google_ai_mode(expert_prompt)
+                phones = extract_phones(result if result else "", source_label=f"{engine_name}_expert")
+                phone = phones[0] if phones else None
 
             # Detect interruption signal from the agent (set by _record_interruption)
             if hasattr(agent, "last_interruption_reason") and agent.last_interruption_reason:
                 interruption_reason = agent.last_interruption_reason
                 agent.last_interruption_reason = None  # reset after consuming
 
-            if result:
-                # Quick phone check without full enrichment
-                from search.phone_extractor import extract_phones
-                phones = extract_phones(result, source_label=engine_name)
-                row.phone = phones[0] if phones else None
-                
-                # 🏆 THE HARVEST LOG: Immediate feedback with progression
-                if row.phone:
-                    logger.info(f"🏆 [{engine_name.upper()}] Row {i}/{len(rows)} HARVESTED: {row.phone}")
+            if phone:
+                logger.info(f"🏆 [{engine_name.upper()}] Row {i}/{len(rows)} HARVESTED: {phone}")
 
-            status = "DONE" if row.phone else "NO TEL"
+            status = "DONE" if (result and phone) else "NO TEL"
 
         except asyncio.CancelledError:
             logger.warning(f"[{engine_name}] Row #{i} was cancelled.")
@@ -165,22 +210,23 @@ async def run_engine_benchmark(
             interruption_reason = "exception"
 
         latency = time.perf_counter() - row_start
-        telemetry.record(engine_name, i, status, latency, interruption_reason)
+        row.status = status # CRITICAL: Update the object so summary counting works
+        _record(engine_name, i, status, latency, interruption_reason, telemetry)
 
         # Progress heartbeat every 25 rows
         if i % 25 == 0 or i == len(rows):
-            stats = telemetry._engines[engine_name].compute()
+            done   = sum(1 for r in rows[:i] if getattr(r, "status", "") == "DONE")
+            no_tel = sum(1 for r in rows[:i] if getattr(r, "status", "") == "NO TEL")
+            errs   = i - done - no_tel
             logger.info(
                 f"  [{engine_name}] Row {start_idx + i}/{start_idx + len(rows)}  |  "
-                f"DONE={stats['rows_done']}  NO_TEL={stats['rows_no_tel']}  "
-                f"ERR={stats['rows_error']}  |  MTTI={stats['mtti_sec']}s"
+                f"DONE={done}  NO_TEL={no_tel}  ERR={errs}  |  lat={latency:.1f}s"
             )
 
-        # Human-like delay between rows (mirrors production behaviour)
+        # Human-like inter-row delay (mirrors production behaviour)
         import random
         await asyncio.sleep(random.uniform(config.MIN_DELAY_SECONDS, config.MAX_DELAY_SECONDS))
-        
-        # Save row-level checkpoint (adding the start offset)
+
         save_checkpoint(engine_name, start_idx + i)
 
     try:

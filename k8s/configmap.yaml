@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tricom-agent-config
+  namespace: default
+data:
+  DOCKER_ENV: "true"
+  CHROMIUM_BINARY_PATH: "/usr/bin/google-chrome"
+  MAX_CONCURRENT_WORKERS: "1"
+  SELENIUMBASE_ENABLED: "true"
+  SELENIUMBASE_XVFB: "true"
+  PERFORMANCE_MODE: "full"
+  WATCHDOG_POLL_INTERVAL: "10"
+  SAVE_INTERVAL: "50"

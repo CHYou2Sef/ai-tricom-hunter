@@ -27,7 +27,7 @@ class ExcelRow:
                 return s if s and s.lower() not in ("none", "nan", "") else None
             return None
 
-        self.nom     = get("raison_sociale")
+        self.nom     = get("raison_sociale") or get("enseigne") or get("nom_commercial")
         
         if mapping.get("adresse") == "__COMPOSITE__":
             parts = [get(c) for c in ["adresse_numero", "adresse_typevoie", "adresse_libellevoie"]]
@@ -41,6 +41,8 @@ class ExcelRow:
             self.adresse = get("adresse")
         
         self.siren   = get("siren") or get("siret")
+        self.category = get("libelle_activite") or get("activite") or get("forme_juridique")
+        self.raw_context = json.dumps(raw, ensure_ascii=False)
 
         if self.nom and self.adresse:
             self.search_type = "RS_ADR"
@@ -105,13 +107,24 @@ class ExcelRow:
             result[f"AI_Phone_{i}_Conf"] = f"{item.get('score')}%"
             # Optional: result[f"AI_Phone_{i}_Source"] = item.get("source")
 
-        # Also add other enriched fields
+        # 3. Add other enriched fields (Email, Siren, etc.)
         for field, data in self.enriched_fields.items():
             if field != "phone_list":
                 if isinstance(data, dict) and "value" in data:
                     result[f"AI_{field.capitalize()}"] = data["value"]
                 else:
                     result[f"AI_{field.capitalize()}"] = str(data)
+
+        # 4. Add AI Provenance & Quality Validation
+        best_source = "N/A"
+        phone_list = self.enriched_fields.get("phone_list", [])
+        if self.phone and phone_list:
+            for item in phone_list:
+                if item.get("num") == self.phone:
+                    best_source = item.get("source")
+                    break
+        result["AI_Scrap_Source"] = best_source
+        result["AI_Confidence_Score"] = f"{self.enriched_fields.get('final_confidence', 0)}%"
 
         return result
 

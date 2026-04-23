@@ -24,11 +24,8 @@ logger = get_logger(__name__)
 # PATTERNS
 # ──────────────────────────────────────────────────────────────────────────────
 
-# French phone patterns (plain text)
-_TEXT_PATTERNS: List[str] = [
-    r'(?<!\d)\+33[\s\.\-]?[1-9](?:[\s\.\-]?\d{2}){4}(?!\d)',   # +33 X XX XX XX XX
-    r'(?<!\d)0[1-9](?:[\s\.\-]?\d{2}){4}(?!\d)',                # 0X XX XX XX XX
-]
+# Use centralized patterns from config
+_TEXT_PATTERNS: List[str] = config.PHONE_PATTERNS
 
 # tel: href pattern  →  <a href="tel:0123456789">
 _TEL_HREF_RE   = re.compile(r'href=["\']tel:([+\d\s\.\-]{8,20})["\']', re.IGNORECASE)

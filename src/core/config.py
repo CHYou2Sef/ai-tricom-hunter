@@ -82,18 +82,13 @@ from common.fs import safe_mkdir as _safe_mkdir_cfg
 _safe_mkdir_cfg(LOG_DIR)
 
 # ── OUTPUT SETTINGS ──
-STATUS_COLUMN_NAME = os.getenv("STATUS_COLUMN_NAME", "Etat_IA")
-READY_DIR          = WORK_DIR / "READY"
-
-# ── OUTPUT SETTINGS ────────────────────────────────────────────────
 # The column name for the agent's processing result (Done, No Tel, etc.)
 # We use 'Etat_IA' to avoid confusion with original 'Statut' (Active/Inactive) columns.
-STATUS_COLUMN_NAME = "Etat_IA"
+STATUS_COLUMN_NAME = os.getenv("STATUS_COLUMN_NAME", "Etat_IA")
 
 # ── The FINAL queue for the Agent (Manual Override) ──
 # If you want to jump the queue, move files here.
-READY_DIR       = WORK_DIR / "READY"
-
+READY_DIR = WORK_DIR / "READY"
 
 def get_output_dir(input_folder_name: str) -> Path:
     """Returns {WORK_DIR}/output/{input_folder_name}"""
@@ -106,7 +101,7 @@ def get_output_dir(input_folder_name: str) -> Path:
 # ── Parallelism & Professional Throttling ──
 # MAX_CONCURRENT_WORKERS = number of simultaneous browser windows
 MAX_CONCURRENT_WORKERS = int(os.getenv("MAX_CONCURRENT_WORKERS", "1"))
-BROWSER_USE_SANDBOX    = os.getenv("BROWSER_USE_SANDBOX", "false").lower() == "true"
+BROWSER_USE_SANDBOX    = os.getenv("BROWSER_USE_SANDBOX", "true").lower() == "true"
 
 # ── HDD OPTIMIZATION ──
 # How often (in rows) the agent saves the Excel file back to disk.
@@ -202,15 +197,12 @@ BROWSER_STALE_TIMEOUT_SEC      = int(os.getenv("BROWSER_STALE_TIMEOUT_SEC", "15"
 CAPTCHA_SOLVER  = os.getenv("CAPTCHA_SOLVER", "manual")   # "manual" | "2captcha" | "capsolver"
 CAPTCHA_API_KEY = os.getenv("CAPTCHA_API_KEY", "")        # Leave blank to use manual mode
 
-# ═══════════════════════════════════════════════════════════════════
-# 🏗️  HYBRID ENGINE — URL TIER CLASSIFICATION
-# ═══════════════════════════════════════════════════════════════════
-# URLs containing these domain fragments are automatically routed to
-# the specified tier. Unknown URLs default to Tier 1.
-#   Tier 1 → PatchrightAgent   (fast, chromium patched, stealth)
-#   Tier 2 → NodriverAgent     (stealth CDP, suits Cloudflare sites)
-#   Tier 3 → Crawl4AIAgent     (managed JS rendering, suits hardened e-commerce)
-#   Tier 4 → CamoufoxAgent     (Firefox anti-detect, absolute last resort)
+# ══ Tier Classification (docs/Gemini.md blueprint) ───────────────────────────
+#   Tier 1 → SeleniumBaseAgent (UC Mode — PRIMARY, stealth + CDP)
+#   Tier 2 → PatchrightAgent   (Chrome stealth, patched binary)
+#   Tier 3 → NodriverAgent     (CDP-only, suits Cloudflare sites)
+#   Tier 4 → Crawl4AIAgent     (managed JS rendering, e-commerce)
+#   Tier 5 → CamoufoxAgent     (Firefox anti-detect, last resort)
 HYBRID_TIER2_DOMAINS = [
     "cloudflare", "linkedin.com", "facebook.com",
     "instagram.com", "leboncoin.fr",
@@ -219,14 +211,29 @@ HYBRID_TIER3_DOMAINS = [
     "amazon.", "zalando.", "fnac.com", "cdiscount.com",
 ]
 # Engine to use when no explicit decision is made (fallback default)
-# Tier 1 (Patchright) is prioritized for speed and baseline stealth.
+# Tier 1 (SeleniumBase UC) is the new primary entry point per docs/Gemini.md
 HYBRID_DEFAULT_TIER = int(os.getenv("HYBRID_DEFAULT_TIER", "1"))
 
-# Tier 0 (Selenium) is available for high-fidelity searches but prone to CAPTCHA.
-SELENIUM_ENABLED = os.getenv("SELENIUM_ENABLED", "true").lower() == "true"
+# Tier 0 (legacy undetected-chromedriver) — kept for benchmark comparisons only
+SELENIUM_ENABLED = os.getenv("SELENIUM_ENABLED", "false").lower() == "true"
 
-# Tier 4 (Camoufox) is heavy. Disable it to save resources if not needed.
+# ── Tier 1: SeleniumBase UC Driver ──────────────────────────────────────
+# Per docs/Gemini.md: "Use Driver(uc=True, headless=False)"
+# "Ne jamais utiliser headless=True avec le mode UC/CDP sur Linux"
+SELENIUMBASE_ENABLED         = os.getenv("SELENIUMBASE_ENABLED", "true").lower() == "true"
+
+# Reconnect-time (seconds) after a Turnstile/Cloudflare challenge.
+# Gemini.md §2: "Toujours inclure reconnect_time si un défi Turnstile est suspecte."
+SELENIUMBASE_RECONNECT_TIME = float(os.getenv("SELENIUMBASE_RECONNECT_TIME", "4"))
+
+# Tier 5 (Camoufox) is heavy. Disable it to save resources if not needed.
 CAMOUFOX_ENABLED = os.getenv("CAMOUFOX_ENABLED", "false").lower() == "true"
+
+# ── Performance & Tier Complexity ──
+# PERFORMANCE_MODE:
+#   "simple" → Only Tiers 1-2 (SeleniumBase + Patchright). Fastest, lowest RAM.
+#   "full"   → All 5 Tiers (including Nodriver, Crawl4AI, Camoufox). Maximum success.
+PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "full").lower()
 
 # ── Obsolete / Fail-safe (For backward compatibility) ──
 # This is no longer used by the Hybrid Waterfall engine but kept as a 
@@ -253,9 +260,8 @@ BROWSER_ENGINE = "hybrid"
 #   Windows →  "C:/Users/YourName/AppData/Local/Chromium/User Data"
 #   macOS   →  "/Users/yourname/Library/Application Support/Chromium"
 # ── Chromium Profile Path ──
-# Professional Hack: If running in Docker, we force the profile to RAM (/dev/shm)
-# to bypass HDD latency on the Windows host.
-_default_profile = str(BASE_DIR / "browser_profiles" / "Default")
+# We move this to the WORK directory to keep the root clean.
+_default_profile = str(WORK_DIR / "browser_profiles" / "Default")
 if DOCKER_ENV and Path("/dev/shm").exists():
     _default_profile = Path("/dev/shm") / "ai_hunter_profile"
     
@@ -344,7 +350,7 @@ GOOGLE_AI_MODE_URL = "https://www.google.com/search?udm=50&aep=42&source=chrome.
 GOOGLE_AI_MODE_INPUT = "textarea[name='q'], div[contenteditable='true'], .nojsq"
 
 # Maximum seconds to wait for the AI answer to appear on screen
-AI_RESPONSE_TIMEOUT = 30   # seconds
+AI_RESPONSE_TIMEOUT = 60   # seconds
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -364,22 +370,17 @@ def _opt(prompt: str) -> str:
 # {nom}     → replaced by company name (Raison Sociale) or SIREN
 # {adresse} → replaced by the company address
 SEARCH_PROMPT_TEMPLATE = _opt(
-    "En tant qu'expert en recherche B2B, identifiez les informations de contact les plus fiables et récentes pour l'entreprise '{nom}' à '{adresse}'. "
-    "Suivez les principes EEAT : priorisez les sources officielles (site web, Infogreffe, LinkedIn). "
-    "Trouvez le numéro de téléphone exact, l'adresse postale complète et le SIREN/SIRET. "
-    "Si plusieurs numéros existent, donnez le plus crédible. Output in json format."
+    "En tant qu'expert en recherche B2B, identifiez les informations de contact les plus fiables et récentes pour l'entreprise '{nom}' à '{adresse}'. Suivez les principes EEAT : priorisez les sources officielles (site web, Infogreffe, LinkedIn). Trouvez le numéro de téléphone exact, l'adresse postale complète et le SIREN/SIRET. Si plusieurs numéros existent, donnez le plus crédible. Output in json format."
 )
 
 # Template for SIREN-based search (Expertise-focused)
 SIREN_SEARCH_TEMPLATE = _opt(
-    "En tant qu'expert B2B, identifiez la Raison Sociale, l'adresse complète et le téléphone officiel pour le SIREN {siren}. "
-    "Priorisez les bases de données d'autorité (INSEE, Infogreffe, Pappers). Output in json format."
+    "En tant qu'expert B2B, identifiez la Raison Sociale, l'adresse complète et le téléphone officiel pour le SIREN {siren}. Priorisez les bases de données d'autorité (INSEE, Infogreffe, Pappers). Output in json format."
 )
 
 # Specific prompt for agent phone number (Experience-focused)
 AGENT_PHONE_PROMPT_TEMPLATE = _opt(
-    "Identifiez le numéro de téléphone direct d'un agent commercial ou responsable pour '{nom}' à '{adresse}'. "
-    "Utilisez des sources d'expérience (LinkedIn, facebook, pages contact) pour garantir la fiabilité EEAT. Output in json format."
+    "Identifiez le numéro de téléphone direct d'un agent commercial ou responsable pour '{nom}' à '{adresse}'. Utilisez des sources d'expérience (LinkedIn, facebook, pages contact) pour garantir la fiabilité EEAT. Output in json format."
 )
 
 # ── SQO (Search Query Optimization) ──
@@ -389,23 +390,58 @@ SQO_CONTACT_KEYWORDS = '("téléphone" OR "contact" OR "siège social")'
 
 # ══════════════════════════════════════════════════════════════════
 # 🤖  TIER 0: GOOGLE AI MODE — PRIMARY PROMPT (JSON STRICT)
-# ══════════════════════════════════════════════════════════════════
+AI_MODE_SEARCH_PROMPT = _opt("""
+### ROLE
+Expert B2B Intelligence Researcher specialized in industrial OSINT.
 
-AI_MODE_SEARCH_PROMPT = _opt(
-    "Search and show me all available data and info of {nom}, {adresse} in JSON format output. "
-    "The most important fields are: phone_numbers, email, siren/siret, legal_form, reponsable_person, address, linkedin, facebook, website. "
-    "OUTPUT ONLY A JSON OBJECT. No text before or after the JSON block."
-)
+### TASK
+Identify critical contact and identification data for the following entity:
+- NAME: {nom}
+- ADDRESS: {adresse}
+- SIREN: {siren}
+- CATEGORY: {category}
+
+### CONTEXT
+Raw source data: {extra}
+
+### CONSTRAINTS
+1. Prioritize direct phone numbers for the Director/CEO or Management.
+2. If direct phone is missing, provide the general company phone.
+3. Ensure the address matches the provided city/locality.
+4. ABSOLUTELY NO conversational text.
+
+### OUTPUT FORMAT (JSON ONLY)
+{{
+  "company_name": "...",
+  "phone_numbers": ["..."],
+  "director_direct_phone": "...",
+  "email": "...",
+  "responsable_person": "...",
+  "siren": "...",
+  "legal_form": "...",
+  "social_media": {{ "facebook": "...", "linkedin": "...", "instagram": "..." }},
+  "website": "..."
+}}
+""")
 
 # ── SECOND CHANCE: EXPERT RESEARCHER PROMPT ──
-AI_MODE_EXPERT_PROMPT = _opt(
-    "En tant qu'expert chercheur en renseignement industriel B2B avec 20 ans d'expérience, "
-    "votre mission est de localiser les informations critiques pour '{nom}' à '{adresse}'. "
-    "Fouillez les registres officiels, les annuaires et les profils professionnels. "
-    "Récupérez impérativement : téléphone (standard ou dirigeant), email, SIREN/SIRET, forme juridique, adresse exacte, LinkedIn, facebook et site web. "
-    "RÉPONDEZ UNIQUEMENT PAR UN OBJET JSON complet. Si une donnée est introuvable, indiquez 'NOT_FOUND'. "
-    "Pas d'introduction, pas de conclusion, juste le JSON."
-)
+AI_MODE_EXPERT_PROMPT = _opt("""
+### IDENTITY
+Advanced Data Forensic Agent for the French B2B Market.
+
+### MISSION
+The standard search failed. Conduct a deep-dive investigation on '{nom}' at '{adresse}' (SIREN: {siren}).
+Target Activity: {category}
+
+### STEPS
+1. Verify legal existence and current operational status.
+2. Locate professional contact details (Email, Phone) via official records or social profiles.
+3. Identify the current 'Dirigeant' (Manager/CEO).
+
+### OUTPUT
+Provide a complete JSON object. If a field is missing, use "NOT_FOUND".
+NO CHATTER. NO PREAMBLE.
+""")
 
 # ── GEO (Generative Engine Optimization) — RAG PROMPT ──
 GEO_FALLBACK_PROMPT = _opt("""
@@ -486,16 +522,11 @@ MAX_CONSECUTIVE_CAPTCHA = 8
 # ═══════════════════════════════════════════════════════════════════
 # 📞  PHONE NUMBER REGEX PATTERNS
 # ═══════════════════════════════════════════════════════════════════
-
-# These regex patterns cover French phone number formats:
-#   +33 1 23 45 67 89   (international)
-#   01 23 45 67 89      (local with spaces)
-#   01.23.45.67.89      (with dots)
-#   0123456789          (no separator)
+# Unified patterns for French phone numbers (Standard, Mobile, International)
 PHONE_PATTERNS = [
-    r'\+33[\s\.\-]?[1-9](?:[\s\.\-]?\d{2}){4}',   # +33 X XX XX XX XX
-    r'0[1-9](?:[\s\.\-]?\d{2}){4}',                # 0X XX XX XX XX
-    r'\b\d{10}\b',                                  # 10 digits, no spaces
+    r'(?<!\d)\+33[\s\.\-]?[1-9](?:[\s\.\-]?\d{2}){4}(?!\d)',   # +33 X XX XX XX XX
+    r'(?<!\d)0[1-9](?:[\s\.\-]?\d{2}){4}(?!\d)',                # 0X XX XX XX XX
+    r'\b0[1-9]\d{8}\b',                                         # 10 digits starting with 0
 ]
 
 

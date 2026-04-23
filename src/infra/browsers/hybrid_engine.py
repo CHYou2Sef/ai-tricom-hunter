@@ -1,28 +1,28 @@
 """
 ╔════════════════════════════════════════════════════════════════════════╗
-║  browser/hybrid_engine.py                                                  ║
-║                                                                          ║
-║  TASK 1 from GEMINI.md — Hybrid Automation Engine                        ║
-║                                                                          ║
-║  Central routing brain that selects the right scraping tier based on     ║
-║  the target URL's protection level, then escalates on failure.           ║
-║                                                                          ║
-║  Decision matrix:                                                        ║
-║  ┌──────────────────────────────────────┬────────────────────────────┐  ║
-║  │ Target Type                          │ Agent                      │  ║
-║  ├──────────────────────────────────────┼────────────────────────────┤  ║
-║  │ Internal / no protection             │ Tier 1: PatchrightAgent    │  ║
-║  │ Cloudflare / LinkedIn / Facebook     │ Tier 2: NodriverAgent      │  ║
-║  │ Amazon / Fnac / hardened e-commerce  │ Tier 3: Crawl4AIAgent      │  ║
-║  │ ALL Chrome tiers exhausted           │ Tier 4: CamoufoxAgent 🦊   │  ║
-║  └──────────────────────────────────────┴────────────────────────────┘  ║
-║                                                                          ║
-║  Escalation waterfall (DEFAULT_TIER=1):                                  ║
-║    Tier 1 (Patchright/Chrome) fails                                      ║
-║      → Tier 2 (Nodriver/Chrome CDP) fails                               ║
-║        → Tier 3 (Crawl4AI/Chrome headless) fails                        ║
-║          → Tier 4 (Camoufox/Firefox) — last resort, diff engine        ║
-║            → ALL FAIL: Circuit Breaker OPEN → pause 300s              ║
+║  browser/hybrid_engine.py                                              ║
+║                                                                        ║
+║  Central routing brain — selects the right scraping tier based on      ║
+║  the target URL's protection level, then escalates on failure.         ║
+║                                                                        ║
+║  Decision matrix (5-Tier Waterfall — docs/Gemini.md blueprint):        ║
+║  ┌──────────────────────────────────────┬──────────────────────────┐  ║
+║  │ Target Type                          │ Agent                    │  ║
+║  ├──────────────────────────────────────┼──────────────────────────┤  ║
+║  │ Default / standard sites             │ Tier 1: SeleniumBase UC  │  ║
+║  │ Internal / no protection             │ Tier 2: PatchrightAgent  │  ║
+║  │ Cloudflare / LinkedIn / Facebook     │ Tier 3: NodriverAgent    │  ║
+║  │ Amazon / Fnac / hardened e-commerce  │ Tier 4: Crawl4AIAgent    │  ║
+║  │ ALL Chrome tiers exhausted           │ Tier 5: CamoufoxAgent 🦊 │  ║
+║  └──────────────────────────────────────┴──────────────────────────┘  ║
+║                                                                        ║
+║  Escalation waterfall (DEFAULT_TIER=1):                                ║
+║    Tier 1 (SeleniumBase UC) fails                                      ║
+║      → Tier 2 (Patchright/Chrome stealth) fails                       ║
+║        → Tier 3 (Nodriver/Chrome CDP) fails                           ║
+║          → Tier 4 (Crawl4AI/Chrome managed) fails                     ║
+║            → Tier 5 (Camoufox/Firefox) — last resort                  ║
+║              → ALL FAIL: Circuit Breaker OPEN → pause 300s            ║
 ╚════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -32,6 +32,7 @@ from typing import Optional, Dict, Any, List
 
 from core import config
 from core.logger import get_logger, alert
+from core.observability import SCRAPING_RESULTS
 
 logger = get_logger(__name__)
 
@@ -90,28 +91,30 @@ class HybridAutomationEngine:
     
     def __init__(self, worker_id: int = 0):
         self._worker_id = worker_id
-        self._tier0: Optional[object] = None   # SeleniumAgent (Legacy/High-Fidelity)
-        self._tier1: Optional[object] = None   # PatchrightAgent (Chrome stealth)
-        self._tier2: Optional[object] = None   # NodriverAgent   (Chrome CDP)
-        self._tier3: Optional[object] = None   # Crawl4AIAgent   (Chrome managed)
-        self._tier4: Optional[object] = None   # CamoufoxAgent   (Firefox anti-detect)
+        self._tier0: Optional[object] = None   # SeleniumAgent      (Legacy/Benchmark)
+        self._tier1: Optional[object] = None   # SeleniumBaseAgent  (UC Driver — Tier 1)
+        self._tier2: Optional[object] = None   # PatchrightAgent    (Chrome stealth)
+        self._tier3: Optional[object] = None   # NodriverAgent      (Chrome CDP)
+        self._tier4: Optional[object] = None   # Crawl4AIAgent      (Chrome managed)
+        self._tier5: Optional[object] = None   # CamoufoxAgent      (Firefox anti-detect)
         self._current_tier = 1
 
-        # ── Circuit Breaker state (Bug #2 fix) ───────────────────────────────
+        # ── Circuit Breaker state ─────────────────────────────────────────────
         # Prevents infinite retry storms when ALL tiers fail due to IP banning.
         self._current_tier = config.HYBRID_DEFAULT_TIER
         self._last_successful_tier: Optional[int] = None
         self._circuit_breaker_open = False
         self._circuit_breaker_until = 0.0
         self._consecutive_failures = 0
-        self._last_target_url: Optional[str] = None # For re-navigation catch-up
+        self._last_target_url: Optional[str] = None  # For re-navigation catch-up
 
         self._stats: Dict[int, Dict[str, Any]] = {
-            0: {"attempts": 0, "successes": 0, "total_ms": 0},  # Selenium
-            1: {"attempts": 0, "successes": 0, "total_ms": 0},
-            2: {"attempts": 0, "successes": 0, "total_ms": 0},
-            3: {"attempts": 0, "successes": 0, "total_ms": 0},
-            4: {"attempts": 0, "successes": 0, "total_ms": 0},
+            0: {"attempts": 0, "successes": 0, "total_ms": 0},  # SeleniumAgent (legacy)
+            1: {"attempts": 0, "successes": 0, "total_ms": 0},  # SeleniumBase UC
+            2: {"attempts": 0, "successes": 0, "total_ms": 0},  # Patchright
+            3: {"attempts": 0, "successes": 0, "total_ms": 0},  # Nodriver
+            4: {"attempts": 0, "successes": 0, "total_ms": 0},  # Crawl4AI
+            5: {"attempts": 0, "successes": 0, "total_ms": 0},  # Camoufox
         }
 
     @property
@@ -130,53 +133,69 @@ class HybridAutomationEngine:
 
     async def start_tier(self, tier: int) -> bool:
         try:
-            # 1. Check if existing agent is alive (Bug #6 fix)
-            agent_map = {0: self._tier0, 1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}
+            # 1. Check if existing agent is alive
+            agent_map = {
+                0: self._tier0, 1: self._tier1, 2: self._tier2,
+                3: self._tier3, 4: self._tier4, 5: self._tier5,
+            }
             agent = agent_map.get(tier)
             if agent:
-                 # Standard health check: can we get page source?
-                 try:
-                     await asyncio.wait_for(agent.get_page_source(), timeout=2)
-                 except Exception:
-                     logger.warning(f"[HybridEngine] Tier {tier} appears STALE. Restarting...")
-                     await self.stop_tier(tier)
-                     agent = None
+                try:
+                    await asyncio.wait_for(agent.get_page_source(), timeout=2)
+                except Exception:
+                    logger.warning(f"[HybridEngine] Tier {tier} appears STALE. Restarting...")
+                    await self.stop_tier(tier)
+                    agent = None
 
+            # ── Tier 0: Legacy SeleniumAgent (ucd benchmark) ───────────────
             if tier == 0 and not self._tier0:
                 from infra.browsers.selenium_agent import SeleniumAgent
                 self._tier0 = SeleniumAgent(worker_id=self._worker_id)
                 await self._tier0.start()
-                logger.info(f"[HybridEngine] ✅ Tier 0 (Selenium) started for worker {self.worker_id}.")
+                logger.info(f"[HybridEngine] ✅ Tier 0 (SeleniumUCD/Legacy) started for worker {self.worker_id}.")
 
-            if tier == 1 and not self._tier1:
-                from infra.browsers.patchright_agent import PatchrightAgent
-                self._tier1 = PatchrightAgent(worker_id=self._worker_id)
-                await self._tier1.start()
-                logger.info(f"[HybridEngine] ✅ Tier 1 (Patchright/Chrome) started for worker {self.worker_id}.")
-
-            elif tier == 2 and not self._tier2:
-                from infra.browsers.nodriver_agent import NodriverAgent
-                self._tier2 = NodriverAgent(worker_id=self._worker_id)
-                await self._tier2.start()
-                logger.info(f"[HybridEngine] ✅ Tier 2 (Nodriver/Chrome CDP) started for worker {self.worker_id}.")
-
-            elif tier == 3 and not self._tier3:
-                from infra.browsers.crawl4ai_agent import Crawl4AIAgent
-                self._tier3 = Crawl4AIAgent()
-                await self._tier3.start()
-                logger.info(f"[HybridEngine] ✅ Tier 3 (Crawl4AI/Chrome) started for worker {self.worker_id}.")
-
-            elif tier == 4 and not self._tier4:
-                if not config.CAMOUFOX_ENABLED:
-                    logger.warning("[HybridEngine] Tier 4 (Camoufox) is DISABLED in config. Skipping.")
+            # ── Tier 1: SeleniumBase UC Driver (PRIMARY) ───────────────────
+            elif tier == 1 and not self._tier1:
+                if not getattr(config, "SELENIUMBASE_ENABLED", True):
+                    logger.warning("[HybridEngine] Tier 1 (SeleniumBase) is DISABLED in config. Skipping.")
                     return False
-                # Tier 4 (Camoufox) is heavy. Lock it globally.
-                async with self._tier4_global_lock:
+                from infra.browsers.seleniumbase_agent import SeleniumBaseAgent
+                self._tier1 = SeleniumBaseAgent(worker_id=self._worker_id)
+                await self._tier1.start()
+                logger.info(f"[HybridEngine] ✅ Tier 1 ⭐ (SeleniumBase UC) started for worker {self.worker_id}.")
+
+            # ── Tier 2: PatchrightAgent (Chrome stealth) ───────────────────
+            elif tier == 2 and not self._tier2:
+                from infra.browsers.patchright_agent import PatchrightAgent
+                self._tier2 = PatchrightAgent(worker_id=self._worker_id)
+                await self._tier2.start()
+                logger.info(f"[HybridEngine] ✅ Tier 2 (Patchright/Chrome) started for worker {self.worker_id}.")
+
+            # ── Tier 3: NodriverAgent (Chrome CDP) ────────────────────────
+            elif tier == 3 and not self._tier3:
+                from infra.browsers.nodriver_agent import NodriverAgent
+                self._tier3 = NodriverAgent(worker_id=self._worker_id)
+                await self._tier3.start()
+                logger.info(f"[HybridEngine] ✅ Tier 3 (Nodriver/Chrome CDP) started for worker {self.worker_id}.")
+
+            # ── Tier 4: Crawl4AIAgent (Chrome managed) ────────────────────
+            elif tier == 4 and not self._tier4:
+                from infra.browsers.crawl4ai_agent import Crawl4AIAgent
+                self._tier4 = Crawl4AIAgent()
+                await self._tier4.start()
+                logger.info(f"[HybridEngine] ✅ Tier 4 (Crawl4AI/Chrome) started for worker {self.worker_id}.")
+
+            # ── Tier 5: CamoufoxAgent (Firefox anti-detect — last resort) ─
+            elif tier == 5 and not self._tier5:
+                if not config.CAMOUFOX_ENABLED:
+                    logger.warning("[HybridEngine] Tier 5 (Camoufox) is DISABLED in config. Skipping.")
+                    return False
+                async with self._tier4_global_lock:  # reuse global lock for Camoufox
                     from infra.browsers.camoufox_agent import CamoufoxAgent
-                    self._tier4 = CamoufoxAgent(worker_id=self._worker_id)
-                    await self._tier4.start()
+                    self._tier5 = CamoufoxAgent(worker_id=self._worker_id)
+                    await self._tier5.start()
                     logger.info(
-                        f"[HybridEngine] ✅ Tier 4 🦊 (Camoufox) started for worker {self.worker_id} (Global Lock Acquired)."
+                        f"[HybridEngine] ✅ Tier 5 🦊 (Camoufox) started for worker {self.worker_id} (Global Lock Acquired)."
                     )
 
             return True
@@ -190,7 +209,10 @@ class HybridAutomationEngine:
 
     async def stop_tier(self, tier: int) -> None:
         """Explicitly close a specific tier to free resources before escalation."""
-        agent_map = {0: self._tier0, 1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}
+        agent_map = {
+            0: self._tier0, 1: self._tier1, 2: self._tier2,
+            3: self._tier3, 4: self._tier4, 5: self._tier5,
+        }
         agent = agent_map.get(tier)
         if agent:
             try:
@@ -204,15 +226,16 @@ class HybridAutomationEngine:
         elif tier == 2: self._tier2 = None
         elif tier == 3: self._tier3 = None
         elif tier == 4: self._tier4 = None
+        elif tier == 5: self._tier5 = None
 
-        # 🧹 PROACTIVE CLEANUP (Bug #5 fix)
+        # 🧹 PROACTIVE CLEANUP
         try:
             from common.disk_cleanup import check_and_cleanup
             check_and_cleanup(threshold_pct=90)
         except: pass
 
     async def stop_all(self) -> None:
-        for tier in [0, 1, 2, 3, 4]:
+        for tier in [0, 1, 2, 3, 4, 5]:
             await self.stop_tier(tier)
 
     async def close(self) -> None:
@@ -252,7 +275,7 @@ class HybridAutomationEngine:
                 remaining = int(self._circuit_breaker_until - time.time())
                 logger.warning(
                     f"[HybridEngine] ⚡ Circuit breaker OPEN — "
-                    f"IP likely banned. Skipping for {remaining}s."
+                    f"🛑 IP likely banned. Skipping for {remaining}s."
                 )
                 return None
             else:
@@ -264,10 +287,19 @@ class HybridAutomationEngine:
         # ── 2. SMART TIER SELECTION ───────────────────────────────────────────
         # If we have a 'last_successful_tier' that is still alive, try it FIRST.
         # This is CRITICAL for search -> extraction continuity.
-        max_tier = 4 if config.CAMOUFOX_ENABLED else 3
-        tier_sequence = list(range(config.HYBRID_DEFAULT_TIER, max_tier + 1))
         
-        # If Selenium is enabled, prepend it as Tier 0
+        # PERFORMANCE_MODE: "simple" caps at Tier 2 (SeleniumBase + Patchright)
+        if getattr(config, "PERFORMANCE_MODE", "full") == "simple":
+            max_tier = 2
+        else:
+            max_tier = 5 if config.CAMOUFOX_ENABLED else 4
+            
+        # Safety: max_tier should never be lower than the starting tier
+        max_tier = max(max_tier, config.HYBRID_DEFAULT_TIER)
+            
+        tier_sequence = list(range(config.HYBRID_DEFAULT_TIER, max_tier + 1))
+
+        # If legacy Selenium is enabled, prepend it as Tier 0
         if getattr(config, "SELENIUM_ENABLED", False):
             tier_sequence.insert(0, 0)
 
@@ -291,7 +323,10 @@ class HybridAutomationEngine:
                     break
                 continue
 
-            agent_map = {0: self._tier0, 1: self._tier1, 2: self._tier2, 3: self._tier3, 4: self._tier4}
+            agent_map = {
+                0: self._tier0, 1: self._tier1, 2: self._tier2,
+                3: self._tier3, 4: self._tier4, 5: self._tier5,
+            }
             agent = agent_map[tier]
 
             # ── 2.1 RE-NAVIGATION CATCH-UP ───────────────────────────────────
@@ -300,7 +335,6 @@ class HybridAutomationEngine:
             # calling an extraction method.
             if tier != tier_sequence[0] and self._last_target_url and method_name != "goto_url":
                 if "search" not in method_name and method_name == "extract_universal_data":
-                    # Defensive check: ensure the agent actually supports goto_url
                     if hasattr(agent, "goto_url"):
                         logger.info(f"[HybridEngine] 🌐 Catching up Tier {tier} to URL: {self._last_target_url}")
                         await getattr(agent, "goto_url")(self._last_target_url)
@@ -343,21 +377,34 @@ class HybridAutomationEngine:
                     # Track last URL logic...
                     if method_name in ["goto_url", "submit_google_search", "search_google_ai_mode"]:
                         try:
-                            if tier == 0 and hasattr(agent, "_driver") and agent._driver:
-                                self._last_target_url = await asyncio.to_thread(lambda: agent._driver.current_url)
-                            elif tier == 1 and hasattr(agent, "page") and agent.page:
-                                self._last_target_url = agent.page.url
-                            elif tier in [2, 4] and hasattr(agent, "page") and agent.page:
+                            # Tiers 0 & 1 use Selenium-style _driver
+                            if tier in [0, 1] and hasattr(agent, "_driver") and agent._driver:
+                                self._last_target_url = await asyncio.to_thread(
+                                    lambda: agent._driver.current_url
+                                )
+                            # Tiers 2, 3, 5 use Playwright-style page
+                            elif tier in [2, 3, 5] and hasattr(agent, "page") and agent.page:
                                 self._last_target_url = agent.page.url
                         except: pass
+                    
+                    # 📈 Prometheus Metric: SUCCESS
+                    SCRAPING_RESULTS.labels(tier=str(tier), scrap_method=method_name, status="SUCCESS").inc()
+                    
                     return result
 
+                # 📈 Prometheus Metric: EMPTY
+                SCRAPING_RESULTS.labels(tier=str(tier), scrap_method=method_name, status="EMPTY").inc()
+                
                 logger.warning(
                     f"[HybridEngine] Tier {tier} method '{method_name}' returned empty. Escalating..."
                 )
             except Exception as exc:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms
+                
+                # 📈 Prometheus Metric: FAILURE
+                SCRAPING_RESULTS.labels(tier=str(tier), scrap_method=method_name, status="FAILURE").inc()
+                
                 logger.error(f"[HybridEngine] Tier {tier} exception in '{method_name}': {exc}")
 
             # Waterfall Escalate - KILL CURRENT TIER FIRST
@@ -367,7 +414,7 @@ class HybridAutomationEngine:
             logger.info(f"[HybridEngine] 🕒 Cool-down delay: 5s...")
             await asyncio.sleep(5)
 
-            self._current_tier = tier + 1
+            self._current_tier = min(tier + 1, max_tier)
 
         # ── 3. ALL TIERS EXHAUSTED — update circuit breaker ──────────────────
         self._current_tier = config.HYBRID_DEFAULT_TIER
@@ -441,15 +488,16 @@ class HybridAutomationEngine:
 
     def print_engine_report(self) -> None:
         tier_names = {
-            0: "Selenium   🟧",
-            1: "Patchright 🟦",
-            2: "Nodriver   🟢",
-            3: "Crawl4AI   🟡",
-            4: "Camoufox 🦊",
+            0: "SeleniumUCD 🟧",
+            1: "SBase-UC   ⭐",
+            2: "Patchright 🟦",
+            3: "Nodriver   🟢",
+            4: "Crawl4AI   🟡",
+            5: "Camoufox 🦊 ",
         }
-        print("\n" + "═" * 64)
-        print("📊  Hybrid Engine Performance Report (5-Tier)")
-        print("═" * 64)
+        print("\n" + "═" * 68)
+        print("📊  Hybrid Engine Performance Report (6-Tier, SeleniumBase=Tier 1)")
+        print("═" * 68)
         for tier, data in self.get_engine_stats().items():
             name = tier_names.get(tier, f"Tier {tier}")
             bar_filled = int(data["success_rate"] / 5)  # 20 chars = 100%
@@ -463,4 +511,4 @@ class HybridAutomationEngine:
         cb_status = "OPEN 🔴" if self._circuit_breaker_open else "CLOSED 🟢"
         print(f"  Circuit Breaker: {cb_status} | "
               f"Consecutive failures: {self._consecutive_failures}/{self._CB_THRESHOLD}")
-        print("═" * 64 + "\n")
+        print("═" * 68 + "\n")

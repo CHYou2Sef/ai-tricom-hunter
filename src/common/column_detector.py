@@ -35,7 +35,7 @@ COLUMN_KEYWORDS = {
         "nom de l'entreprise", "nom entreprise",
         "societe", "société",
         "libelle", "libellé",
-        "enseigne",
+        "enseigne", "nom", "entreprise", "nom_com",
     ],
 
     # ── Full address (single-field) ──

@@ -600,7 +600,7 @@ def create_proxy_auth_extension(proxy_url: str, worker_id: int = 0) -> str:
         );
         """ % {"host": host, "port": port, "username": username, "password": password}
 
-        ext_dir = Path("browser_profiles") / f"proxy_auth_ext_{worker_id}"
+        ext_dir = config.WORK_DIR / "browser_profiles" / f"proxy_auth_ext_{worker_id}"
         if ext_dir.exists():
             try:
                 shutil.rmtree(ext_dir)

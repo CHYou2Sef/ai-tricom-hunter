@@ -47,25 +47,6 @@ logger = get_logger(__name__)
 # ── Google Knowledge Panel / Instant Answer selectors ──────────────────────
 # These CSS selectors target common locations where Google displays phone numbers
 # directly on the search results page (no AI Overview needed).
-GOOGLE_PHONE_SELECTORS = [
-    # Knowledge Panel phone number
-    "[data-attrid='kc:/local:phone'] span",
-    "[data-attrid='tel'] span",
-    "[data-dtype='d3ph'] span",
-    # Business info card
-    ".LGOjhe span",
-    ".zS8pY",
-    # Local pack result phone
-    "span[data-dtype='d3ph']",
-    # Rich answer / featured snippet
-    ".kno-rdesc span",
-    ".yDYNvb.lyLwlc",
-    # Generic description blocks that may contain phone
-    "div[data-attrid='wa:/description'] span",
-    "[data-chunk-index='0']",
-    ".wDYxhc .VwiC3b",
-]
-
 GOOGLE_SEARCH_INPUT = 'textarea[name="q"], input[name="q"]'
 
 # ── Gemini selectors (kept for SIREN/Name enrichment only, NOT phone) ──────
@@ -107,14 +88,7 @@ class PatchrightAgent(BaseBrowserAgent):
         vp = self._fingerprint["viewport"]
         launch_args = []
 
-        if not config.BROWSER_USE_SANDBOX:
-            launch_args.append("--no-sandbox")
-            launch_args.append("--disable-setuid-sandbox")
-
         launch_args.extend([
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-            "--no-dbus-config",
             f"--window-size={vp['width']},{vp['height']}",
             # NOTE: --disable-blink-features=AutomationControlled is intentionally
             # OMITTED here. Patchright adds it automatically at the binary level.
@@ -204,11 +178,11 @@ class PatchrightAgent(BaseBrowserAgent):
                 await self.page.wait_for_load_state("domcontentloaded")
                 await self._handle_captcha_if_present()
 
-                # ─ Try targeted phone selectors first (Knowledge Panel) ─
-                phone_text = await self._extract_first_available(GOOGLE_PHONE_SELECTORS, timeout_ms=3000)
-                if phone_text:
-                    logger.info(f"✨ [Google] Found phone in Knowledge Panel.")
-                    return phone_text
+                # ─ Try targeted phone extraction via UUE (Knowledge Panel) ─
+                metadata = await self.extract_universal_data()
+                if metadata and metadata.get("heuristic_phones"):
+                    logger.info(f"✨ [Google] Found phone via UUE Heuristics.")
+                    return metadata["heuristic_phones"][0]
 
                 # ─ Return FULL page TEXT (not HTML) for regex scanning ─
                 logger.info("[Google] No instant panel — returning page text for regex scan.")

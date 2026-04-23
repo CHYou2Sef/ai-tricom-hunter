@@ -122,12 +122,20 @@ def save_results(rows: list, original_filepath: str) -> None:
     date_str = datetime.date.today().strftime("%Y-%m-%d")
     fusion_path = out_dir / f"{input_folder}_{date_str}.xlsx"
 
-    # 1. Convert new rows to DF
+    # 1. Convert new rows to DF (Only include ENRICHED rows in Fusion file)
     new_data = []
     for r in rows:
+        if r.status != "DONE":
+            continue
+            
         d = r.to_dict()
         d["__fingerprint"] = r.get_fingerprint()
         new_data.append(d)
+    
+    if not new_data:
+        logger.info("[Writer] No new enriched rows to add to fusion file.")
+        return
+        
     new_df = pd.DataFrame(new_data)
     
     # Standardize column names

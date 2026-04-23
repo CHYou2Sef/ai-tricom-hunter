@@ -22,7 +22,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import bootstrap
 import time
 import asyncio
 
@@ -70,7 +69,7 @@ def cleanup_input_folders() -> None:
     import shutil
     # List of folder basenames we must NEVER delete
     keep_dirs = [
-        "INCOMING", "STD", "SIREN", "RS", "OTHERS", "READY", "output", "ARCHIVE", "CHECKPOINTS"
+        "INCOMING", "STD", "SIREN", "RS", "OTHERS", "READY", "output", "ARCHIVE", "CHECKPOINTS", "docs"
     ]
     
     input_root = config.INPUT_DIR

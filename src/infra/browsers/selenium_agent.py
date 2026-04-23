@@ -98,19 +98,9 @@ class SeleniumAgent(BaseBrowserAgent):
         # ── Build common Chrome options ──
         common_args = [
             f"--window-size={vp['width']},{vp['height']}",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-dev-shm-usage",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-infobars",
-            "--disable-notifications",
             "--lang=fr-FR",
-            "--disable-extensions",
-            "--disable-gpu",
-            "--no-dbus-config",
+            "--disable-notifications",
         ]
-        if not config.BROWSER_USE_SANDBOX:
-            common_args += ["--no-sandbox", "--disable-setuid-sandbox"]
 
         # Per-worker isolated profile
         profile_base = Path(config.CHROMIUM_PROFILE_PATH).parent
