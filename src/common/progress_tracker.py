@@ -70,3 +70,14 @@ class FileProgressTracker:
                 os.remove(self.checkpoint_path)
             except Exception as e:
                 logger.error(f"[Progress] Cleanup failed for {self.checkpoint_path.name}: {e}")
+
+    def archive(self):
+        """Move the checkpoint to the archived_json folder."""
+        if not self.checkpoint_path.exists(): return
+        try:
+            import shutil
+            target = config.ARCHIVED_CHECKPOINTS_DIR / self.checkpoint_path.name
+            shutil.move(str(self.checkpoint_path), str(target))
+            logger.info(f"[Progress] 📦 Archived checkpoint to: {target.name}")
+        except Exception as e:
+            logger.error(f"[Progress] Archiving failed: {e}")

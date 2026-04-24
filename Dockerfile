@@ -38,6 +38,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglu1-mesa \
     && rm -rf /var/lib/apt/lists/*
 
+# ── 1.5 Install Google Chrome (Official) ──────────────────────────────
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
+    && apt-get update && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+
 # ── 2. (Removed Node.js - Native Python Validation is used) ────────────
 
 # ── 3. Install 'uv' (Fast Python Package Manager - Pillar 1) ──────────
@@ -80,4 +86,4 @@ ENV PYTHONUNBUFFERED=1
 ENTRYPOINT ["/bin/bash", "/app/scripts/entrypoint.sh"]
 
 # Default command: Start the autonomous worker
-CMD ["python", "run/worker.py"]
+CMD ["python","run/worker.py"]

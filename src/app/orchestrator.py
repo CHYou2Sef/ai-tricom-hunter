@@ -248,6 +248,6 @@ async def finalize_file_processing(
         logger.info(f"   🔁 Saved to FAILED/ folder")
 
     if progress:
-        progress.delete()
+        progress.archive()
     try: os.remove(original_filepath)
     except: pass

@@ -30,7 +30,6 @@ services:
       # browser_profiles is handled by tmpfs above for speed
     
     # ── Automatic Launch Mode ───────────────────────────────────────────
-    # The agent now starts automatically on boot. 
     command: python run/worker.py
     
     ports:
@@ -41,6 +40,22 @@ services:
         limits:
           memory: 4G
           cpus: '4.0'
+
+  # ── Ingestion Service (Pillar 0) ───────────────────────────────────
+  # Watches INCOMING/ and prepares files for the agent.
+  ingest:
+    build: .
+    container_name: tricom_ingest
+    restart: unless-stopped
+    environment:
+      - DOCKER_ENV=true
+      - PYTHONPATH=/app/src
+    env_file:
+      - .env.prod
+    volumes:
+      - ${HOST_WORK_DIR:-./WORK}:/app/WORK:Z
+      - ${HOST_LOG_DIR:-./logs}:/app/logs:Z
+    command: python run/ingest.py
 
   # ── Metrics Storage ───────────────────────────────────────────────
   prometheus:
