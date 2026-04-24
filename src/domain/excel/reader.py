@@ -125,6 +125,10 @@ class ExcelRow:
                     break
         result["AI_Scrap_Source"] = best_source
         result["AI_Confidence_Score"] = f"{self.enriched_fields.get('final_confidence', 0)}%"
+        
+        # Add Per-Row Latency
+        if self.processing_start_ts and self.processing_end_ts:
+            result["AI_Latency_Sec"] = round(self.processing_end_ts - self.processing_start_ts, 1)
 
         return result
 

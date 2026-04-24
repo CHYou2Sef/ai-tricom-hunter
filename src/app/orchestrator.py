@@ -20,7 +20,7 @@ from core import config
 from domain.excel.reader import ExcelRow, read_excel
 from domain.excel.writer import save_results, save_subset_to_excel
 from core.logger import get_logger
-from common.metrics import PerformanceTracker
+from common.metrics import PerformanceTracker, get_telemetry
 from common.progress_tracker import FileProgressTracker
 from domain.search.phone_extractor import normalize_phone
 
@@ -219,6 +219,9 @@ async def process_file_async(filepath: str) -> None:
     await asyncio.to_thread(save_results, rows, filepath)
     tracker.end_file_processing()
     await finalize_file_processing(rows, filepath, tracker, progress)
+    
+    # Finalize Benchmark Telemetry (Persistence)
+    get_telemetry().finalize()
 
 async def finalize_file_processing(
     rows: List[ExcelRow], original_filepath: str, tracker: Optional[PerformanceTracker] = None, progress: FileProgressTracker = None

@@ -183,6 +183,11 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
 
     progress_str = f"{idx}/{total}" if idx and total else f"#{row.row_index}"
     siren_log = row.siren if row.siren else "N/A"
+    
+    # Set current row for telemetry
+    if hasattr(agent, 'current_row_index'):
+        agent.current_row_index = row.row_index
+        
     logger.info(f"🔍 [Verification] Row {progress_str} | Target: '{row.nom}' | SIREN: {siren_log} | Localité: '{row.adresse}'")
     
     row.processing_start_ts = time.perf_counter()
@@ -284,6 +289,10 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
         # Store full list in enriched_fields for column expansion
         row.enriched_fields["phone_list"] = harvested
         row.enriched_fields["final_confidence"] = final_conf
+        
+        # Save Tier Provenance
+        if hasattr(agent, 'last_successful_tier_used'):
+            row.enriched_fields["tier"] = agent.last_successful_tier_used
         
         logger.info(f"🏆 [Row {progress_str}] Status: {row.status} (Conf: {final_conf}%) | Best: {row.phone} | Time: {elapsed}s")
     else:

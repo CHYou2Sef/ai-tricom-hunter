@@ -33,6 +33,7 @@ from typing import Optional, Dict, Any, List
 from core import config
 from core.logger import get_logger, alert
 from core.observability import SCRAPING_RESULTS
+from common.metrics import get_telemetry
 
 logger = get_logger(__name__)
 
@@ -107,6 +108,8 @@ class HybridAutomationEngine:
         self._circuit_breaker_until = 0.0
         self._consecutive_failures = 0
         self._last_target_url: Optional[str] = None  # For re-navigation catch-up
+        self.current_row_index: int = 0             # Track current row for telemetry
+        self.last_successful_tier_used: Optional[int] = None # For per-row export
 
         self._stats: Dict[int, Dict[str, Any]] = {
             0: {"attempts": 0, "successes": 0, "total_ms": 0},  # SeleniumAgent (legacy)
@@ -303,10 +306,10 @@ class HybridAutomationEngine:
         if getattr(config, "SELENIUM_ENABLED", False):
             tier_sequence.insert(0, 0)
 
-        if self._last_successful_tier and self._last_successful_tier in tier_sequence:
+        if self.last_successful_tier_used and self.last_successful_tier_used in tier_sequence:
             # Move it to the front of the list
-            tier_sequence.remove(self._last_successful_tier)
-            tier_sequence.insert(0, self._last_successful_tier)
+            tier_sequence.remove(self.last_successful_tier_used)
+            tier_sequence.insert(0, self.last_successful_tier_used)
 
         logger.debug(
             f"[HybridEngine] Waterfall sequence: {tier_sequence} "
@@ -372,8 +375,17 @@ class HybridAutomationEngine:
                 if result:
                     self._stats[tier]["successes"] += 1
                     self._consecutive_failures = 0
-                    self._last_successful_tier = tier
+                    self.last_successful_tier_used = tier
                     
+                    # 📈 Persistent Telemetry: SUCCESS
+                    get_telemetry().record(
+                        engine_name=tier_names.get(tier, f"Tier {tier}"),
+                        row_index=self.current_row_index,
+                        status="SUCCESS",
+                        latency_sec=elapsed_ms / 1000.0,
+                        method_name=method_name
+                    )
+
                     # Track last URL logic...
                     if method_name in ["goto_url", "submit_google_search", "search_google_ai_mode"]:
                         try:
@@ -398,6 +410,14 @@ class HybridAutomationEngine:
                 logger.warning(
                     f"[HybridEngine] Tier {tier} method '{method_name}' returned empty. Escalating..."
                 )
+                # 📈 Persistent Telemetry: EMPTY
+                get_telemetry().record(
+                    engine_name=tier_names.get(tier, f"Tier {tier}"),
+                    row_index=self.current_row_index,
+                    status="EMPTY",
+                    latency_sec=elapsed_ms / 1000.0,
+                    method_name=method_name
+                )
             except Exception as exc:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms
@@ -405,6 +425,21 @@ class HybridAutomationEngine:
                 # 📈 Prometheus Metric: FAILURE
                 SCRAPING_RESULTS.labels(tier=str(tier), scrap_method=method_name, status="FAILURE").inc()
                 
+                # 📈 Persistent Telemetry: FAILURE
+                reason = "exception"
+                exc_str = str(exc).lower()
+                if "captcha" in exc_str or "waf" in exc_str: reason = "captcha_waf"
+                elif "ip_ban" in exc_str or "forbidden" in exc_str: reason = "ip_ban"
+                
+                get_telemetry().record(
+                    engine_name=tier_names.get(tier, f"Tier {tier}"),
+                    row_index=self.current_row_index,
+                    status="FAILURE",
+                    latency_sec=elapsed_ms / 1000.0,
+                    interruption_reason=reason,
+                    method_name=method_name
+                )
+
                 logger.error(f"[HybridEngine] Tier {tier} exception in '{method_name}': {exc}")
 
             # Waterfall Escalate - KILL CURRENT TIER FIRST

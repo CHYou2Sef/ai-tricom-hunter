@@ -24,6 +24,15 @@ from core.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Global singleton-like instance for shared tracking across workers
+_telemetry_instance: Optional["BenchmarkTelemetry"] = None
+
+def get_telemetry() -> "BenchmarkTelemetry":
+    global _telemetry_instance
+    if _telemetry_instance is None:
+        _telemetry_instance = BenchmarkTelemetry()
+    return _telemetry_instance
+
 # ─── File path for the persistent JSON telemetry payload ──────────────────
 TELEMETRY_PATH: Path = config.WORK_DIR / "telemetry.json"
 
@@ -101,6 +110,8 @@ class TierStats:
         self.total_latency_sec: float = 0.0
         self.session_start_ts: float = time.monotonic()
         self._last_clean_ts: float = time.monotonic()  # Start of current uninterrupted streak
+        # New: Per-method tracking
+        self.methods: Dict[str, Dict[str, Any]] = {}  # {method_name: {attempts, successes, latency}}
 
     # ── Event recording ────────────────────────────────────────────────
 
@@ -110,17 +121,25 @@ class TierStats:
         status: str,
         latency_sec: float,
         interruption_reason: Optional[str] = None,
+        method_name: str = "unknown",
     ) -> None:
         """
         Record one row's outcome.
-        - status: 'DONE' | 'NO TEL' | 'ERROR'
+        - status: 'DONE' | 'NO TEL' | 'ERROR' | 'SUCCESS'
         - interruption_reason: 'captcha_waf' | 'ip_ban' | 'exception' | None
         """
         self.rows_attempted += 1
         self.total_latency_sec += latency_sec
 
-        if status == "DONE":
+        # Method tracking
+        if method_name not in self.methods:
+            self.methods[method_name] = {"attempts": 0, "successes": 0, "latency": 0.0}
+        self.methods[method_name]["attempts"] += 1
+        self.methods[method_name]["latency"] += latency_sec
+
+        if status in ("DONE", "SUCCESS"):
             self.rows_done += 1
+            self.methods[method_name]["successes"] += 1
         elif status == "NO TEL":
             self.rows_no_tel += 1
         else:
@@ -167,6 +186,7 @@ class TierStats:
             "ip_ban_blocks": self.ip_ban_count,
             "mtti_sec": mtti_sec,   # ← Primary continuity KPI
             "interruption_log": self.interruptions,
+            "methods": self.methods,
         }
 
     def format_console_report(self) -> str:
@@ -174,7 +194,7 @@ class TierStats:
         m = self.compute()
         bar_filled = int(m["success_rate_pct"] / 5)
         bar = ("█" * bar_filled).ljust(20)
-        return (
+        report = (
             f"\n  ┌─ {m['engine']}\n"
             f"  │  Rows:        {m['rows_done']:>4} DONE / {m['rows_no_tel']:>4} NO TEL / {m['rows_error']:>4} ERR\n"
             f"  │  Success:     [{bar}] {m['success_rate_pct']}%\n"
@@ -184,8 +204,15 @@ class TierStats:
             f"  │  MTTI:        {m['mtti_sec']}s  (mean time to interruption)\n"
             f"  │  Interruptions:{m['interruptions_total']} total  "
             f"(CAPTCHA/WAF: {m['captcha_blocks']} | IP Ban: {m['ip_ban_blocks']})\n"
-            f"  └──────────────────────────────────────"
+            f"  │  ─── Methods ─────────────────────────\n"
         )
+        for meth, mdata in m["methods"].items():
+            m_sr = round(mdata["successes"] / mdata["attempts"] * 100, 1) if mdata["attempts"] else 0
+            m_lat = round(mdata["latency"] / mdata["attempts"], 2) if mdata["attempts"] else 0
+            report += f"  │  - {meth:<20}: {m_sr:>5}% | {m_lat:>5}s\n"
+        
+        report += "  └──────────────────────────────────────"
+        return report
 
 
 class BenchmarkTelemetry:
@@ -230,6 +257,7 @@ class BenchmarkTelemetry:
                 stats.captcha_count = engine_data.get("captcha_blocks", 0)
                 stats.ip_ban_count = engine_data.get("ip_ban_blocks", 0)
                 stats.total_latency_sec = engine_data.get("avg_latency_sec", 0) * stats.rows_attempted
+                stats.methods = engine_data.get("methods", {})
                 
                 # For session time, we treat existing data as a "previous session" block
                 # We can't perfectly recover monotonic time, so we adjust session_start_ts
@@ -257,6 +285,7 @@ class BenchmarkTelemetry:
         status: str,
         latency_sec: float,
         interruption_reason: Optional[str] = None,
+        method_name: str = "unknown",
     ) -> None:
         """Record a single row result for the given engine."""
         if engine_name not in self._engines:
@@ -266,6 +295,7 @@ class BenchmarkTelemetry:
             status=status,
             latency_sec=latency_sec,
             interruption_reason=interruption_reason,
+            method_name=method_name,
         )
 
     def finalize(self) -> Dict[str, Any]:
