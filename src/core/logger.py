@@ -23,6 +23,8 @@ from logging.handlers import TimedRotatingFileHandler, RotatingFileHandler
 from core import config
 import gzip
 import shutil
+import glob
+import time
 
 # Ensure the log directory exists
 from common.fs import safe_mkdir as _safe_mkdir
@@ -102,6 +104,40 @@ def _log_rotator(source: str, dest: str) -> None:
             shutil.copyfileobj(f_in, f_out)
     os.remove(source)
 
+class BatchArchivingRotatingFileHandler(RotatingFileHandler):
+    """
+    Rotates logs sequentially (.1, .2). When backupCount is reached (e.g., 5 files),
+    it concatenates all of them into a single date-stamped .gz archive and deletes
+    the uncompressed fragments.
+    """
+    def doRollover(self):
+        # Check if the oldest backup file exists (meaning we hit the backupCount limit)
+        oldest_backup = self.rotation_filename("%s.%d" % (self.baseFilename, self.backupCount))
+        
+        if os.path.exists(oldest_backup):
+            # We have reached the limit! Time to batch archive them into ONE .gz file
+            timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+            archive_name = f"{self.baseFilename}.archive_{timestamp}.gz"
+            
+            # Concatenate all backups (from oldest .5 to newest .1) into the single .gz
+            with gzip.open(archive_name, "wt", encoding="utf-8") as f_out:
+                for i in range(self.backupCount, 0, -1):
+                    fn = self.rotation_filename("%s.%d" % (self.baseFilename, i))
+                    if os.path.exists(fn):
+                        try:
+                            with open(fn, "r", encoding="utf-8") as f_in:
+                                shutil.copyfileobj(f_in, f_out)
+                            # Remove the file since it's now safely archived
+                            os.remove(fn)
+                        except Exception as e:
+                            # Failsafe: if we can't read a file, skip it but don't crash logger
+                            pass
+                            
+        # Now execute the standard rollover. Since .1 to .5 are deleted, 
+        # it will simply rename the current active log to .1
+        super().doRollover()
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SINGLETON PATTERN
@@ -143,30 +179,27 @@ def _setup_root_logger() -> None:
 
     # ── 2. "Clean" error log file (Only ERRORS and CRITICAL) ──
     # This prevents disk fill-up with trivial infologs
-    error_handler = RotatingFileHandler(
+    error_handler = BatchArchivingRotatingFileHandler(
         error_file,
         maxBytes=10 * 1024 * 1024,  # 10 MB
-        backupCount=5,              # Keep 5 error archives
+        backupCount=5,              # Archive when we hit 5 uncompressed files
         encoding="utf-8"
     )
-    error_handler.namer   = _log_namer
-    error_handler.rotator = _log_rotator
+    # We no longer need namer/rotator because BatchArchivingRotatingFileHandler handles gzip natively
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(
         logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT)
     )
 
     # ── 3. High-Res Rotation log (Persistent history for monitoring) ──
-    # Rotates at 10MB, keeps latest 5 files.
+    # Rotates at 10MB, archives every 5 files.
     archive_file = os.path.join(config.LOG_DIR, "debug_archive.log")
-    archive_handler = RotatingFileHandler(
+    archive_handler = BatchArchivingRotatingFileHandler(
         archive_file,
         maxBytes=10 * 1024 * 1024,  # 10 MB
-        backupCount=10,             # Keep more archives since they are compressed
+        backupCount=5,              # Archive when we hit 5 uncompressed files
         encoding="utf-8"
     )
-    archive_handler.namer   = _log_namer
-    archive_handler.rotator = _log_rotator
     archive_handler.setLevel(logging.INFO)     # Preserve full execution history (rotated & compressed)
     archive_handler.setFormatter(
         logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT)

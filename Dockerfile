@@ -85,5 +85,5 @@ ENV PYTHONUNBUFFERED=1
 # The entrypoint launches Xvfb and validates the agent
 ENTRYPOINT ["/bin/bash", "/app/scripts/entrypoint.sh"]
 
-# Default command: Start the autonomous worker
-CMD ["python","run/worker.py"]
+# Default command: Start worker + monitoring API
+CMD ["/bin/bash", "/app/scripts/start_with_monitoring.sh"]

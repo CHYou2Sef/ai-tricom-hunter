@@ -30,7 +30,8 @@ services:
       # browser_profiles is handled by tmpfs above for speed
     
     # ── Automatic Launch Mode ───────────────────────────────────────────
-    command: python run/worker.py
+    # Starts both the agent worker AND the FastAPI monitoring API (:8000)
+    command: ["/bin/bash", "/app/scripts/start_with_monitoring.sh"]
     
     ports:
       - "8000:8000"           # Expose API for Monitoring/Prometheus

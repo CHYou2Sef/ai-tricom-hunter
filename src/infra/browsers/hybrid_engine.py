@@ -90,6 +90,15 @@ class HybridAutomationEngine:
     # a single concurrent instance across ALL workers to save RAM.
     _tier4_global_lock = asyncio.Lock()
     
+    _TIER_NAMES = {
+        0: "selenium_legacy",
+        1: "seleniumbase",
+        2: "patchright",
+        3: "nodriver",
+        4: "crawl4ai",
+        5: "camoufox",
+    }
+    
     def __init__(self, worker_id: int = 0):
         self._worker_id = worker_id
         self._tier0: Optional[object] = None   # SeleniumAgent      (Legacy/Benchmark)
@@ -379,7 +388,7 @@ class HybridAutomationEngine:
                     
                     # 📈 Persistent Telemetry: SUCCESS
                     get_telemetry().record(
-                        engine_name=tier_names.get(tier, f"Tier {tier}"),
+                        engine_name=self._TIER_NAMES.get(tier, f"Tier {tier}"),
                         row_index=self.current_row_index,
                         status="SUCCESS",
                         latency_sec=elapsed_ms / 1000.0,
@@ -412,7 +421,7 @@ class HybridAutomationEngine:
                 )
                 # 📈 Persistent Telemetry: EMPTY
                 get_telemetry().record(
-                    engine_name=tier_names.get(tier, f"Tier {tier}"),
+                    engine_name=self._TIER_NAMES.get(tier, f"Tier {tier}"),
                     row_index=self.current_row_index,
                     status="EMPTY",
                     latency_sec=elapsed_ms / 1000.0,
@@ -432,7 +441,7 @@ class HybridAutomationEngine:
                 elif "ip_ban" in exc_str or "forbidden" in exc_str: reason = "ip_ban"
                 
                 get_telemetry().record(
-                    engine_name=tier_names.get(tier, f"Tier {tier}"),
+                    engine_name=self._TIER_NAMES.get(tier, f"Tier {tier}"),
                     row_index=self.current_row_index,
                     status="FAILURE",
                     latency_sec=elapsed_ms / 1000.0,
