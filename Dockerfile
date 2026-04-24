@@ -61,19 +61,23 @@ RUN patchright install chromium
 RUN seleniumbase install chromedriver
 
 # ── 6. Copy Application Source Code ───────────────────────────────────
-# First, copy and fix entrypoint specifically to prevent Windows 'file not found' errors
-COPY scripts/entrypoint.sh /app/scripts/entrypoint.sh
-RUN sed -i 's/\r$//' /app/scripts/entrypoint.sh && chmod +x /app/scripts/entrypoint.sh
-
-# Then copy the rest
+# We copy everything, preserving the folder structure (src/, run/, scripts/, etc.)
 COPY . .
 
 # Professional Final Pass: Ensure all shell scripts have Linux LF endings
-RUN find /app/scripts -name "*.sh" -exec sed -i 's/\r$//' {} +
+# and fix permissions for Windows-to-Linux transfers.
+RUN find /app/scripts -name "*.sh" -exec sed -i 's/\r$//' {} + && \
+    chmod +x /app/scripts/entrypoint.sh
 
-# ── 7. Configure Container Startup ────────────────────────────────────
-# The entrypoint launches Xvfb and validates the agent before running main.py
+# ── 7. Configure Environment ──────────────────────────────────────────
+# Set PYTHONPATH so 'import agents' works from /app/src
+ENV PYTHONPATH="/app/src"
+# Force Python to unbuffer logs for real-time visibility in Docker logs
+ENV PYTHONUNBUFFERED=1
+
+# ── 8. Configure Container Startup ────────────────────────────────────
+# The entrypoint launches Xvfb and validates the agent
 ENTRYPOINT ["/bin/bash", "/app/scripts/entrypoint.sh"]
 
-# Default command if none is provided
-CMD ["python", "main.py"]
+# Default command: Start the autonomous worker
+CMD ["python", "run/worker.py"]

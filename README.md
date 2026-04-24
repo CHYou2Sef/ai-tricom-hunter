@@ -46,19 +46,29 @@ tail -f logs/agent.log
 # Run Agent
 python -m src.app.orchestrator
 
-# Or benchmark engines
-python scripts/benchmark_engines.py --rows 100
-```
+## 🚀 Quick Start (Windows / Docker)
 
-## 🏗️ Architecture Overview
+Follow these 3 steps to start the industrial harvest:
 
-![Architecture](docs/architecture_overview.svg)
+1.  **Prepare Environment**:
+    Copy `.env.example` to `.env` and add your `GOOGLE_API_KEY`.
+2.  **Launch the Stack**:
+    Run this command in PowerShell to build and start the agents:
+    ```powershell
+    docker compose build --no-cache; docker compose up -d
+    ```
+3.  **Start Hunting**:
+    Drop your Excel/CSV files into the `WORK/INCOMING` folder. The agent will detect them automatically. Monitor progress with:
+    ```powershell
+    docker logs -f tricom_ai_agent
+    ```
 
-**Key Components**:
+## 🏗️ Technical Architecture
 
-- **Orchestrator**: Async pool (`MAX_CONCURRENT_WORKERS=4`), WorkerContext dataclass
-- 🤖 **Intelligence Waterfall:** Hybrid engine (SeleniumBase ➔ Patchright ➔ Nodriver ➔ Deep Discovery).
-- 🧬 **Deep Discovery:** Proactive social media & official site navigation for hidden phone extraction.
+- **Orchestrator**: Async pool (`MAX_CONCURRENT_WORKERS=4`) with real-time JSON checkpointing.
+- **Hybrid Waterfall**: Intelligence escalation (Standard AI ➔ Expert AI ➔ Deep Discovery ➔ Web Scraping).
+- **Anti-Detection**: Human-like Gaussian action delays + 10-property CDP fingerprint masking.
+- **Data Integrity**: Binary Status (DONE/NO TEL), automatic column cleaning, and no-duplication logic.
 - 🛡️ **Schema Hardening:** Resilient to quoted CSV headers, malformed AI JSON, and whitespace issues.
 - ⚡ **24/7 Autonomy:** Checkpoint-based recovery, proxy rotation, and human-like anti-detection.
 - **Data Layer**: Pandas pro-formatted Excel + atomic JSON checkpoints

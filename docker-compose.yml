@@ -14,6 +14,7 @@ services:
     environment:
       - CHROMIUM_BINARY_PATH=/usr/bin/google-chrome
       - DOCKER_ENV=true
+      - PYTHONPATH=/app/src
 
     # ── Windows/Mac Performance Hack ──────────────────────────────────
     # Prevents slow I/O on host-mounted volumes for browser profiles
@@ -28,10 +29,9 @@ services:
       - ${HOST_LOG_DIR:-./logs}:/app/logs:Z
       # browser_profiles is handled by tmpfs above for speed
     
-    # ── Manual Launch Mode ───────────────────────────────────────────
-    # Prevents the agent from starting automatically. 
-    # Use 'docker exec -it tricom_ai_agent python run/worker.py' to start.
-    command: tail -f /dev/null
+    # ── Automatic Launch Mode ───────────────────────────────────────────
+    # The agent now starts automatically on boot. 
+    command: python run/worker.py
     
     ports:
       - "8000:8000"           # Expose API for Monitoring/Prometheus
