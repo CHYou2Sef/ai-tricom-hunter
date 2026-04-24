@@ -84,7 +84,13 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
             "__agent_phone": "AI_Agent_Phone"
         })
     
-    # 2. Protection against duplicate columns (e.g. if re-processing an output file)
+    # 2. Drop technical internal columns (starting with __)
+    # These are kept in JSON checkpoints but removed from final Excel/CSV reports.
+    internal_cols = [c for c in df.columns if str(c).startswith("__")]
+    if internal_cols:
+        df = df.drop(columns=internal_cols)
+    
+    # 3. Protection against duplicate columns
     df = _deduplicate_columns(df)
 
     safe_mkdir(target_path.parent)

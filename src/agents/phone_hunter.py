@@ -191,7 +191,9 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
     def add_unique(num, score, source):
         norm = normalize_phone(num)
         if not norm: return
-        # Avoid duplicate numbers in same row
+        # Avoid duplication with original file data
+        if row.phone and normalize_phone(row.phone) == norm: return
+        # Avoid duplicate numbers in same session
         if any(h['num'] == norm for h in harvested): return
         harvested.append({"num": norm, "score": score, "source": source})
 
@@ -241,6 +243,10 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
             if any(h['score'] >= 90 for h in harvested): break
             logger.info(f"🔎 [DeepDiscovery] Opening: {url}")
             if await agent.goto_url(url):
+                source = await agent.get_page_source()
+                if source:
+                    row.raw_ai_responses.append({"text": source[:10000], "source": source_tag, "url": url})
+                
                 page_meta = await agent.extract_universal_data()
                 if page_meta and page_meta.get("heuristic_phones"):
                     for p in page_meta["heuristic_phones"]:
@@ -271,16 +277,15 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
         harvested.sort(key=lambda x: x['score'], reverse=True)
         row.phone = harvested[0]['num'] # Main phone
         
-        # Calculate final aggregated confidence
+        # Binary Status: If we have a phone, it's DONE. No more 'LOW_CONF'.
         final_conf = _calculate_row_confidence(row)
-        row.status = "DONE" if final_conf >= 70 else "LOW_CONF"
+        row.status = "DONE"
         
         # Store full list in enriched_fields for column expansion
         row.enriched_fields["phone_list"] = harvested
         row.enriched_fields["final_confidence"] = final_conf
         
-        icon = "🏆" if row.status == "DONE" else "⚠️"
-        logger.info(f"{icon} [Row {progress_str}] Status: {row.status} (Conf: {final_conf}%) | Best: {row.phone} | Time: {elapsed}s")
+        logger.info(f"🏆 [Row {progress_str}] Status: {row.status} (Conf: {final_conf}%) | Best: {row.phone} | Time: {elapsed}s")
     else:
         row.status = "NO TEL"
         logger.warning(f"🔦 [Row {progress_str}] DEPLETED: No phone found | Time: {elapsed}s")

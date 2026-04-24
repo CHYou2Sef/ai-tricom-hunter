@@ -125,6 +125,12 @@ class UniversalExtractor:
             for k in result["social_links"]:
                 result["social_links"][k] = list(set(result["social_links"][k]))
                     
+            # --- 6. Plain Text Scanner (Fallback) ---
+            # If nothing found in high-signal areas, scan the entire text content
+            from domain.search.phone_extractor import extract_phones_from_html
+            text_phones = extract_phones_from_html(html_source)
+            result["heuristic_phones"].extend(text_phones)
+
             # --- Deduplicate ---
             result["heuristic_phones"] = list(set([p for p in result["heuristic_phones"] if p]))
             result["heuristic_emails"] = list(set([e for e in result["heuristic_emails"] if e]))

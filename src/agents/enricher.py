@@ -4,7 +4,7 @@ from domain.enrichment.row_enricher import enrich_row as base_enrich_row
 
 logger = logging.getLogger("Enricher")
 
-def enrich_row(row: ExcelRow):
+async def enrich_row(row: ExcelRow, agent=None):
     """
     Wrapper for enrichment logic.
     Source priority: google_ai_mode (0.97) > aeo_schema (1.00) > gemini_json (0.90)

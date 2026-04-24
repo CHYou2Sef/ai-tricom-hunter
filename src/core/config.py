@@ -108,6 +108,13 @@ BROWSER_USE_SANDBOX    = os.getenv("BROWSER_USE_SANDBOX", "true").lower() == "tr
 # High values (50-100) are recommended for HDDs to reduce write operations.
 SAVE_INTERVAL = int(os.getenv("SAVE_INTERVAL", "10"))
 
+# ── ENRICHMENT ENGINE (Phase 4) ──
+# If True, the agent will attempt to extract secondary data (Email, Siren, Director, Social)
+# Source priority: google_ai_mode (0.97) > aeo_schema (1.00) > gemini_json (0.90)
+ENRICH_ENABLED = os.getenv("ENRICH_ENABLED", "true").lower() == "true"
+# If True, the agent will re-enrich even if fields are already populated.
+ENRICH_FORCE_RETRY = os.getenv("ENRICH_FORCE_RETRY", "false").lower() == "true"
+
 # Number of rows per RETRY chunk file sent back to incoming/.
 RETRY_CHUNK_SIZE = int(os.getenv("RETRY_CHUNK_SIZE", "50"))
 
