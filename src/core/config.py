@@ -463,12 +463,12 @@ Analyse le CONTEXTE suivant issu des pages officielles pour l'entreprise : {nom}
 3. Si l'information n'est pas présente dans le texte fournise, réponds strictement "NOT_FOUND".
 4. RÉPONDS UNIQUEMENT AVEC UN OBJET JSON. PAS DE TEXTE AVANT OU APRÈS.
 ### FORMAT JSON ATTENDU (STRICT) :
-{
+{{
   "telephone": "01XXXXXXXX",
   "source": "URL ou Nom du Site",
   "confiance": 0.95,
   "raisonnement": "Indiquez brièvement où vous avez trouvé l'info"
-}
+}}
 """)
 
 # ── IA MODE: WEBSITE DEEP SCRAPE PROMPT ──
@@ -484,7 +484,7 @@ Objectif : Extraire TOUTES les informations de contact de l'entreprise à partir
 3. INTERDICTION : NE FAITES PAS DE PHRASES. NE DITES PAS "ENCHANTÉ". NE DONNEZ PAS D'EXPLICATION.
 4. SI VIDE : Si une donnée manque, mettez "NOT_FOUND".
 ### FORMAT JSON ATTENDU (NE RÉPONDEZ QUE PAR CECI) :
-{
+{{
   "telephone": "0XXXXXXXXX",
   "email": "contact@entreprise.com",
   "linkedin": "url",
@@ -495,7 +495,7 @@ Objectif : Extraire TOUTES les informations de contact de l'entreprise à partir
   "nom_officiel": "raison sociale trouvée",
   "confiance": 0.98,
   "sources_utilisees": ["Accueil", "Contact"]
-}
+}}
 """)
 
 # Keywords to find contact/legal pages

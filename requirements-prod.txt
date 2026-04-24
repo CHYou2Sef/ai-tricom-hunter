@@ -10,6 +10,9 @@ openpyxl>=3.1.2
 xlsxwriter>=3.1.9
 
 # The Primary Browsers (SeleniumBase, Patchright, Nodriver, Crawl4AI)
+undetected-chromedriver>=3.5.5
+selenium>=4.18.0
+
 seleniumbase>=4.24.0
 patchright>=1.51.0
 nodriver>=0.34

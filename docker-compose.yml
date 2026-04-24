@@ -27,6 +27,7 @@ services:
       # Direct Wormhole: Map your Windows Host folder to the Container's WORK directory
       - ${HOST_WORK_DIR:-./WORK}:/app/WORK:Z
       - ${HOST_LOG_DIR:-./logs}:/app/logs:Z
+      - ./scripts:/app/scripts:ro,Z
       # browser_profiles is handled by tmpfs above for speed
     
     # ── Automatic Launch Mode ───────────────────────────────────────────
@@ -56,6 +57,7 @@ services:
     volumes:
       - ${HOST_WORK_DIR:-./WORK}:/app/WORK:Z
       - ${HOST_LOG_DIR:-./logs}:/app/logs:Z
+      - ./scripts:/app/scripts:ro,Z
     command: python run/ingest.py
 
   # ── Metrics Storage ───────────────────────────────────────────────

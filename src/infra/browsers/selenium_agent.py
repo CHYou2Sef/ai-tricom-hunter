@@ -85,7 +85,7 @@ class SeleniumAgent(BaseBrowserAgent):
             await self._record_interruption("startup_failure", f"Failed to start: {exc}")
             # Log the specific error the user is looking for
             if "undetected_chromedriver" in str(exc) or "undetected-chromedriver" in str(exc):
-                 logger.error(f"[Selenium] ❌ undetected-chromedriver is not installed. Run: pip install undetected-chromedriver")
+                 logger.debug(f"[Selenium] undetected-chromedriver is not installed (expected in container).")
             raise
 
     def _sync_start(self) -> None:

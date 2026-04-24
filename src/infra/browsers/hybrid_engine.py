@@ -74,6 +74,20 @@ def classify_url(url: str) -> int:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TIER DEFINITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+
+TIER_NAMES = {
+    0: "selenium_legacy",
+    1: "seleniumbase",
+    2: "patchright",
+    3: "nodriver",
+    4: "crawl4ai",
+    5: "camoufox",
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # HYBRID ENGINE  (async context manager)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -89,15 +103,6 @@ class HybridAutomationEngine:
     # Tier 4 (Camoufox/Firefox) is extremely heavy. We limit it to 
     # a single concurrent instance across ALL workers to save RAM.
     _tier4_global_lock = asyncio.Lock()
-    
-    _TIER_NAMES = {
-        0: "selenium_legacy",
-        1: "seleniumbase",
-        2: "patchright",
-        3: "nodriver",
-        4: "crawl4ai",
-        5: "camoufox",
-    }
     
     def __init__(self, worker_id: int = 0):
         self._worker_id = worker_id
@@ -212,11 +217,13 @@ class HybridAutomationEngine:
 
             return True
         except ImportError as ie:
-            logger.error(f"  ❌ [HybridEngine] Tier {tier} is NOT INSTALLED! Skip to next available tier.")
-            logger.warning(f"     Run: pip install {ie.name}")
+            logger.warning(f"  ⏭️ [HybridEngine] Tier {tier} is NOT INSTALLED or DISABLED! Skip to next available tier.")
+            # Handle potential absence of .name in some ImportError variants
+            pkg_name = getattr(ie, 'name', None) or "required dependencies"
+            logger.warning(f"     Run: pip install {pkg_name}")
             return False
         except Exception as exc:
-            logger.error(f"[HybridEngine] Failed to start Tier {tier}: {exc}")
+            logger.warning(f"[HybridEngine] Failed to start Tier {tier}: {exc}")
             return False
 
     async def stop_tier(self, tier: int) -> None:
@@ -374,7 +381,7 @@ class HybridAutomationEngine:
                 try:
                     result = await asyncio.wait_for(method(*args, **kwargs), timeout=90.0)
                 except asyncio.TimeoutError:
-                    logger.error(f"🛑 [HybridEngine] Tier {tier} HANG/TIMEOUT in '{method_name}' after 90s.")
+                    logger.warning(f"⏳ [HybridEngine] Tier {tier} TIMEOUT in '{method_name}' after 90s. Escalating...")
                     await self.stop_tier(tier) # KILL IMMEDIATELY
                     continue # Try next tier
                 
@@ -388,7 +395,7 @@ class HybridAutomationEngine:
                     
                     # 📈 Persistent Telemetry: SUCCESS
                     get_telemetry().record(
-                        engine_name=self._TIER_NAMES.get(tier, f"Tier {tier}"),
+                        engine_name=TIER_NAMES.get(tier, f"Tier {tier}"),
                         row_index=self.current_row_index,
                         status="SUCCESS",
                         latency_sec=elapsed_ms / 1000.0,
@@ -421,7 +428,7 @@ class HybridAutomationEngine:
                 )
                 # 📈 Persistent Telemetry: EMPTY
                 get_telemetry().record(
-                    engine_name=self._TIER_NAMES.get(tier, f"Tier {tier}"),
+                    engine_name=TIER_NAMES.get(tier, f"Tier {tier}"),
                     row_index=self.current_row_index,
                     status="EMPTY",
                     latency_sec=elapsed_ms / 1000.0,
@@ -441,7 +448,7 @@ class HybridAutomationEngine:
                 elif "ip_ban" in exc_str or "forbidden" in exc_str: reason = "ip_ban"
                 
                 get_telemetry().record(
-                    engine_name=self._TIER_NAMES.get(tier, f"Tier {tier}"),
+                    engine_name=TIER_NAMES.get(tier, f"Tier {tier}"),
                     row_index=self.current_row_index,
                     status="FAILURE",
                     latency_sec=elapsed_ms / 1000.0,
@@ -531,7 +538,8 @@ class HybridAutomationEngine:
         return result
 
     def print_engine_report(self) -> None:
-        tier_names = {
+        # Friendly names for the console report
+        FRIENDLY_NAMES = {
             0: "SeleniumUCD 🟧",
             1: "SBase-UC   ⭐",
             2: "Patchright 🟦",
@@ -543,7 +551,7 @@ class HybridAutomationEngine:
         print("📊  Hybrid Engine Performance Report (6-Tier, SeleniumBase=Tier 1)")
         print("═" * 68)
         for tier, data in self.get_engine_stats().items():
-            name = tier_names.get(tier, f"Tier {tier}")
+            name = FRIENDLY_NAMES.get(tier, f"Tier {tier}")
             bar_filled = int(data["success_rate"] / 5)  # 20 chars = 100%
             bar = ("█" * bar_filled).ljust(20)
             print(

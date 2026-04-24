@@ -10,6 +10,15 @@ set -e
 
 echo "🚀 Starting AI Tricom Hunter with Monitoring API..."
 
+# ── 0. Infrastructure Prep ──────────────────────────────────────────────
+echo "🧹 Cleaning stale Chrome profile locks..."
+find /tmp -name ".com.google.Chrome.*" -exec rm -rf {} + 2>/dev/null || true
+find ./browser_profiles -name "SingletonLock" -exec rm -f {} + 2>/dev/null || true
+
+echo "🔒 Fixing permissions on WORK/ directory..."
+chmod -R 777 WORK/ 2>/dev/null || true
+chmod -R 777 logs/ 2>/dev/null || true
+
 # ── 1. Start Xvfb (virtual display) if not already running ────────────────
 if [ -z "$DISPLAY" ] || ! pgrep -x "Xvfb" > /dev/null; then
     echo "🖥️  Starting Xvfb on :99..."
