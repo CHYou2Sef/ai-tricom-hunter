@@ -59,15 +59,16 @@ class TracingMiddleware(BaseHTTPMiddleware):
         
         duration = time.perf_counter() - start_time
         
-        # Log structured request info
-        log.info(
-            "http_request",
-            method=request.method,
-            path=request.url.path,
-            status_code=response.status_code,
-            duration=f"{duration:.4f}s",
-            request_id=request_id
-        )
+        # Log structured request info (Skip /metrics to reduce noise)
+        if request.url.path != "/metrics":
+            log.info(
+                "http_request",
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+                duration=f"{duration:.4f}s",
+                request_id=request_id
+            )
 
         # Add Security Headers (DAST Compliance)
         response.headers["X-Frame-Options"] = "DENY"
@@ -80,17 +81,19 @@ def setup_observability(app):
     """
     Integrates Prometheus metrics, OpenTelemetry Tracing, and Tracing middleware.
     """
-    # 1. Setup OpenTelemetry
-    provider = TracerProvider()
-    
-    # Export to OTLP collector (e.g. Jaeger / OTEL Collector)
-    otlp_exporter = OTLPSpanExporter(endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"))
-    processor = BatchSpanProcessor(otlp_exporter)
-    provider.add_span_processor(processor)
-    trace.set_tracer_provider(provider)
-    
-    # Instrument FastAPI
-    FastAPIInstrumentor.instrument_app(app)
+    # 1. Setup OpenTelemetry (Only if explicitly enabled via OTEL_EXPORTER_OTLP_ENDPOINT)
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if endpoint:
+        provider = TracerProvider()
+        otlp_exporter = OTLPSpanExporter(endpoint=endpoint)
+        processor = BatchSpanProcessor(otlp_exporter)
+        provider.add_span_processor(processor)
+        trace.set_tracer_provider(provider)
+        
+        # Instrument FastAPI
+        FastAPIInstrumentor.instrument_app(app)
+    else:
+        log.debug("OTLP Tracing disabled (no endpoint configured)")
     
     # 2. Add Custom Tracing Middleware (for headers & specific logs)
     app.add_middleware(TracingMiddleware)

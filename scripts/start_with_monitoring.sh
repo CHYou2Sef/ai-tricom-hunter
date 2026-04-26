@@ -29,7 +29,7 @@ fi
 
 # ── 2. Start FastAPI Monitoring API (background) ─────────────────────────
 echo "📊 Starting monitoring API on port 8000..."
-python -m uvicorn app.monitoring.app:app --host 0.0.0.0 --port 8000 --loop asyncio &
+python -m uvicorn app.monitoring.app:app --host 0.0.0.0 --port 8000 --loop asyncio --no-access-log &
 MONITOR_PID=$!
 
 # ── 3. Wait for monitor to be ready ──────────────────────────────────────
@@ -64,7 +64,7 @@ while true; do
     fi
     if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
         echo "⚠️  Monitor died. Restarting..."
-        python -m uvicorn app.monitoring.app:app --host 0.0.0.0 --port 8000 --loop asyncio &
+        python -m uvicorn app.monitoring.app:app --host 0.0.0.0 --port 8000 --loop asyncio --no-access-log &
         MONITOR_PID=$!
     fi
     sleep 5
