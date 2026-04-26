@@ -1,9 +1,9 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  agent.py  —  Core Orchestration Engine (Canonical Layout)               ║
+║  app/orchestrator.py  —  Core Orchestration Engine                       ║
 ║                                                                          ║
-║  This file acts as the ORCHESTRATOR. It manages the pool of agents       ║
-║  and routes logic to Specialized Agents (PhoneHunter, Enricher).         ║
+║  Role: Central dispatcher.  Manages an async pool of browser workers,    ║
+║  routes each row to PhoneHunter then Enricher, and handles persistence. ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -30,11 +30,15 @@ from agents.enricher import enrich_row
 
 logger = get_logger(__name__)
 
-# Agent Pool for parallel workers
+# ── Agent Pool ───────────────────────────────────────────────────────────
+# asyncio.Queue gives us a cheap semaphore-like pool of pre-warmed browsers.
 _agent_pool = asyncio.Queue()
 
 async def init_agent_pool(count: int):
-    """Pre-initialize a pool of browser hybrid engines."""
+    """
+    Pre-warm `count` HybridAutomationEngine instances.
+    Each worker starts on the default tier so the first row is fast.
+    """
     logger.info(f"[AgentPool] Initializing {count} workers...")
     for i in range(count):
         from infra.browsers.hybrid_engine import HybridAutomationEngine
@@ -43,15 +47,17 @@ async def init_agent_pool(count: int):
         await _agent_pool.put(agent)
 
 async def close_agent_pool():
-    """Close all workers in the pool."""
+    """Gracefully close every agent in the pool to free RAM / sockets."""
     while not _agent_pool.empty():
         agent = await _agent_pool.get()
         await agent.close()
 
 def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: FileProgressTracker) -> int:
     """
-    Synchronize with today's previous results using Pandas.
-    Ensures data integrity: a row is only 'DONE' if we actually have its result data.
+    Resume interrupted runs by checking two sources:
+      1. Per-file JSON checkpoint (fast, local)
+      2. Daily fusion Excel (global dedup)
+    A row is only considered DONE if the checkpoint actually stores a phone.
     """
     import datetime
     orig_path = Path(filepath)
@@ -123,7 +129,11 @@ from dataclasses import dataclass
 
 @dataclass
 class WorkerContext:
-    """Context holding all dependencies to process a single row."""
+    """
+    Immutable-ish bag of dependencies for one row.
+    Passed through the coroutine chain so every layer has
+    access to locks, trackers, and the shared row list.
+    """
     row: ExcelRow
     sem: asyncio.Semaphore
     save_lock: asyncio.Lock
@@ -135,13 +145,19 @@ class WorkerContext:
     progress: FileProgressTracker
 
 async def _execute_agent_task(ctx: WorkerContext, agent) -> None:
-    """Isolated task that performs extraction and enrichment using a verified healthy agent."""
+    """
+    Run the two-phase pipeline for one row:
+      1. Phone extraction (if missing)
+      2. Enrichment      (if enabled and phone found)
+    Writes the result atomically to the JSON checkpoint so crashes
+    do not lose progress.
+    """
     if not ctx.row.phone:
         await process_row(ctx.row, agent)
-    if ctx.row.phone and hasattr(config, 'ENRICH_ENABLED') and config.ENRICH_ENABLED:
+    if ctx.row.phone and getattr(config, 'ENRICH_ENABLED', False):
         await enrich_row(ctx.row, agent)
     
-    # Atomic Save to per-file JSON tracker
+    # Atomic checkpoint: survives sudden SIGKILL / power loss
     ctx.progress.mark_row_done(
         ctx.row.row_index, 
         ctx.row.phone, 
@@ -151,13 +167,17 @@ async def _execute_agent_task(ctx: WorkerContext, agent) -> None:
     )
 
 async def _worker_process_row(ctx: WorkerContext):
-    async with ctx.sem:
+    """
+    Coroutine executed by each pool worker.
+    Handles agent checkout → health check → task → checkin → save.
+    """
+    async with ctx.sem:   # Limits concurrent browsers (RAM/CPU bound)
         row_start = time.perf_counter()
         agent = None
         try:
             agent = await _agent_pool.get()
             
-            # P0 Fix #1: Health check before use
+            # P0 Fix: Agents can die (Chrome crash, proxy hang).  Verify before use.
             if hasattr(agent, 'is_alive') and not await agent.is_alive():
                 logger.warning(f"[AgentPool] Worker dead, recreating...")
                 await agent.close()
@@ -172,26 +192,31 @@ async def _worker_process_row(ctx: WorkerContext):
             ctx.row.status = "ERROR"
         finally:
             if agent:
-                # Keep it alive if possible, or close if dead
+                # Recycle healthy agents; dead ones are left for GC
                 await _agent_pool.put(agent)
         
         elapsed = time.perf_counter() - row_start
         ctx.tracker.track_row(elapsed, ctx.row.status)
         
+        # Periodic disk flush (trade-off: safety vs I/O load on HDD)
         if ctx.idx % config.SAVE_INTERVAL == 0 or ctx.idx == ctx.total:
             async with ctx.save_lock:
                 await asyncio.to_thread(save_results, ctx.all_rows, ctx.filepath)
     return ctx.row
 
 async def process_file_async(filepath: str) -> None:
+    """
+    End-to-end async file processor.
+    Flow: read → resume → filter → parallel worker dispatch → save → archive.
+    """
     logger.info(f"[Agent] Starting file: {os.path.basename(filepath)}")
     rows, _ = await asyncio.to_thread(read_excel, filepath)
     if not rows: return
 
-    # Initialize per-file progress tracker
+    # Checkpoint file: keeps partial progress across crashes
     progress = FileProgressTracker(filepath)
 
-    # Disk cleanup integration
+    # Proactive cleanup so we don't run out of disk during long runs
     from common.disk_cleanup import check_and_cleanup
     check_and_cleanup()
 
@@ -199,6 +224,7 @@ async def process_file_async(filepath: str) -> None:
     tracker.start_file_processing()
     await asyncio.to_thread(sync_with_previous_results, rows, filepath, progress)
     
+    # Decide which rows still need work
     rows_to_process = [r for r in rows if r.status != "DONE"] if config.REPROCESS_FAILED_ROWS else [r for r in rows if r.status not in ("DONE", "NO TEL", "SKIP")]
     total = len(rows_to_process)
     
@@ -206,7 +232,8 @@ async def process_file_async(filepath: str) -> None:
         logger.info(f"[Agent] ⏭️  Skipping '{os.path.basename(filepath)}' — 0 rows to process.")
     else:
         logger.info(f"[Agent] 🔄 Processing {total} rows from '{os.path.basename(filepath)}'...")
-        save_lock, sem = asyncio.Lock(), asyncio.Semaphore(config.MAX_CONCURRENT_WORKERS)
+        save_lock = asyncio.Lock()                 # Serialises Excel writes
+        sem = asyncio.Semaphore(config.MAX_CONCURRENT_WORKERS)  # RAM/CPU guard
         tasks = []
         for i, r in enumerate(rows_to_process, 1):
             ctx = WorkerContext(
@@ -216,11 +243,11 @@ async def process_file_async(filepath: str) -> None:
             tasks.append(asyncio.create_task(_worker_process_row(ctx)))
         await asyncio.gather(*tasks)
     
+    # Final flush and archival
     await asyncio.to_thread(save_results, rows, filepath)
     tracker.end_file_processing()
     await finalize_file_processing(rows, filepath, tracker, progress)
     
-    # Finalize Benchmark Telemetry (Persistence)
     get_telemetry().finalize()
 
 async def finalize_file_processing(

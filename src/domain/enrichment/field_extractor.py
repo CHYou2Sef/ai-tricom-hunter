@@ -1,11 +1,19 @@
 """
-enrichment/field_extractor.py
-
-Pure extraction functions.
-Input  : raw AI text (str)
-Output : dict of { field_name: (value, confidence_float) }
-
-No side effects. No browser calls. No row mutations.
+╔══════════════════════════════════════════════════════════════════════════╗
+║  domain/enrichment/field_extractor.py                                    ║
+║                                                                          ║
+║  AI Response Field Extractor                                             ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Parses raw AI text/HTML responses and extracts structured fields:     ║
+║    email, website, SIRET, NAF, director, social media, etc.              ║
+║                                                                          ║
+║  HOW IT WORKS:                                                           ║
+║    1. Tries JSON extraction first (most reliable)                        ║
+║    2. Falls back to regex patterns for each field type                   ║
+║    3. Validates extracted values (e.g., email format, SIRET length)      ║
+║    4. Returns dict with field_name → {value, source, confidence}         ║
+╚══════════════════════════════════════════════════════════════════════════╝
 """
 
 import re

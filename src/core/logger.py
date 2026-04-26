@@ -106,9 +106,12 @@ def _log_rotator(source: str, dest: str) -> None:
 
 class BatchArchivingRotatingFileHandler(RotatingFileHandler):
     """
-    Rotates logs sequentially (.1, .2). When backupCount is reached (e.g., 5 files),
-    it concatenates all of them into a single date-stamped .gz archive and deletes
-    the uncompressed fragments.
+    Custom RotatingFileHandler with batch gzip archiving.
+    
+    Standard RotatingFileHandler renames logs to .1, .2, etc.
+    When backupCount is hit, this subclass concatenates ALL backlog
+    files into one timestamped .gz archive instead of leaving many
+    small files on disk.  Keeps the log directory clean on long runs.
     """
     def doRollover(self):
         # Check if the oldest backup file exists (meaning we hit the backupCount limit)
@@ -220,12 +223,19 @@ def _setup_root_logger() -> None:
 
 def get_logger(name: str) -> logging.Logger:
     """
-    Get a named logger with support for TRACE and FATAL levels.
+    Return a named logger augmented with TRACE (5) and FATAL (60) shorthands.
+
+    Args:
+        name : Usually __name__ — becomes the logger namespace.
+
+    Returns:
+        logging.Logger with extra .trace() and .fatal() methods.
     """
     _setup_root_logger()
     logger = logging.getLogger(name)
     
-    # Add helper methods for custom levels if they don't exist
+    # Monkey-patch custom level helpers so callers can do logger.trace('msg')
+    # instead of the verbose logger.log(TRACE, 'msg')
     if not hasattr(logger, 'trace'):
         logger.trace = lambda msg, *args, **kwargs: logger.log(TRACE, msg, *args, **kwargs)
     if not hasattr(logger, 'fatal'):

@@ -1,8 +1,20 @@
 """
-enrichment/confidence.py
-
-Source reliability scores used when multiple sources provide the same field.
-Higher = more trustworthy.
+╔══════════════════════════════════════════════════════════════════════════╗
+║  domain/enrichment/confidence.py                                         ║
+║                                                                          ║
+║  Confidence Scoring Engine for Enrichment Fields                         ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Assigns a confidence score (0.0–1.0) to each extracted field based    ║
+║    on the reliability of its source.                                     ║
+║                                                                          ║
+║  SOURCE WEIGHTS (highest → lowest):                                      ║
+║    aeo_schema   : 1.00  — structured JSON-LD from official sites         ║
+║    gemini_json  : 0.90  — Google Gemini AI response in JSON format       ║
+║    google_ai    : 0.75  — Google AI Overview text                        ║
+║    web_scrap    : 0.60  — raw HTML scraping                              ║
+║    ollama_local : 0.50  — local LLM fallback                             ║
+╚══════════════════════════════════════════════════════════════════════════╝
 """
 
 SOURCE_WEIGHTS = {

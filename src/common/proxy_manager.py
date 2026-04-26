@@ -13,6 +13,25 @@
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  common/proxy_manager.py                                                 ║
+║                                                                          ║
+║  Proxy Pool Manager with State Machine & Health Tracking                 ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Manages a rotating pool of HTTP proxies to prevent IP bans.           ║
+║    Tracks proxy health via a state machine: HEALTHY → WARN → BAN         ║
+║                                                                          ║
+║  HOW IT WORKS:                                                           ║
+║    1. Fetches proxies from premium .env list OR free public sources      ║
+║    2. Validates proxy URLs (blocks SSRF/private ranges)                  ║
+║    3. get_proxy() returns next healthy proxy from shuffled pool          ║
+║    4. mark_error() advances state machine; BAN triggers rotation         ║
+║    5. Exponential backoff between rotations: 1s → 2s → 4s → 8s → 16s   ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 import os
 import json
 import random

@@ -1,3 +1,22 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  domain/excel/reader.py                                                  ║
+║                                                                          ║
+║  Universal Excel/CSV/JSON File Reader & Row Model                        ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Reads any tabular input file and converts each row into an ExcelRow   ║
+║    object with normalized fields (nom, adresse, siren, phone, etc.).     ║
+║                                                                          ║
+║  HOW IT WORKS:                                                           ║
+║    1. Uses pandas to read .xlsx, .xls, .csv, or .json files             ║
+║    2. detect_columns() maps headers to standard concepts via keywords    ║
+║    3. If heuristics fail, falls back to LLM-based column detection       ║
+║    4. Each row becomes an ExcelRow with search_type (RS_ADR/SIREN_ADR)  ║
+║    5. Filters out "radié" (closed) companies automatically               ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 import pandas as pd
 import os
 import json

@@ -1,3 +1,13 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  agents/phone_hunter.py                                                  ║
+║                                                                          ║
+║  Role: Primary phone extraction orchestrator for each Excel row.         ║
+║  Uses a multi-tier waterfall: AI Mode → Knowledge Panel → Web Scraping.  ║
+║  Falls back to local LLM (Ollama) if cloud extraction fails.             ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 import time
 import logging
 import re
@@ -18,16 +28,31 @@ logger = get_logger(__name__)
 from common.search_engine import build_b2b_query
 
 def build_search_query(row: ExcelRow) -> str:
-    nom = row.get_search_name()
-    adr = row.adresse or ""
+    """Build a B2B search query from row name + address."""
+    nom = row.get_search_name()   # company name or SIREN fallback
+    adr = row.adresse or ""       # physical address for geo disambiguation
     return build_b2b_query(nom, adr)
 
 def build_agent_query(row: ExcelRow) -> str:
+    """Build a targeted agent-phone prompt (director/mobile lines)."""
     nom     = row.get_search_name()
     adresse = row.adresse or ""
     return config.AGENT_PHONE_PROMPT_TEMPLATE.format(nom=nom, adresse=adresse)
 
 async def _search_knowledge_panel_phone(row: ExcelRow, agent, query: str) -> Optional[str]:
+    """
+    Try Google's Knowledge Panel for a direct phone hit.
+    Knowledge Panels appear for well-known businesses and often list
+    phones, emails, and URLs without needing page scraping.
+
+    Args:
+        row   : ExcelRow being processed (mutated for provenance tracking)
+        agent : Active browser agent (HybridAutomationEngine)
+        query : Pre-built search string (company + address)
+
+    Returns:
+        Normalised phone string or None if panel is absent/empty.
+    """
     row.search_queries_used.append(f"KP: {query}")
     logger.info(f"    ├─ [UUE] Knowledge Panel Search: '{query}'")
 
@@ -35,11 +60,12 @@ async def _search_knowledge_panel_phone(row: ExcelRow, agent, query: str) -> Opt
     if not success:
         return None
 
-    await asyncio.sleep(2)
+    await asyncio.sleep(2)   # Let JS-rendered panel stabilise
     
     metadata = await agent.extract_universal_data() or {}
     best_phone = None
     
+    # Phones are ranked by confidence by the underlying extractor
     if metadata.get("heuristic_phones"):
         best_phone = metadata["heuristic_phones"][0]
                 
@@ -51,7 +77,7 @@ async def _search_knowledge_panel_phone(row: ExcelRow, agent, query: str) -> Opt
                 "source": "google_kp",
                 "query":  query,
             })
-            # Enrich other fields from UUE if found
+            # Opportunistically grab email / website from the same panel
             for block in metadata.get("aeo_data", []):
                 for field, key in [("email", "email"), ("website", "url")]:
                     val = block.get(key)
@@ -64,9 +90,23 @@ async def _search_knowledge_panel_phone(row: ExcelRow, agent, query: str) -> Opt
     return None
 
 async def _extract_geo_phone(row: ExcelRow, agent, page_content: str) -> Optional[str]:
+    """
+    GEO (Generative Engine Optimisation) fallback via local Ollama LLM.
+    Converts raw HTML into a structured prompt and asks the model to
+    extract the phone number.  Used only when cloud APIs return nothing.
+
+    Args:
+        row         : ExcelRow (for name/address context)
+        agent       : Browser agent (unused but kept for signature consistency)
+        page_content: Raw HTML from the last visited page
+
+    Returns:
+        Phone string parsed from model JSON or None.
+    """
     if not config.OLLAMA_ENABLED:
-        return None
+        return None   # Local LLM disabled in .env — skip to save time
     logger.info(f"    [GEO] Initializing Local LLM (Ollama) fallback...")
+    # Clamp context to 8k chars to fit small models (3B params) and avoid OOM
     context = clean_html_to_text(page_content)[:8000].strip()
     geo_prompt = config.GEO_FALLBACK_PROMPT.format(
         nom=row.nom or row.siren,
@@ -77,33 +117,62 @@ async def _extract_geo_phone(row: ExcelRow, agent, page_content: str) -> Optiona
     if geo_response:
         row.raw_ai_responses.append({"text": geo_response, "source": "ollama_local", "query": geo_prompt[:200]})
         try:
+            # Ollama may emit markdown → strip everything outside the JSON block
             json_match = re.search(r'\{.*\}', geo_response, re.DOTALL)
             if json_match:
                 res = json.loads(json_match.group(0).strip())
                 tel = res.get("telephone")
                 if tel and str(tel).upper() not in ("NOT_FOUND", "NONE", ""):
                     return tel
-        except: pass
+        except Exception:   # Malformed JSON or unexpected format — safe to ignore
+            pass
     return None
 
 async def _search_and_extract_phone(row: ExcelRow, agent, query: str, source_tag: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Generic search → extract pipeline.  Tries UA metadata first,
+    then regex extraction, then GEO/Ollama fallback.
+
+    Args:
+        row        : ExcelRow (logs query provenance)
+        agent      : Active browser agent
+        query      : Search string
+        source_tag : Provenance label (e.g. "google_scrap") used for scoring
+
+    Returns:
+        (phone_or_None, full_page_text_or_None)
+    """
     row.search_queries_used.append(query)
     logger.info(f"    ├─ [{source_tag.upper()}] Query: '{query}'")
     content = await agent.search_google_ai(query)
     if content:
         row.raw_ai_responses.append({"text": content, "source": source_tag, "query": query})
     
+    # 1. Structured metadata (highest confidence — often from Knowledge Panel)
     metadata = await agent.extract_universal_data() or {}
     phone = metadata.get("heuristic_phones")[0] if metadata.get("heuristic_phones") else None
     
+    # 2. Regex heuristics on raw text
     if not phone and content:
         phones = extract_phones(content, source_label=source_tag)
         phone = get_best_phone(phones)
+    # 3. Local LLM last resort
     if not phone and content:
         phone = await _extract_geo_phone(row, agent, content)
     return phone, content
 
 def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
+    """
+    Parse the JSON blob returned by Google AI Mode and populate
+    the ExcelRow with as many structured fields as possible.
+
+    Args:
+        raw_text : Unstructured text from AI Mode (may contain markdown)
+        row      : ExcelRow to mutate with enriched data
+
+    Returns:
+        The best phone found, or None.
+    """
     data = parse_ai_mode_json(raw_text)
     if not data: return None
     phones_raw = data.get("phone_numbers") or data.get("telephone") or data.get("phone")
@@ -113,9 +182,11 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
     elif isinstance(phones_raw, str):
         best = normalize_phone(phones_raw)
     if not best:
+        # Fallback: regex on the raw text if JSON key was missing
         candidates = extract_phones(raw_text, source_label="google_ai_mode")
         best = get_best_phone(candidates)
     
+    # Mapping: output key → list of possible JSON keys (handles model inconsistency)
     field_map = {
         "email": ["email"], "linkedin": ["linkedin", "linkedin_url"],
         "website": ["website", "website_url"], "siren": ["siren"],
@@ -126,6 +197,7 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
         "facebook": ["facebook", "facebook_url"], "instagram": ["instagram", "instagram_url"],
         "direct_phone": ["director_direct_phone", "tel_direct", "mobile"],
     }
+    # Maps enriched field names back to ExcelRow attribute names
     attr_map = {
         "email": "email", "linkedin": "linkedin", "website": "website", "siren": "siren",
         "siret": "siret", "legal_form": "forme_juridique", "naf": "naf",
@@ -144,10 +216,9 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
                 if attr and not getattr(row, attr, None): setattr(row, attr, clean_val)
                 break
     
-    # --- 3. Consistency Validation (Best Practice) ---
+    # --- Consistency Validation: SIREN cross-check to detect hallucination ---
     extracted_siren = data.get("siren")
     if extracted_siren and row.siren:
-        # Normalize for comparison
         clean_ext = "".join(filter(str.isdigit, str(extracted_siren)))
         clean_row = "".join(filter(str.isdigit, str(row.siren)))
         if clean_ext != clean_row:
@@ -157,16 +228,24 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
     return best
 
 def _calculate_row_confidence(row: ExcelRow) -> int:
-    """Aggregates confidence based on source and validation."""
+    """
+    Compute a composite confidence score (0-100) for the row.
+    Factors: extraction source quality, SIREN validation penalty.
+
+    Args:
+        row : ExcelRow containing harvested phones and validation state
+
+    Returns:
+        Integer confidence percentage.
+    """
     if not row.phone: return 0
     
-    # Base on source
     phone_list = row.enriched_fields.get("phone_list", [])
-    if not phone_list: return 50
+    if not phone_list: return 50   # Default mid-confidence when no metadata
     
     best_score = max(h.get('score', 0) for h in phone_list)
     
-    # Penalize if SIREN mismatch
+    # Penalise hallucination risk when SIREN extracted ≠ SIREN input
     if row.enriched_fields.get("validation_error") == "SIREN_MISMATCH":
         best_score -= 30
         
@@ -182,7 +261,7 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
         return []
 
     progress_str = f"{idx}/{total}" if idx and total else f"#{row.row_index}"
-    siren_log = row.siren if row.siren else "N/A"
+    siren_log = row.siren if row.siren else ""
     
     # Set current row for telemetry
     if hasattr(agent, 'current_row_index'):
@@ -211,8 +290,8 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
         nom = row.nom or row.siren or "Inconnue"
         
     adr = row.adresse or "France"
-    siren = row.siren or "NOT_PROVIDED"
-    category = row.category or "B2B"
+    siren = row.siren or ""
+    category = row.category or ""
     extra = row.raw_context[:200]
     
     # Existing phones to avoid duplication

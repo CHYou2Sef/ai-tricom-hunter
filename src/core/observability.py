@@ -1,3 +1,20 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  core/observability.py                                                   ║
+║                                                                          ║
+║  Observability & Monitoring Stack                                        ║
+║  Integrates three industrial-grade telemetry systems:                    ║
+║    1. Prometheus Metrics    — Counters/Gauges for scraping stats         ║
+║    2. OpenTelemetry Tracing — Distributed request tracing (OTLP)         ║
+║    3. Structured Logging    — JSON-formatted logs via structlog          ║
+║                                                                          ║
+║  HOW IT WORKS:                                                           ║
+║    FastAPIInstrumentor auto-instruments all HTTP endpoints.              ║
+║    Custom TracingMiddleware adds security headers + request IDs.         ║
+║    SCRAPING_RESULTS counter tracks tier/method/status outcomes.          ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 import time
 import uuid
 import structlog

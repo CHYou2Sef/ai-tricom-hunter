@@ -1,3 +1,21 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  common/json_parser.py                                                   ║
+║                                                                          ║
+║  AI Response JSON Extractor                                              ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Extracts and parses JSON objects from raw AI text responses.          ║
+║    Handles markdown code blocks, raw strings, and common AI quirks.      ║
+║                                                                          ║
+║  HOW IT WORKS:                                                           ║
+║    1. Searches for ```json ... ``` code blocks first                     ║
+║    2. Falls back to finding any { ... } structure                        ║
+║    3. Cleans common formatting issues (newlines, trailing commas)        ║
+║    4. Recursively strips whitespace from all keys/values                 ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 import re
 import json
 from typing import Optional, Dict, Any

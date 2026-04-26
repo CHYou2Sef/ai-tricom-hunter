@@ -1,3 +1,21 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  domain/excel/writer.py                                                  ║
+║                                                                          ║
+║  Professional Excel/CSV Output Generator                                 ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Saves processed rows to beautifully formatted Excel files with        ║
+║    color-coded AI columns, auto-filters, and frozen panes.               ║
+║                                                                          ║
+║  HOW IT WORKS:                                                           ║
+║    1. save_subset_to_excel() writes rows with professional formatting   ║
+║    2. save_results() updates BOTH the working file AND a daily fusion    ║
+║    3. Daily fusion deduplicates by fingerprint + phone (one-to-many)     ║
+║    4. Drops internal __columns from final output                         ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 import os
 import datetime
 import pandas as pd

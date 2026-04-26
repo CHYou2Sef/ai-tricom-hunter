@@ -1,23 +1,19 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  excel/cleaner.py  —  Input File Cleaning & Classification               ║
+║  domain/excel/cleaner.py                                                 ║
 ║                                                                          ║
-║  POST-PROCESSING STEP (called after every file is processed).            ║
-║  For each row in the finished file:                                      ║
-║    1. Detect which key fields are present (SIREN, RS, Adresse, Tel)     ║
-║    2. Classify the row into one of 4 categories                         ║
-║    3. Write the categorised rows into separate Excel files               ║
+║  Input File Cleaning & Row Classification                                ║
 ║                                                                          ║
-║  Classification rules (first match wins):                                ║
-║    std_input   → SIREN + RS + Adresse    (complete record)              ║
-║    RS_input    → RS + Adresse (no SIREN)                                ║
-║    sir_input   → SIREN/SIRET + Adresse   (no RS)                       ║
-║    other_input → any other partial combination                           ║
-║    DISCARD     → no useful field at all  (row dropped)                  ║
+║  ROLE:                                                                   ║
+║    After processing, sorts rows into 4 buckets based on data quality:    ║
+║    STD (complete), RS (no SIREN), SIREN (no name), OTHERS (partial)     ║
 ║                                                                          ║
-║  BEGINNER NOTE:                                                          ║
-║    We reuse the fields already extracted on each ExcelRow object.       ║
-║    No re-parsing of the raw Excel columns is needed.                    ║
+║  CLASSIFICATION RULES (first match wins):                                ║
+║    STD   → SIREN + RS + Adresse    (complete record)                     ║
+║    RS    → RS + Adresse (no SIREN)                                       ║
+║    SIREN → SIREN/SIRET + Adresse   (no RS)                              ║
+║    OTHER → any other partial combination                                 ║
+║    DISCARD → no useful field at all  (row dropped)                       ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 

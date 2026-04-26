@@ -1,3 +1,21 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  core/singleton.py                                                       ║
+║                                                                          ║
+║  Process-level singleton enforcement using POSIX file locks (fcntl).     ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Ensures only ONE instance of the agent worker runs at a time.         ║
+║    Prevents duplicate processing and resource contention.                ║
+║                                                                          ║
+║  HOW IT WORKS:                                                           ║
+║    Creates a .lock file in the work directory.                           ║
+║    Uses fcntl.LOCK_EX | fcntl.LOCK_NB for non-blocking exclusive lock.   ║
+║    If lock fails, reads PID from file and exits with error.              ║
+║    Lock is automatically released when process terminates.               ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 import os
 import sys
 import fcntl

@@ -1,3 +1,21 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  common/progress_tracker.py                                              ║
+║                                                                          ║
+║  Per-File Crash Recovery System                                          ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Saves row-by-row processing results to a JSON sidecar file.           ║
+║    If the agent crashes, it resumes from the exact row it left off.      ║
+║                                                                          ║
+║  HOW IT WORKS:                                                           ║
+║    Checkpoint file: WORK/CHECKPOINTS/{filename}.json                     ║
+║    Each row stores: phone, agent_phone, status, enriched_fields          ║
+║    On restart: sync_with_previous_results() reads checkpoints first      ║
+║    After completion: checkpoint is archived to CHECKPOINTS/archived/     ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 import json
 import os
 from pathlib import Path

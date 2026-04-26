@@ -1,4 +1,25 @@
 """
+╔══════════════════════════════════════════════════════════════════════════╗
+║  domain/enrichment/row_enricher.py                                       ║
+║                                                                          ║
+║  Single-Row Enrichment Orchestrator                                      ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    After phone extraction, scans all AI responses for secondary data:    ║
+║    email, website, SIRET, NAF, director name, social media, etc.         ║
+║                                                                          ║
+║  RULES:                                                                  ║
+║    1. Never overwrite a field that already has a non-empty input value   ║
+║    2. Run field_extractor on EVERY collected AI response                 ║
+║    3. When multiple sources provide the same field, pick best confidence ║
+║    4. Record every decision in row.enriched_fields for full auditability ║
+║                                                                          ║
+║  SOURCE PRIORITY (highest → lowest):                                     ║
+║    aeo_schema (1.00) > gemini_json (0.90) > google_ai (0.75)            ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
+"""
 enrichment/row_enricher.py
 
 Orchestrates the enrichment pipeline for a single ExcelRow.

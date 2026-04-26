@@ -1,14 +1,22 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  search/phone_extractor.py                                               ║
+║  domain/search/phone_extractor.py                                        ║
 ║                                                                          ║
-║  Extract phone numbers from:                                             ║
-║    1. Raw AI text snippets (regex on plain text)                         ║
-║    2. Full HTML page source (tel: hrefs, schema.org, meta tags)          ║
+║  Multi-Source Phone Number Extractor & Normalizer                        ║
 ║                                                                          ║
-║  EEAT NOTE:                                                              ║
-║    We prioritise <a href="tel:..."> links because they are deliberately  ║
-║    placed by the website owner → highest authoritativeness signal.       ║
+║  ROLE:                                                                   ║
+║    Extracts French phone numbers from both plain text and HTML sources.  ║
+║    Normalizes them to a standard "XX XX XX XX XX" format.                ║
+║                                                                          ║
+║  SOURCES (priority order):                                               ║
+║    1. tel: href links    — highest trust (deliberately placed)           ║
+║    2. schema.org JSON-LD — structured data                               ║
+║    3. data-phone attrs   — semantic markup                               ║
+║    4. meta tags          — SEO metadata                                  ║
+║    5. Plain text regex   — last resort fallback                          ║
+║                                                                          ║
+║  FAX AVOIDANCE:                                                          ║
+║    Skips numbers near "fax" / "télécopie" keywords to avoid false hits.  ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 

@@ -1,3 +1,20 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  common/disk_cleanup.py                                                  ║
+║                                                                          ║
+║  Proactive Disk Space Recovery                                           ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Prevents "No space left on device" crashes by monitoring /tmp usage   ║
+║    and cleaning up zombie browser profile directories.                   ║
+║                                                                          ║
+║  HOW IT WORKS:                                                           ║
+║    check_and_cleanup() monitors disk usage percentage.                   ║
+║    If above threshold → aggressive deep purge of temp files.             ║
+║    Always runs light purge of known zombie browser folders.              ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 import os
 import shutil
 import glob

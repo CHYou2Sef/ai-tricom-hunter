@@ -98,11 +98,11 @@ class HybridAutomationEngine:
     """
     # ── Configuration & Resource Locks ─────────────────────────────────────
     _CB_THRESHOLD = 5      # Consecutive failures before opening circuit
-    _CB_PAUSE_SEC  = 300   # 5 minutes pause
+    _CB_PAUSE_SEC  = 300   # 5 minutes pause — lets WAF cool down + proxy rotate
     
-    # Tier 4 (Camoufox/Firefox) is extremely heavy. We limit it to 
-    # a single concurrent instance across ALL workers to save RAM.
-    _tier4_global_lock = asyncio.Lock()
+    # Tier 5 (Camoufox/Firefox) is extremely heavy (~1 GB RAM).
+    # We limit it to a single concurrent instance across ALL workers.
+    _tier4_global_lock = asyncio.Lock()  # Originally named for Tier 4, reused for Tier 5
     
     def __init__(self, worker_id: int = 0):
         self._worker_id = worker_id
@@ -261,25 +261,32 @@ class HybridAutomationEngine:
         await self.stop_all()
 
     async def rotate_proxy(self):
-        """Forward proxy rotation to the active agent."""
+        """Forward proxy rotation to the currently active agent."""
         agent_map = {0: self._tier0, 1: self._tier1, 2: self._tier2, 3: self._tier3}
         agent = agent_map.get(self._current_tier)
         if agent and hasattr(agent, "rotate_proxy"):
             await agent.rotate_proxy()
 
     # ── Main orchestration & Delegation ───────────────────────────────────
+    # Every public browser method (search, crawl, etc.) funnels through here.
+    # The waterfall tries tiers in ascending order of sophistication until
+    # one succeeds or the circuit breaker trips.
 
     async def _execute_with_waterfall(self, method_name: str, *args, **kwargs) -> Any:
         """
-        Executes a method on the active tier. If it fails (returns None or raises),
-        closes the active tier and escalates to the next one.
+        Execute `method_name` on the current tier; escalate on failure.
 
-        Adaptive Circuit Breaker (Bug #2 fix):
-          - Tracks consecutive total failures across all tiers.
-          - After _CB_THRESHOLD failures → opens circuit for _CB_PAUSE_SEC seconds.
-          - A SUCCESS anywhere in the waterfall resets the failure counter.
-          - Rationale: if the IP is banned by Google, retrying different engines
-            is pointless — they ALL share the same IP.
+        Args:
+            method_name : Browser method to call (e.g. "search_google_ai_mode")
+            *args, **kwargs : Passed verbatim to that method
+
+        Returns:
+            Whatever the method returns, or None if all tiers fail.
+
+        Circuit Breaker rationale:
+          All tiers share the same outbound IP.  If Google bans it, every
+          tier will fail.  After _CB_THRESHOLD consecutive failures we pause
+          for _CB_PAUSE_SEC seconds to let the WAF cool down.
         """
         # ── 0. DISK SPACE GUARD (Bug #5 — proactive auto-cleanup) ────────────
         try:

@@ -1,7 +1,21 @@
 """
-Strategic Search Engine Utility - AI Tricom Hunter
-Centralized logic for generating "Power Search" URLs (Google AI Mode).
+╔══════════════════════════════════════════════════════════════════════════╗
+║  common/search_engine.py                                                 ║
+║                                                                          ║
+║  Strategic Search URL Generator for Google AI Mode                       ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Centralizes the logic for building "Power Search" URLs that trigger   ║
+║    Google's AI Overview / Search Generative Experience (SGE).            ║
+║                                                                          ║
+║  PARAMETERS EXPLAINED:                                                   ║
+║    udm=50  : Direct AI Overview / Gemini variant (requested by user)    ║
+║    aep=22  : Experimental generative UI parameter                       ║
+║    gl=fr   : Geolocation lock to France for accurate results            ║
+║    hl=fr   : Interface language = French                                ║
+╚══════════════════════════════════════════════════════════════════════════╝
 """
+
 import urllib.parse
 from typing import Optional
 

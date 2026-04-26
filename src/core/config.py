@@ -132,9 +132,11 @@ PROXY_ROTATE_EVERY_N           = 5      # Rotate every 5 rows to stay fresh
 PROXY_PREEMPTIVE_ROTATE_ON_WARN  = True   # Rotate BEFORE the ban threshold is reached (at warn_threshold)
 
 # ── Proxy State Machine Thresholds ──
+# State machine: HEALTHY → WARN → BAN → ROTATE
+# PROXY_PREEMPTIVE_ROTATE_ON_WARN (above) lets us rotate at WARN to avoid BAN.
 PROXY_WARN_THRESHOLD  = int(os.getenv("PROXY_WARN_THRESHOLD", "10"))   # errors before WARN state
 PROXY_BAN_THRESHOLD   = int(os.getenv("PROXY_BAN_THRESHOLD",  "13"))   # errors before BAN + rotate
-PROXY_BACKOFF_DELAYS  = [1, 2, 4, 8, 16, 32]                           # seconds (exponential)
+PROXY_BACKOFF_DELAYS  = [1, 2, 4, 8, 16, 32]                           # seconds (exponential backoff)
 
 # ═══════════════════════════════════════════════════════════════════
 # 🖐️  FINGERPRINT RANDOMISATION (CDP injection per session)
@@ -283,13 +285,20 @@ CHROMIUM_PROFILE_NAME = os.getenv("CHROMIUM_PROFILE_NAME", "Default")
 SELENIUM_DISPLAY_MODE = "gui"  # "headless" or "gui"
 
 # ── Chrome Binary Resolution Strategy ───────────────────────────────
+# Chromium is required by Selenium, Playwright, and Crawl4AI tiers.
+# On Linux servers / containers we prefer the distro package;
+# on Windows/macOS we fall back to known install paths.
 def find_chrome_executable() -> str:
     """
-    Unified strategy to locate the Chrome/Chromium binary.
-    Prioritizes:
-    1. Explicit .env override (CHROMIUM_BINARY_PATH)
-    2. Docker standard path (/usr/bin/google-chrome)
-    3. OS-standard discovery
+    Locate Chrome/Chromium binary across platforms.
+
+    Resolution order (first match wins):
+      1. CHROMIUM_BINARY_PATH from .env  → explicit override
+      2. /.dockerenv exists             → /usr/bin/google-chrome (container)
+      3. OS discovery                   → standard install paths
+
+    Returns:
+        Absolute path string, or "" if not found (agents will fail-fast).
     """
     import platform
     
@@ -545,6 +554,51 @@ PHONE_PATTERNS = [
     r'(?<!\d)0[1-9](?:[\s\.\-]?\d{2}){4}(?!\d)',                # 0X XX XX XX XX
     r'\b0[1-9]\d{8}\b',                                         # 10 digits starting with 0
 ]
+
+# ═══════════════════════════════════════════════════════════════════
+# 🚫  ANTI-HALLUCINATION: FAKE PHONE BLOCKLIST
+# ═══════════════════════════════════════════════════════════════════
+# Known fake / demo / placeholder / sequential French numbers.
+# Any phone that normalizes to one of these DIGITS-ONLY strings
+# is silently rejected and never stored.
+# Add new offenders here; format: digits only, no spaces.
+FAKE_PHONE_BLOCKLIST: set = {
+    "0123456789",   # Classic demo number (sequential)
+    "0000000000",   # All-zero placeholder
+    "1111111111",   # All-ones placeholder
+    "2222222222",
+    "3333333333",
+    "4444444444",
+    "5555555555",
+    "6666666666",
+    "7777777777",
+    "8888888888",
+    "9999999999",
+    "0102030405",   # Sequential variant
+    "0605040302",
+    "0600000000",   # Generic mobile placeholder
+    "0700000000",
+    "0100000000",
+    "0200000000",
+    "0300000000",
+    "0400000000",
+    "0500000000",
+    "0900000000",
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# 🚫  ANTI-HALLUCINATION: NULL VALUE STRINGS
+# ═══════════════════════════════════════════════════════════════════
+# When the AI returns any of these strings for a field, treat it as
+# EMPTY and store nothing. Case-insensitive match applied at runtime.
+NULL_VALUE_STRINGS: set = {
+    "not_found", "not found", "none", "null", "n/a", "na",
+    "non disponible", "non spécifié", "non renseigné",
+    "indisponible", "inconnu", "inconnue",
+    "non communiqué", "pas de téléphone",
+    "aucun", "aucune", "aucun numéro",
+    "", ".", "-", "_",
+}
 
 
 # ═══════════════════════════════════════════════════════════════════

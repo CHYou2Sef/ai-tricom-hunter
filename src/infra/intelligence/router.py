@@ -1,3 +1,25 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  infra/intelligence/router.py                                            ║
+║                                                                          ║
+║  LLM Provider Router                                                     ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Centralizes the decision of which LLM provider to use for a given     ║
+║    prompt completion request.                                            ║
+║                                                                          ║
+║  ROUTING LOGIC:                                                          ║
+║    auto   → Try Ollama (local) first, fallback to Gemini (cloud)        ║
+║    ollama → Force local inference (privacy-first, no API costs)          ║
+║    gemini → Force Google Gemini (better quality, requires internet)      ║
+║                                                                          ║
+║  WHY LOCAL FIRST:                                                        ║
+║    - Zero API costs                                                        ║
+║    - Data stays on-premise (no PII leakage)                               ║
+║    - Works offline                                                         ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 import logging
 from core import config
 from infra.intelligence.ollama_client import ollama_client
@@ -8,9 +30,13 @@ logger = logging.getLogger("LLMRouter")
 async def route_completion(prompt: str, provider: str = "auto") -> str:
     """
     Routes a prompt completion request to the appropriate provider.
-    - auto: try Ollama first, fallback to Gemini
-    - ollama: force local
-    - gemini: force cloud
+
+    Args:
+        prompt   : The text prompt to send to the LLM
+        provider : "auto" | "ollama" | "gemini"
+
+    Returns:
+        str : LLM response text, or "" if all providers fail
     """
     if provider == "ollama" or (provider == "auto" and config.OLLAMA_ENABLED):
         logger.info("[Router] Attempting local completion via Ollama...")

@@ -1,3 +1,23 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  app/monitoring/app.py                                                   ║
+║                                                                          ║
+║  FastAPI Monitoring & Health API                                         ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Exposes HTTP endpoints for Kubernetes health probes, Prometheus       ║
+║    metrics, and real-time agent status monitoring.                       ║
+║                                                                          ║
+║  ENDPOINTS:                                                              ║
+║    GET /health  → Liveness/Readiness probe (K8s compatible)              ║
+║    GET /stats   → Agent throughput & worker pool status                  ║
+║    GET /metrics → Prometheus metrics (auto-exposed by setup_observability)║
+║                                                                          ║
+║  SECURITY:                                                               ║
+║    Swagger docs disabled in production (DOCKER_ENV=true)                 ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 import os
 from fastapi import FastAPI
 from core import config

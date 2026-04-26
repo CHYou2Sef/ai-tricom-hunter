@@ -1,3 +1,21 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════╗
+║  common/health_check.py                                                  ║
+║                                                                          ║
+║  Startup Dependency Validator                                            ║
+║                                                                          ║
+║  ROLE:                                                                   ║
+║    Validates that all external dependencies are healthy before the       ║
+║    agent starts processing files.                                        ║
+║                                                                          ║
+║  CHECKS PERFORMED:                                                       ║
+║    1. Ollama LLM server reachable (if OLLAMA_ENABLED=true)              ║
+║    2. Disk usage < 85% (prevents mid-run crashes)                        ║
+║    3. Required WORK/ directories exist (creates if missing)              ║
+║    4. Proxy availability (simplified check)                              ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 import asyncio
 import logging
 import shutil
