@@ -5,10 +5,9 @@
 
 FROM python:3.10-slim-bookworm
 
-# ── 1. Install System Dependencies & Headless Display (Xvfb) ──────────
-# Xvfb provides a "fake" monitor. This consumes almost zero CPU/RAM,
-# but it tricks anti-bot systems into thinking a real monitor exists,
-# allowing patchright/nodriver to run in "headed" mode invisibly.
+# ── 1. Install System Dependencies, Chrome & Xvfb ──────────
+# We combine these into a single RUN command so we can purge wget and gnupg
+# in the exact same layer, preventing them from bloating the final image size.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gnupg \
@@ -36,27 +35,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgtk-3-0 \
     libxshmfence1 \
     libglu1-mesa \
-    && rm -rf /var/lib/apt/lists/*
-
-# ── 1.5 Install Google Chrome (Official) ──────────────────────────────
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
-    && apt-get update && apt-get install -y google-chrome-stable \
+    && apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
+    && apt-get purge -y wget gnupg \
+    && apt-get autoremove -y \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # ── 2. (Removed Node.js - Native Python Validation is used) ────────────
 
-# ── 3. Install 'uv' (Fast Python Package Manager - Pillar 1) ──────────
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
-
-# Set up working directory
 WORKDIR /app
 
-# ── 4. Install Python Dependencies ────────────────────────────────────
-# Copy requirements first to leverage Docker Layer Caching
+# ── 3. Install Python Dependencies with Ephemeral 'uv' ────────────────
+# Copy requirements first to leverage Docker Layer Caching.
+# We download uv, use it to install packages, and immediately delete it.
 COPY requirements-prod.txt .
-RUN uv pip install --system -r requirements-prod.txt
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && /root/.local/bin/uv pip install --system -r requirements-prod.txt \
+    && rm -rf /root/.local/bin/uv /root/.cache/uv
 
 # ── 5. Install Stealth Browsers ───────────────────────────────────────
 # Patchright requires custom Chromium binaries
@@ -64,7 +61,8 @@ RUN patchright install chromium
 
 # SeleniumBase Tier 1 requires chromedriver (UC Mode)
 # We use the built-in installer to ensure version compatibility
-RUN seleniumbase install chromedriver
+RUN seleniumbase install chromedriver \
+    && rm -rf /root/.cache/seleniumbase
 
 # ── 6. Copy Application Source Code ───────────────────────────────────
 # We copy everything, preserving the folder structure (src/, run/, scripts/, etc.)

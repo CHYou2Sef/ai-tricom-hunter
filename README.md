@@ -46,31 +46,28 @@ tail -f logs/agent.log
 # Run Agent
 python -m src.app.orchestrator
 
-## 🚀 Quick Start (Windows / Docker)
+### Kubernetes (Production Cluster)
 
-Follow these 3 steps to start the industrial harvest:
+```bash
+# Apply ConfigMap and Persistent Volumes
+kubectl apply -f k8s/persistent-volume.yaml
+kubectl apply -f k8s/configmap.yaml
 
-1.  **Prepare Environment**:
-    Copy `.env.example` to `.env` and add your `GOOGLE_API_KEY`.
-2.  **Launch the Stack**:
-    Run this command in PowerShell to build and start the agents:
-    ```powershell
-    docker compose build --no-cache; docker compose up -d
-    ```
-3.  **Start Hunting**:
-    Drop your Excel/CSV files into the `WORK/INCOMING` folder. The agent will detect them automatically. Monitor progress with:
-    ```powershell
-    docker logs -f tricom_ai_agent
-    ```
+# Deploy the Agent (Zero-Downtime Rolling Updates)
+kubectl apply -f k8s/deployment.yaml
+
+# Monitor Logs
+kubectl logs -f deployment/tricom-agent
+```
 
 ## 🏗️ Technical Architecture
 
 - **Orchestrator**: Async pool (`MAX_CONCURRENT_WORKERS=4`) with real-time JSON checkpointing.
 - **Hybrid Waterfall**: Intelligence escalation (Standard AI ➔ Expert AI ➔ Deep Discovery ➔ Web Scraping).
 - **Anti-Detection**: Human-like Gaussian action delays + 10-property CDP fingerprint masking.
-- **Data Integrity**: Binary Status (DONE/NO TEL), automatic column cleaning, and no-duplication logic.
+- **Data Integrity**: SIREN Validation, binary Status (DONE/NO TEL), automatic column cleaning, and hallucination blocklists.
 - 🛡️ **Schema Hardening:** Resilient to quoted CSV headers, malformed AI JSON, and whitespace issues.
-- ⚡ **24/7 Autonomy:** Checkpoint-based recovery, proxy rotation, and human-like anti-detection.
+- ⚡ **Infrastructure:** Highly optimized Docker image (same-layer purging), K8s Readiness/Liveness probes, and Prometheus telemetry.
 - **Data Layer**: Pandas pro-formatted Excel + atomic JSON checkpoints
 
 ## ✨ Features Matrix
@@ -89,9 +86,9 @@ Follow these 3 steps to start the industrial harvest:
 ✅ Phone Yield: ~95%
 ⚡ Throughput: 4 rows/sec (4 workers)
 🔄 Resume: Atomic (0% loss)
-🛡️ Uptime: 24/7 Watchdog
+🛡️ Uptime: 24/7 Watchdog with Native Healthchecks
 📈 Test Coverage: 90%+ (pytest)
-🛡️ Security: Bandit Clean
+🐳 Image Size: Highly Optimized (Same-Layer Purging)
 ```
 
 ## 🛡️ Security & Quality

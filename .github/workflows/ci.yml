@@ -10,6 +10,10 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate-and-test:
     runs-on: ubuntu-latest
@@ -27,6 +31,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+
+      - name: Cache uv dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
 
       - name: Install Dependencies
         run: |
@@ -102,3 +114,5 @@ jobs:
           tags: |
             ghcr.io/${{ env.owner }}/ai_tricom_hunter:latest
             ghcr.io/${{ env.owner }}/ai_tricom_hunter:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

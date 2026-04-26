@@ -23,3 +23,14 @@ browser_profiles/
 # Documentation testing
 *.pdf
 *.tex
+
+# CI/CD & Orchestration (Not needed at runtime)
+tests/
+.pytest_cache/
+k8s/
+.github/
+
+# Agent/AI Configs
+.agents/
+.claude/
+agent.yaml
