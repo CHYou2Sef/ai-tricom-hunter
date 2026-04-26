@@ -149,7 +149,8 @@ def save_results(rows: list, original_filepath: str) -> None:
     # 1. Convert new rows to DF (Only include ENRICHED rows in Fusion file)
     new_data = []
     for r in rows:
-        if r.status != "DONE":
+        # DONE = confirmed data. LOW_CONF = SIREN mismatch — include for operator review.
+        if r.status not in ("DONE", "LOW_CONF"):
             continue
             
         d = r.to_dict()

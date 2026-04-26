@@ -568,6 +568,7 @@ FAKE_PHONE_BLOCKLIST: set = {
     "1111111111",   # All-ones placeholder
     "2222222222",
     "3333333333",
+    "0333333333",   # 03-prefix all-3 variant (evidence: row 15)
     "4444444444",
     "5555555555",
     "6666666666",

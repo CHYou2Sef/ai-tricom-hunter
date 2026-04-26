@@ -31,6 +31,7 @@ Rules:
   4. Record every decision in row.enriched_fields for full auditability.
 """
 
+import re
 import time
 from typing import TYPE_CHECKING
 
@@ -72,6 +73,34 @@ FIELD_TO_ATTR = {
     "instagram":       "instagram",
     "twitter":         "twitter",
 }
+
+
+# ── Fields whose values need extra noise-stripping ─────────────────────────
+_CITY_NOISE_RE = re.compile(
+    r'[\n\r\t].*$'
+    r'|\s*(t\u00e9l\u00e9phone|tel|contact|appel|fax|email|mail).*$',
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _sanitize_field_value(field_name: str, value: str) -> str:
+    """
+    Post-clean a raw enriched value before writing it to the row.
+
+    Addresses Bug #5 where scraped city values arrive as:
+      'GOLBEY t\u00e9l\u00e9phone contact\\nL'
+    instead of just 'GOLBEY'.
+
+    Args:
+        field_name : Enrichable field name (e.g. 'ville', 'code_postal')
+        value      : Raw candidate string
+
+    Returns:
+        Clean string, or original value for fields that don't need stripping.
+    """
+    if field_name in ('ville', 'code_postal', 'adresse', 'nom'):
+        value = _CITY_NOISE_RE.sub('', value).strip()
+    return value
 
 
 def enrich_row(row: "ExcelRow") -> None:
@@ -133,6 +162,10 @@ def enrich_row(row: "ExcelRow") -> None:
         new_value = winner.get("value")
 
         if new_value:
+            new_value = _sanitize_field_value(field_name, str(new_value))
+            if not new_value:
+                continue   # Sanitisation reduced it to empty string
+
             # IMPORTANT: SET THE ATTRIBUTE SO IT'S SAVED IN THE FINAL EXCEL
             setattr(row, attr, new_value)
             row.enriched_fields[field_name] = {

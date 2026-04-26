@@ -95,8 +95,8 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: Fi
             valid_a = normalize_phone(cp_data.get("agent_phone"))
             status = cp_data.get("status")
             
-            # If we have data OR a definitive finish status, sync it
-            if valid_p or valid_a or status in ["DONE", "NO TEL", "SKIP"]:
+            # H3 fix: LOW_CONF (SIREN mismatch) is a terminal state — don't re-process
+            if valid_p or valid_a or status in ["DONE", "NO TEL", "SKIP", "LOW_CONF"]:
                 r.phone = valid_p
                 r.agent_phone = valid_a
                 r.status = status or "DONE"
@@ -225,7 +225,12 @@ async def process_file_async(filepath: str) -> None:
     await asyncio.to_thread(sync_with_previous_results, rows, filepath, progress)
     
     # Decide which rows still need work
-    rows_to_process = [r for r in rows if r.status != "DONE"] if config.REPROCESS_FAILED_ROWS else [r for r in rows if r.status not in ("DONE", "NO TEL", "SKIP")]
+    # LOW_CONF = SIREN mismatch — terminal state, no re-processing
+    terminal = ("DONE", "NO TEL", "SKIP", "LOW_CONF")
+    rows_to_process = (
+        [r for r in rows if r.status != "DONE"] if config.REPROCESS_FAILED_ROWS
+        else [r for r in rows if r.status not in terminal]
+    )
     total = len(rows_to_process)
     
     if total == 0:
@@ -254,8 +259,9 @@ async def finalize_file_processing(
     rows: List[ExcelRow], original_filepath: str, tracker: Optional[PerformanceTracker] = None, progress: FileProgressTracker = None
 ) -> None:
     orig_path = Path(original_filepath)
-    success_rows = [r for r in rows if r.phone or r.status == "DONE"]
-    retry_rows = [r for r in rows if r.status in ("NO TEL", "SKIP", "PENDING", "ERROR")]
+    success_rows  = [r for r in rows if r.status == "DONE"]
+    low_conf_rows = [r for r in rows if r.status == "LOW_CONF"]
+    retry_rows    = [r for r in rows if r.status in ("NO TEL", "SKIP", "PENDING", "ERROR")]
 
     total = len(rows)
     duration_str = f"{tracker.get_metrics_summary()['total_execution_seconds']}s" if tracker else "N/A"
@@ -264,7 +270,7 @@ async def finalize_file_processing(
     logger.info(f"{'━' * 60}")
     logger.info(f"📊  FILE COMPLETED: {orig_path.name}")
     logger.info(f"   📁 Total: {total} | ⏱️ Duration: {duration_str}")
-    logger.info(f"   ✅ Success: {len(success_rows)} | 🔁 Retry: {len(retry_rows)}")
+    logger.info(f"   ✅ DONE: {len(success_rows)} | ⚠️  LOW_CONF: {len(low_conf_rows)} | 🔁 Retry: {len(retry_rows)}")
     logger.info(f"{'━' * 60}")
 
     if success_rows:

@@ -122,8 +122,9 @@ async def _extract_geo_phone(row: ExcelRow, agent, page_content: str) -> Optiona
             if json_match:
                 res = json.loads(json_match.group(0).strip())
                 tel = res.get("telephone")
-                if tel and str(tel).upper() not in ("NOT_FOUND", "NONE", ""):
-                    return tel
+                if tel and str(tel).upper() not in {s.upper() for s in config.NULL_VALUE_STRINGS}:
+                    # C2 fix: run through full normalizer so blocklist + structural validator apply
+                    return normalize_phone(str(tel))
         except Exception:   # Malformed JSON or unexpected format — safe to ignore
             pass
     return None
@@ -204,16 +205,26 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
         "dirigeant": "dirigeant", "capital": "capital", "ville": "ville", "code_postal": "code_postal",
         "facebook": "facebook", "instagram": "instagram", "direct_phone": "phone_agent"
     }
+    # Centralised null-value set (Bug #3 — includes French "Non disponible" etc.)
+    _null_values = {s.upper() for s in config.NULL_VALUE_STRINGS}
+
     for row_key, json_keys in field_map.items():
+        attr = attr_map.get(row_key)
+        # Bug #2: Never overwrite a field already present in the original row
+        if attr and getattr(row, attr, None):
+            existing = str(getattr(row, attr, "")).strip()
+            if existing.upper() not in _null_values:
+                continue   # skip — original data wins
+
         for jk in json_keys:
             val = data.get(jk)
             if isinstance(val, dict): val = ", ".join(str(v) for v in val.values() if v)
             elif isinstance(val, list): val = ", ".join(str(v) for v in val if v)
-            if val and str(val).upper() not in ("NOT_FOUND", "NONE", "", "NULL"):
+            if val and str(val).strip().upper() not in _null_values:
                 clean_val = str(val).strip()
                 row.enriched_fields[row_key] = {"value": clean_val, "source": "google_ai_mode", "confidence": 0.97}
-                attr = attr_map.get(row_key)
-                if attr and not getattr(row, attr, None): setattr(row, attr, clean_val)
+                if attr and not getattr(row, attr, None):
+                    setattr(row, attr, clean_val)
                 break
     
     # --- Consistency Validation: SIREN cross-check to detect hallucination ---
@@ -221,10 +232,15 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
     if extracted_siren and row.siren:
         clean_ext = "".join(filter(str.isdigit, str(extracted_siren)))
         clean_row = "".join(filter(str.isdigit, str(row.siren)))
-        if clean_ext != clean_row:
-            logger.warning(f"🚩 [Validation] SIREN Mismatch! Expected {clean_row}, got {clean_ext}. High risk of hallucination.")
+        if clean_ext != clean_row and clean_ext:
+            logger.warning(
+                f"🚩 [Validation] SIREN Mismatch! Expected {clean_row}, got {clean_ext}. "
+                "Phone discarded — high risk of hallucination."
+            )
             row.enriched_fields["validation_error"] = "SIREN_MISMATCH"
-            
+            # Bug #4: Reject the phone when the company identity is wrong
+            best = None
+
     return best
 
 def _calculate_row_confidence(row: ExcelRow) -> int:
@@ -359,12 +375,21 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
     if harvested:
         # Sort by score descending
         harvested.sort(key=lambda x: x['score'], reverse=True)
-        row.phone = harvested[0]['num'] # Main phone
-        
-        # Binary Status: If we have a phone, it's DONE. No more 'LOW_CONF'.
+        row.phone = harvested[0]['num']  # Main phone
+
         final_conf = _calculate_row_confidence(row)
-        row.status = "DONE"
-        
+
+        # Bug #4: SIREN_MISMATCH means we extracted data for a DIFFERENT company.
+        # Mark LOW_CONF so the operator can review it — never auto-DONE.
+        if row.enriched_fields.get("validation_error") == "SIREN_MISMATCH":
+            row.status = "LOW_CONF"
+            logger.warning(
+                f"⚠️ [Row {progress_str}] Status: LOW_CONF (SIREN mismatch) — "
+                f"phone kept for review: {row.phone}"
+            )
+        else:
+            row.status = "DONE"
+
         # Store full list in enriched_fields for column expansion
         row.enriched_fields["phone_list"] = harvested
         row.enriched_fields["final_confidence"] = final_conf

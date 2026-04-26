@@ -177,16 +177,50 @@ def _dedupe_and_log(phones: List[str], source_label: Optional[str] = None) -> Li
     return unique
 
 
+def is_valid_french_phone(digits: str) -> bool:
+    """
+    Structural anti-hallucination validator for 10-digit French numbers.
+
+    Rejects:
+      - Known blocklisted demo/test numbers (from config.FAKE_PHONE_BLOCKLIST)
+      - All-same-digit numbers (e.g. '0333333333')
+      - Strictly sequential ascending numbers (e.g. '0123456789')
+
+    Args:
+        digits: Cleaned 10-digit string starting with '0' (no spaces/dots)
+
+    Returns:
+        False if the number looks fake/hallucinated.
+    """
+    # 1. Hard blocklist (exact matches)
+    if digits in config.FAKE_PHONE_BLOCKLIST:
+        logger.debug(f"[PhoneExtractor] Blocked (blocklist): {digits}")
+        return False
+
+    # 2. All same digit: '0000000000', '0666666666', etc.
+    if len(set(digits)) == 1:
+        logger.debug(f"[PhoneExtractor] Blocked (all-same-digit): {digits}")
+        return False
+
+    # 3. Monotonically sequential digits (e.g. 0123456789)
+    if digits == ''.join(str(i % 10) for i in range(len(digits))):
+        logger.debug(f"[PhoneExtractor] Blocked (sequential ascending): {digits}")
+        return False
+
+    return True
+
+
 def normalize_phone(phone: Optional[str]) -> Optional[str]:
     """
     Normalise a raw phone string:
       - Remove spaces, dots, dashes
       - Validate length (9–15 digits)
+      - Reject fake/hallucinated numbers via blocklist + structural checks
       - Format French numbers as 'XX XX XX XX XX'
     """
     if not phone:
         return None
-    
+
     digits_only = re.sub(r'[\s\.\-\(\)]', '', str(phone)).strip()
 
     if not re.match(r'^\+?\d{9,15}$', digits_only):
@@ -197,6 +231,9 @@ def normalize_phone(phone: Optional[str]) -> Optional[str]:
         digits_only = '0' + digits_only[3:]
 
     if digits_only.startswith('0') and len(digits_only) == 10:
+        # Anti-hallucination structural validation
+        if not is_valid_french_phone(digits_only):
+            return None
         return format_french(digits_only)
 
     # Return raw for non-French formats (e.g. +44…)
