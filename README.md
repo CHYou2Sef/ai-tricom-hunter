@@ -137,4 +137,4 @@ python -m src.app.orchestrator
 
 ---
 
-**Built by Youssef CHEBL** | [Architecture](docs/architecture_overview.svg)
+**Built by Youssef CHEBL** 
