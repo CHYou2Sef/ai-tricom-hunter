@@ -75,3 +75,9 @@ class BaseBrowserAgent:
                 pass
         self._browser = None
         self._page = None
+    async def generate_human_noise(self) -> None:
+        """
+        Navigate to a random 'Trust Site' to build profile history and reduce bot signals.
+        To be implemented by specific agent tiers.
+        """
+        pass

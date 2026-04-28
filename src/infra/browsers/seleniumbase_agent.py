@@ -716,3 +716,40 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                 last_text = current
 
         return last_text if last_text else None
+
+    async def generate_human_noise(self) -> None:
+        """
+        Navigates to a random trust site, scrolls, and waits to simulate human browsing.
+        """
+        import random
+        if not self._driver:
+            return
+            
+        site = random.choice(config.HUMAN_NOISE_SITES)
+        logger.info(f"🎭 [Human Noise] Simulating activity on: {site}")
+        
+        try:
+            # 1. Open site in a new tab (to keep the search session alive)
+            self._driver.execute_script(f"window.open('{site}', '_blank');")
+            self._driver.switch_to.window(self._driver.window_handles[-1])
+            
+            # 2. Simulate human reading (Wait + Scroll)
+            await asyncio.sleep(random.uniform(5, 12))
+            for _ in range(random.randint(2, 5)):
+                self._driver.execute_script(f"window.scrollBy(0, {random.randint(300, 800)});")
+                await asyncio.sleep(random.uniform(1, 3))
+            
+            # 3. Close the noise tab and return to main
+            self._driver.close()
+            self._driver.switch_to.window(self._driver.window_handles[0])
+            logger.info("🎭 [Human Noise] Simulation complete. Resuming search.")
+            
+        except Exception as exc:
+            logger.debug(f"[Human Noise] Simulation error: {exc}")
+            # Ensure we return to main window if possible
+            try:
+                if len(self._driver.window_handles) > 1:
+                    self._driver.close()
+                self._driver.switch_to.window(self._driver.window_handles[0])
+            except:
+                pass

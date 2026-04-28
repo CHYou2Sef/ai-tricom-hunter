@@ -166,6 +166,16 @@ async def _execute_agent_task(ctx: WorkerContext, agent) -> None:
         extra=ctx.row.enriched_fields
     )
 
+    # 🎭 [Human Noise] Trigger session seasoning occasionally
+    if getattr(config, 'ENABLE_HUMAN_NOISE', False):
+        if ctx.row.row_index % config.HUMAN_NOISE_INTERVAL == 0:
+            try:
+                # Get the active browser engine from the hybrid engine if possible
+                # or just use the current agent
+                await agent.generate_human_noise()
+            except Exception as e:
+                logger.debug(f"[Orchestrator] Noise generation failed: {e}")
+
 async def _worker_process_row(ctx: WorkerContext):
     """
     Coroutine executed by each pool worker.

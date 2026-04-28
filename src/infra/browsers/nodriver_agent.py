@@ -414,3 +414,32 @@ class NodriverAgent(BaseBrowserAgent):
                 await action_delay_async("type_char")
             except Exception:
                 continue
+
+    async def generate_human_noise(self) -> None:
+        """
+        Simulate human browsing in Nodriver (CDP-only).
+        """
+        import random
+        if not self._browser:
+            return
+            
+        site = random.choice(config.HUMAN_NOISE_SITES)
+        logger.info(f"🎭 [Human Noise] Simulating activity on: {site}")
+        
+        try:
+            # 1. Open site in a new tab
+            noise_tab = await self._browser.get(site, new_tab=True)
+            
+            # 2. Simulate human reading (Wait + Scroll)
+            await asyncio.sleep(random.uniform(5, 12))
+            for _ in range(random.randint(2, 5)):
+                # Nodriver scroll is async
+                await noise_tab.scroll_down(random.randint(300, 800))
+                await asyncio.sleep(random.uniform(1, 3))
+            
+            # 3. Close the noise tab
+            await noise_tab.close()
+            logger.info("🎭 [Human Noise] Simulation complete. Resuming search.")
+            
+        except Exception as exc:
+            logger.debug(f"[Human Noise] Simulation error: {exc}")

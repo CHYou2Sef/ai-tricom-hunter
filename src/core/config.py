@@ -274,7 +274,7 @@ BROWSER_ENGINE = "hybrid"
 #   macOS   →  "/Users/yourname/Library/Application Support/Chromium"
 # ── Chromium Profile Path ──
 # We use the root browser_profiles directory to persist cookies across sessions.
-CHROMIUM_PROFILE_BASE = ROOT_DIR / "browser_profiles"
+CHROMIUM_PROFILE_BASE = WORK_DIR / "browser_profiles"
 CHROMIUM_PROFILE_BASE.mkdir(parents=True, exist_ok=True)
 
 def get_worker_profile_path(worker_id: int, tier: str = "default") -> str:
@@ -283,6 +283,18 @@ def get_worker_profile_path(worker_id: int, tier: str = "default") -> str:
     path = CHROMIUM_PROFILE_BASE / name
     path.mkdir(parents=True, exist_ok=True)
     return str(path.resolve())
+
+# ── Human Noise / Session Seasoning ──
+# Occasionally visiting "Trust Sites" (YouTube, Wikipedia) to build profile trust.
+ENABLE_HUMAN_NOISE = os.getenv("ENABLE_HUMAN_NOISE", "true").lower() == "true"
+HUMAN_NOISE_INTERVAL = int(os.getenv("HUMAN_NOISE_INTERVAL", "15")) # Every 15 rows
+HUMAN_NOISE_SITES = [
+    "https://www.youtube.com",
+    "https://www.wikipedia.org",
+    "https://www.lemonde.fr",
+    "https://www.interieur.gouv.fr",
+    "https://www.economie.gouv.fr"
+]
 
 CHROMIUM_PROFILE_PATH = str(CHROMIUM_PROFILE_BASE)
 
