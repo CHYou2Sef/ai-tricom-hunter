@@ -23,6 +23,17 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 import time
 import asyncio
+import socket
+
+def check_internet(host="8.8.8.8", port=53, timeout=3) -> bool:
+    """Check if an internet connection is available."""
+    try:
+        socket.setdefaulttimeout(timeout)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((host, port))
+        return True
+    except Exception:
+        return False
 
 try:
     from watchdog.observers import Observer
@@ -165,6 +176,11 @@ async def main_async() -> None:
 
     ensure_directories()
     
+    if not check_internet():
+        logger.error("[Setup] ❌ No internet connection detected! Please check your network and try again.")
+        print("\n[ERROR] No internet connection. The agent cannot start. Please check your network.\n")
+        return
+    
     # ── SINGLETON LOCK ──
     # Prevents "Opening in existing browser session" errors by ensuring
     # only one agent instance runs at a time.
@@ -217,6 +233,14 @@ async def main_async() -> None:
 
     try:
         while True:
+            if not check_internet():
+                logger.warning("[Main] ⚠️  Internet connection lost. Pausing agent and saving advancement...")
+                print("\n[WARNING] Internet connection lost. Waiting for connection to resume...\n")
+                while not check_internet():
+                    await asyncio.sleep(5)
+                logger.info("[Main] 🌐 Internet connection restored! Resuming work.")
+                print("\n[INFO] Internet restored. Resuming work...\n")
+
             filepath = await file_queue.get()
             
             if not os.path.exists(filepath):
@@ -243,7 +267,8 @@ async def main_async() -> None:
                 logger.info("[Main] 💤 Queue empty. Waiting for new files...")
             
     except asyncio.CancelledError:
-        logger.info("[Main] 🛑 Shutdown signal received.")
+        logger.info("[Main] 🛑 Shutdown signal received (PC closed/stopped). Agent paused and advancement saved.")
+        print("\n[INFO] Agent is paused and advancement is saved.\n")
     except Exception as e:
         logger.error(f"[Main] 💥 Unexpected loop error: {e}", exc_info=True)
     finally:

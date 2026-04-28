@@ -21,14 +21,14 @@ import datetime
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
 from core import config
 from core.logger import get_logger
 from common.fs import safe_mkdir, safe_touch
 
 logger = get_logger(__name__)
 
-def _apply_pro_formatting(writer, df, sheet_name="Results"):
+def _apply_pro_formatting(writer, df, rows: List, sheet_name="Results"):
     """Apply professional XlsxWriter formatting to the output."""
     workbook  = writer.book
     worksheet = writer.sheets[sheet_name]
@@ -45,6 +45,16 @@ def _apply_pro_formatting(writer, df, sheet_name="Results"):
 
     ai_col_fmt = workbook.add_format({
         'bg_color': '#DDEBF7',  # Light Blue
+        'border': 1
+    })
+
+    filled_fmt = workbook.add_format({
+        'bg_color': '#E2EFDA',  # Light Green (Filled from Empty)
+        'border': 1
+    })
+
+    clone_fmt = workbook.add_format({
+        'bg_color': '#FFF2CC',  # Light Yellow (New Row/Clone)
         'border': 1
     })
 
@@ -69,14 +79,52 @@ def _apply_pro_formatting(writer, df, sheet_name="Results"):
         max_len = max(float(max_data_len), len(str(col_name))) + 2
         width = min(max_len, 50)
         
-        # Apply special color if it's an AI column
-        if str(col_name).startswith("AI_") or str(col_name) == config.STATUS_COLUMN_NAME:
-            worksheet.set_column(i, i, width, ai_col_fmt)
-        else:
-            worksheet.set_column(i, i, width)
-        
         # Write header with format
         worksheet.write(0, i, str(col_name), header_fmt)
+
+    # --- 5. Conditional Row/Cell Highlighting ---
+    for row_idx, excel_row in enumerate(rows):
+        row_num = row_idx + 1  # Offset by 1 for headers
+        
+        # Determine if this is a "New Row" (clone)
+        is_clone = getattr(excel_row, 'is_clone', False)
+        
+        for col_idx, col_name in enumerate(df.columns):
+            # Check if this specific field was enriched from an EMPTY state
+            is_filled = False
+            
+            # Map column name back to enricher field keys
+            # (e.g. AI_Email -> email, AI_Siren -> siren)
+            field_key = str(col_name).replace("AI_", "").lower()
+            
+            if field_key in excel_row.enriched_fields:
+                if excel_row.enriched_fields[field_key].get("was_empty"):
+                    is_filled = True
+            
+            # Special case: Status column highlights
+            if col_name == config.STATUS_COLUMN_NAME:
+                val = df.iloc[row_idx, col_idx]
+                if val == "DONE":
+                    worksheet.write(row_num, col_idx, val, ai_col_fmt)
+                    continue
+                elif val == "LOW_CONF":
+                    worksheet.write(row_num, col_idx, val, clone_fmt)
+                    continue
+
+            # Apply formatting
+            target_fmt = None
+            if is_filled:
+                target_fmt = filled_fmt
+            elif is_clone:
+                target_fmt = clone_fmt
+            elif str(col_name).startswith("AI_"):
+                target_fmt = ai_col_fmt
+                
+            if target_fmt:
+                val = df.iloc[row_idx, col_idx]
+                # Handle NaNs for Excel
+                if pd.isna(val): val = ""
+                worksheet.write(row_num, col_idx, val, target_fmt)
 
 def _deduplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Ensure all column names are unique, keeping the last occurrence (the newest data)."""
@@ -122,7 +170,7 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
         # Professional Excel: XlsxWriter engine
         with pd.ExcelWriter(target_path, engine='xlsxwriter') as writer:
             df.to_excel(writer, sheet_name="Results", index=False)
-            _apply_pro_formatting(writer, df)
+            _apply_pro_formatting(writer, df, rows)
         logger.info(f"[Writer] Subset saved as Pro Excel (Pandas): {target_path}")
     
     safe_touch(target_path)
@@ -196,7 +244,13 @@ def save_results(rows: list, original_filepath: str) -> None:
     try:
         with pd.ExcelWriter(fusion_path, engine='xlsxwriter') as writer:
             final_df.to_excel(writer, sheet_name="Results", index=False)
-            _apply_pro_formatting(writer, final_df)
+            # Re-read rows matching the final_df logic if needed, but for simplicity
+            # we pass a placeholder or we use the data we have.
+            # NOTE: Daily fusion doesn't have the original 'rows' objects anymore 
+            # for the entire file, but for the 'new_data' it does.
+            # To keep it perfect, we use the original objects for the whole df.
+            # However, for now, we'll just apply standard formatting to the fusion file.
+            _apply_pro_formatting(writer, final_df, []) # No individual highlighting in fusion for now
         safe_touch(fusion_path)
         logger.info(f"[Writer] Daily fusion updated: {fusion_path.name}")
     except Exception as e:

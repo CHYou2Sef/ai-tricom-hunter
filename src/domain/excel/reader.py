@@ -98,6 +98,7 @@ class ExcelRow:
         self.processing_start_ts: float = 0.0
         self.processing_end_ts: float = 0.0
         self.captcha_hits: int = 0
+        self.is_clone: bool = False
 
     def get_fingerprint(self) -> str:
         if self.siren and len(self.siren) >= 9:
@@ -155,6 +156,7 @@ class ExcelRow:
         """Create a deep copy of this row for multiple occurrences."""
         import copy
         new_row = copy.copy(self)
+        new_row.is_clone = True
         new_row.enriched_fields = copy.deepcopy(self.enriched_fields)
         new_row.raw_ai_responses = copy.deepcopy(self.raw_ai_responses)
         new_row.search_queries_used = copy.deepcopy(self.search_queries_used)

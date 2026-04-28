@@ -102,7 +102,7 @@ def get_output_dir(input_folder_name: str) -> Path:
 
 # ── Parallelism & Professional Throttling ──
 # MAX_CONCURRENT_WORKERS = number of simultaneous browser windows
-MAX_CONCURRENT_WORKERS = int(os.getenv("MAX_CONCURRENT_WORKERS", "1"))
+MAX_CONCURRENT_WORKERS = int(os.getenv("MAX_CONCURRENT_WORKERS", "2"))
 BROWSER_USE_SANDBOX    = os.getenv("BROWSER_USE_SANDBOX", "true").lower() == "true"
 
 # ── HDD OPTIMIZATION ──
@@ -244,7 +244,7 @@ CAMOUFOX_ENABLED = os.getenv("CAMOUFOX_ENABLED", "false").lower() == "true"
 # PERFORMANCE_MODE:
 #   "simple" → Only Tiers 1-2 (SeleniumBase + Patchright). Fastest, lowest RAM.
 #   "full"   → All 5 Tiers (including Nodriver, Crawl4AI, Camoufox). Maximum success.
-PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "full").lower()
+PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "simple").lower()
 
 # ── Obsolete / Fail-safe (For backward compatibility) ──
 # This is no longer used by the Hybrid Waterfall engine but kept as a 
@@ -585,6 +585,7 @@ FAKE_PHONE_BLOCKLIST: set = {
     "0400000000",
     "0500000000",
     "0900000000",
+    "0107142857",   # Dummy/repeated number reported by user
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -598,6 +599,7 @@ NULL_VALUE_STRINGS: set = {
     "indisponible", "inconnu", "inconnue",
     "non communiqué", "pas de téléphone",
     "aucun", "aucune", "aucun numéro",
+    "data_not_found", "missing", "not identified", "non trouvé", "non-disponible",
     "", ".", "-", "_",
 }
 
