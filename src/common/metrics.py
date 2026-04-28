@@ -304,6 +304,28 @@ class BenchmarkTelemetry:
         WORK/telemetry.json (dual-output).
         Returns the full computed payload.
         """
+        payload = self.save()
+
+        # ── Console output ────────────────────────────────────────────────
+        print("\n" + "═" * 64)
+        print("📊  BENCHMARK TELEMETRY REPORT — Engine Continuity Comparison")
+        print("═" * 64)
+        print(f"   Total benchmark runtime: {payload['benchmark_runtime_sec']}s")
+        for stats in self._engines.values():
+            print(stats.format_console_report())
+        print("\n  🏆  RANKING  (Best Continuity → Worst)")
+        for r in payload["ranking"]:
+            print(f"     #{r['rank']}  {r['engine']:<20}  MTTI={r['mtti_sec']}s  |  Success={r['success_rate_pct']}%")
+        print("═" * 64 + "\n")
+
+        return payload
+
+    def save(self) -> Dict[str, Any]:
+        """
+        Calculates current metrics (ranking, MTTI, SR) and flushes them to
+        telemetry.json. Does NOT print to console.
+        Useful for real-time updates in production.
+        """
         total_runtime = round(time.monotonic() - self._benchmark_start_ts, 1)
         payload = {
             "benchmark_runtime_sec": total_runtime,
@@ -320,21 +342,8 @@ class BenchmarkTelemetry:
             for i, e in enumerate(ranked)
         ]
 
-        # ── Console output ────────────────────────────────────────────────
-        print("\n" + "═" * 64)
-        print("📊  BENCHMARK TELEMETRY REPORT — Engine Continuity Comparison")
-        print("═" * 64)
-        print(f"   Total benchmark runtime: {total_runtime}s")
-        for stats in self._engines.values():
-            print(stats.format_console_report())
-        print("\n  🏆  RANKING  (Best Continuity → Worst)")
-        for r in payload["ranking"]:
-            print(f"     #{r['rank']}  {r['engine']:<20}  MTTI={r['mtti_sec']}s  |  Success={r['success_rate_pct']}%")
-        print("═" * 64 + "\n")
-
         # ── JSON flush (WORK/telemetry.json) ──────────────────────────────
         self._flush_to_json(payload)
-
         return payload
 
     def _flush_to_json(self, payload: Dict[str, Any]) -> None:
@@ -343,6 +352,7 @@ class BenchmarkTelemetry:
             TELEMETRY_PATH.parent.mkdir(parents=True, exist_ok=True)
             with open(TELEMETRY_PATH, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2, ensure_ascii=False)
-            logger.info(f"[Telemetry] ✅ Metrics flushed to: {TELEMETRY_PATH}")
+            # Use debug to avoid log spam in main loop
+            logger.debug(f"[Telemetry] ✅ Metrics flushed to: {TELEMETRY_PATH}")
         except Exception as exc:
             logger.error(f"[Telemetry] Failed to write telemetry.json: {exc}")

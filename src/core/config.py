@@ -242,9 +242,11 @@ CAMOUFOX_ENABLED = os.getenv("CAMOUFOX_ENABLED", "false").lower() == "true"
 
 # ── Performance & Tier Complexity ──
 # PERFORMANCE_MODE:
-#   "simple" → Only Tiers 1-2 (SeleniumBase + Patchright). Fastest, lowest RAM.
-#   "full"   → All 5 Tiers (including Nodriver, Crawl4AI, Camoufox). Maximum success.
-PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "simple").lower()
+#   "simple"   → Tiers 1-2 (SeleniumBase + Patchright).
+#   "stealth"  → Tiers 1 + 3 ONLY (SeleniumBase + Nodriver). Skips Patchright.
+#   "balanced" → Tiers 1-3 (SeleniumBase + Patchright + Nodriver).
+#   "full"     → All 5 Tiers.
+PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "stealth").lower()
 
 # ── Obsolete / Fail-safe (For backward compatibility) ──
 # This is no longer used by the Hybrid Waterfall engine but kept as a 

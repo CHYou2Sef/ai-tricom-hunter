@@ -13,11 +13,11 @@
 ║    ✓ Protocol discontinuity — WebDriver disconnects on sensitive events  ║
 ║    ✓ UC GUI clicks     — OS-level input bypasses JS event listeners      ║
 ║    ✓ Turnstile/CAPTCHA — uc_gui_click_captcha() native handling          ║
-║    ✓ xvfb guard        — auto-detects headless Linux, sets DISPLAY=:99  ║
+║    ✓ xvfb guard        — auto-detects headless Linux, sets DISPLAY=:99   ║
 ║                                                                          ║
 ║  Implemented scraping methods (BaseBrowserAgent contract):               ║
 ║    • search_google_ai_mode()   PRIMARY: direct AI Mode URL               ║
-║    • search_google_ai()        Alias for waterfall compatibility          ║
+║    • search_google_ai()        Alias for waterfall compatibility         ║
 ║    • submit_google_search()    Standard search + human typing            ║
 ║    • search_gemini_ai()        Gemini chat interface                     ║
 ║    • crawl_website()           Deep crawl with contact page discovery    ║
@@ -159,7 +159,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         self._driver = Driver(
             uc=True,
             headless=False,
-            ad_block=True,
+           # ad_block=True,
             proxy=proxy_str,
             binary_location=config.CHROMIUM_BINARY_PATH or None,
             locale_code="fr",
@@ -172,7 +172,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         except Exception:
             pass
 
-        self._driver.set_page_load_timeout(30)
+        self._driver.set_page_load_timeout(50)
         self._session_start_ts = time.monotonic()
 
         logger.info(

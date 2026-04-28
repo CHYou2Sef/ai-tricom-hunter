@@ -23,7 +23,7 @@ from core.logger import get_logger
 
 logger = get_logger(__name__)
 
-def check_and_cleanup(threshold_pct: int = 80):
+def check_and_cleanup(threshold_pct: int = 95):
     """
     Checks disk usage on /tmp and performs deep cleanup if it exceeds threshold.
     Also cleans up known zombie browser directories.

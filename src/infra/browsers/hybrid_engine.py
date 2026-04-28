@@ -301,9 +301,13 @@ class HybridAutomationEngine:
                 remaining = int(self._circuit_breaker_until - time.time())
                 logger.warning(
                     f"[HybridEngine] ⚡ Circuit breaker OPEN — "
-                    f"🛑 IP likely banned. Skipping for {remaining}s."
+                    f"🛑 IP likely banned. Pausing execution for {remaining}s..."
                 )
-                return None
+                await asyncio.sleep(remaining)
+                # After sleeping, reset and try again instead of skipping
+                self._circuit_breaker_open = False
+                self._consecutive_failures = 0
+                logger.info("[HybridEngine] ⚡ Circuit breaker COOLDOWN finished — resuming.")
             else:
                 # Cooling period over — reset and try again
                 self._circuit_breaker_open = False
@@ -314,16 +318,22 @@ class HybridAutomationEngine:
         # If we have a 'last_successful_tier' that is still alive, try it FIRST.
         # This is CRITICAL for search -> extraction continuity.
         
-        # PERFORMANCE_MODE: "simple" caps at Tier 2 (SeleniumBase + Patchright)
-        if getattr(config, "PERFORMANCE_MODE", "full") == "simple":
-            max_tier = 2
+        # PERFORMANCE_MODE escalation caps
+        p_mode = getattr(config, "PERFORMANCE_MODE", "full")
+        
+        if p_mode == "simple":
+            tier_sequence = [1, 2]
+        elif p_mode == "stealth":
+            tier_sequence = [1, 3]
+        elif p_mode == "balanced":
+            tier_sequence = [1, 2, 3]
         else:
-            max_tier = 5 if config.CAMOUFOX_ENABLED else 4
+            # "full" mode or unknown
+            max_t = 5 if config.CAMOUFOX_ENABLED else 4
+            max_t = max(max_t, config.HYBRID_DEFAULT_TIER)
+            tier_sequence = list(range(config.HYBRID_DEFAULT_TIER, max_t + 1))
             
-        # Safety: max_tier should never be lower than the starting tier
-        max_tier = max(max_tier, config.HYBRID_DEFAULT_TIER)
-            
-        tier_sequence = list(range(config.HYBRID_DEFAULT_TIER, max_tier + 1))
+        max_tier = max(tier_sequence)
 
         # If legacy Selenium is enabled, prepend it as Tier 0
         if getattr(config, "SELENIUM_ENABLED", False):
@@ -408,6 +418,7 @@ class HybridAutomationEngine:
                         latency_sec=elapsed_ms / 1000.0,
                         method_name=method_name
                     )
+                    get_telemetry().save() # Persist real-time metrics
 
                     # Track last URL logic...
                     if method_name in ["goto_url", "submit_google_search", "search_google_ai_mode"]:
@@ -441,6 +452,7 @@ class HybridAutomationEngine:
                     latency_sec=elapsed_ms / 1000.0,
                     method_name=method_name
                 )
+                get_telemetry().save() # Persist real-time metrics
             except Exception as exc:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms
@@ -462,6 +474,7 @@ class HybridAutomationEngine:
                     interruption_reason=reason,
                     method_name=method_name
                 )
+                get_telemetry().save() # Persist real-time metrics
 
                 logger.error(f"[HybridEngine] Tier {tier} exception in '{method_name}': {exc}")
 
@@ -469,8 +482,8 @@ class HybridAutomationEngine:
             await self.stop_tier(tier)
             
             # Cool-down between tiers to let WAF sessions partially reset
-            logger.info(f"[HybridEngine] 🕒 Cool-down delay: 5s...")
-            await asyncio.sleep(5)
+            logger.info(f"[HybridEngine] 🕒 Cool-down delay: 8s...")
+            await asyncio.sleep(8)
 
             self._current_tier = min(tier + 1, max_tier)
 
