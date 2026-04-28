@@ -156,10 +156,15 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             # Explicitly try to avoid no-sandbox on host machines
             extra_args += " --no-sandbox=false" 
 
+        # ── Persistent Profile Handling ──
+        profile_path = config.get_worker_profile_path(self.worker_id, "seleniumbase")
+        logger.info(f"[SeleniumBase] 📂 Using persistent profile: {profile_path}")
+
         self._driver = Driver(
             uc=True,
             headless=False,
-           # ad_block=True,
+            user_data_dir=profile_path,
+            ad_block=True,
             proxy=proxy_str,
             binary_location=config.CHROMIUM_BINARY_PATH or None,
             locale_code="fr",

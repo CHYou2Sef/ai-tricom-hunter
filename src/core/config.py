@@ -273,12 +273,18 @@ BROWSER_ENGINE = "hybrid"
 #   Windows →  "C:/Users/YourName/AppData/Local/Chromium/User Data"
 #   macOS   →  "/Users/yourname/Library/Application Support/Chromium"
 # ── Chromium Profile Path ──
-# We move this to the WORK directory to keep the root clean.
-_default_profile = str(WORK_DIR / "browser_profiles" / "Default")
-if DOCKER_ENV and Path("/dev/shm").exists():
-    _default_profile = Path("/dev/shm") / "ai_hunter_profile"
-    
-CHROMIUM_PROFILE_PATH = str(Path(os.getenv("CHROMIUM_PROFILE_PATH", _default_profile)).expanduser().resolve(strict=False))
+# We use the root browser_profiles directory to persist cookies across sessions.
+CHROMIUM_PROFILE_BASE = ROOT_DIR / "browser_profiles"
+CHROMIUM_PROFILE_BASE.mkdir(parents=True, exist_ok=True)
+
+def get_worker_profile_path(worker_id: int, tier: str = "default") -> str:
+    """Returns a unique, persistent profile path for a specific worker and tier."""
+    name = f"worker_{worker_id}_{tier}"
+    path = CHROMIUM_PROFILE_BASE / name
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path.resolve())
+
+CHROMIUM_PROFILE_PATH = str(CHROMIUM_PROFILE_BASE)
 
 # The specific profile folder name inside the profile path
 # (usually "Default" unless you created multiple profiles)

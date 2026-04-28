@@ -108,12 +108,17 @@ class NodriverAgent(BaseBrowserAgent):
             else:
                 browser_args.append(f"--proxy-server={self._proxy}")
 
+        # ── Persistent Profile Handling ──
+        profile_path = config.get_worker_profile_path(self.worker_id, "nodriver")
+        logger.info(f"[Nodriver] 📂 Using persistent profile: {profile_path}")
+
         # Hardened: ensure path is a valid string or exactly None (not "")
         nd_path = config.CHROMIUM_BINARY_PATH if config.CHROMIUM_BINARY_PATH else None
 
         self._browser = await nd.start(
             browser_executable_path=nd_path,
             browser_args=browser_args,
+            user_data_dir=profile_path,
             headless=False,               # Headed mode is more stealthy
         )
         

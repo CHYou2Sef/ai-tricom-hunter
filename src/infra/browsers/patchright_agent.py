@@ -72,10 +72,7 @@ class PatchrightAgent(BaseBrowserAgent):
         self._fingerprint = None
 
         # Generate a unique profile path for this worker to avoid locking conflicts
-        self.profile_path = config.CHROMIUM_PROFILE_PATH
-        if worker_id > 0:
-            original_path = Path(config.CHROMIUM_PROFILE_PATH)
-            self.profile_path = str(original_path.parent / (original_path.name + f"_worker_{worker_id}"))
+        self.profile_path = config.get_worker_profile_path(worker_id, "patchright")
 
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
