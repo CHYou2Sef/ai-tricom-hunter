@@ -259,7 +259,7 @@ async def process_file_async(filepath: str) -> None:
         await asyncio.gather(*tasks)
     
     # Final flush and archival
-    await asyncio.to_thread(save_results, rows, filepath)
+    await asyncio.to_thread(save_results, rows, filepath, force=True)
     tracker.end_file_processing()
     await finalize_file_processing(rows, filepath, tracker, progress)
     

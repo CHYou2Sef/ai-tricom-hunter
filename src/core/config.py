@@ -117,6 +117,11 @@ ENRICH_ENABLED = os.getenv("ENRICH_ENABLED", "true").lower() == "true"
 # If True, the agent will re-enrich even if fields are already populated.
 ENRICH_FORCE_RETRY = os.getenv("ENRICH_FORCE_RETRY", "false").lower() == "true"
 
+# ── PHONE VERIFICATION (Phase 5) ──
+# Numverify API: deterministic validation for high-risk phone numbers.
+NUMVERIFY_API_KEY = os.getenv("NUMVERIFY_API_KEY", "")
+NUMVERIFY_ENABLED = os.getenv("NUMVERIFY_ENABLED", "false").lower() == "true"
+
 # Number of rows per RETRY chunk file sent back to incoming/.
 RETRY_CHUNK_SIZE = int(os.getenv("RETRY_CHUNK_SIZE", "50"))
 
@@ -246,7 +251,10 @@ CAMOUFOX_ENABLED = os.getenv("CAMOUFOX_ENABLED", "false").lower() == "true"
 #   "stealth"  → Tiers 1 + 3 ONLY (SeleniumBase + Nodriver). Skips Patchright.
 #   "balanced" → Tiers 1-3 (SeleniumBase + Patchright + Nodriver).
 #   "full"     → All 5 Tiers.
-PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "stealth").lower()
+PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "simple").lower()
+
+# Strict cap on waterfall depth (default 2 = Tier 1 & 2 only)
+MAX_WATERFALL_TIER = int(os.getenv("MAX_WATERFALL_TIER", "2"))
 
 # ── Obsolete / Fail-safe (For backward compatibility) ──
 # This is no longer used by the Hybrid Waterfall engine but kept as a 

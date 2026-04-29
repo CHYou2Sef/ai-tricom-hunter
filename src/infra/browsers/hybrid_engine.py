@@ -333,7 +333,10 @@ class HybridAutomationEngine:
             max_t = max(max_t, config.HYBRID_DEFAULT_TIER)
             tier_sequence = list(range(config.HYBRID_DEFAULT_TIER, max_t + 1))
             
-        max_tier = max(tier_sequence)
+        # Apply strict global cap from config
+        tier_sequence = [t for t in tier_sequence if t <= config.MAX_WATERFALL_TIER]
+        
+        max_tier = max(tier_sequence) if tier_sequence else config.HYBRID_DEFAULT_TIER
 
         # If legacy Selenium is enabled, prepend it as Tier 0
         if getattr(config, "SELENIUM_ENABLED", False):

@@ -25,6 +25,7 @@ from typing import List, Dict, Any
 from core import config
 from core.logger import get_logger
 from common.fs import safe_mkdir, safe_touch
+from domain.json.jsonl_handler import JSONLWriter, JSONLReader
 
 logger = get_logger(__name__)
 
@@ -143,7 +144,7 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
     if not rows: return
     
     # 1. Prepare Data
-    data = [r.to_dict() for r in rows]
+    data = [r.to_dict() if hasattr(r, 'to_dict') else r for r in rows]
     df = pd.DataFrame(data)
     
     # Reorder/Rename status header to user's config
@@ -155,8 +156,7 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
         })
     
     # 2. Drop technical internal columns (starting with __)
-    # These are kept in JSON checkpoints but removed from final Excel/CSV reports.
-    internal_cols = [c for c in df.columns if str(c).startswith("__")]
+    internal_cols = [c for c in df.columns if str(c).startswith("__") and c != "__fingerprint"]
     if internal_cols:
         df = df.drop(columns=internal_cols)
     
@@ -167,30 +167,42 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
     suffix = target_path.suffix.lower()
 
     if suffix == ".csv":
-        # Professional CSV: UTF-8-SIG (Excel friendly) + Semicolon
         df.to_csv(target_path, sep=";", index=False, encoding="utf-8-sig")
-        logger.info(f"[Writer] Subset saved as CSV (Pandas): {target_path}")
+        logger.info(f"[Writer] Subset saved as CSV: {target_path}")
     else:
-        # Professional Excel: XlsxWriter engine
         with pd.ExcelWriter(target_path, engine='xlsxwriter') as writer:
             df.to_excel(writer, sheet_name="Results", index=False)
             _apply_pro_formatting(writer, df, rows)
-        logger.info(f"[Writer] Subset saved as Pro Excel (Pandas): {target_path}")
+        logger.info(f"[Writer] Subset saved as Pro Excel: {target_path}")
     
     safe_touch(target_path)
 
-def save_results(rows: list, original_filepath: str) -> None:
+def save_jsonl_to_excel(jsonl_path: Path, excel_path: Path) -> None:
+    """Post-processing: Convert a JSONL stream to a formatted Excel file."""
+    reader = JSONLReader(str(jsonl_path))
+    rows = reader.get_all_rows()
+    if not rows:
+        logger.warning(f"[Writer] No data in {jsonl_path} to convert to Excel.")
+        return
+    save_subset_to_excel(rows, excel_path)
+
+def save_results(rows: list, original_filepath: str, force: bool = False) -> None:
     """Daily Fusion Handler + Local File Synchronizer."""
     if not rows: return
     
     orig_path = Path(original_filepath)
     
     # ── Part A: Save back to the ORIGINAL WORKING FILE ──
-    # This keeps the current batch file updated in real-time.
-    try:
-        save_subset_to_excel(rows, orig_path)
-    except Exception as e:
-        logger.error(f"[Writer] Failed to update local worker file {orig_path.name}: {e}")
+    # [Phase 2] We now skip the heavy Excel rewrite during the loop.
+    # The real persistence is handled by FileProgressTracker (JSON).
+    # We only update the local Excel if it's a small file or at the very end (force=True).
+    if force or len(rows) < 50:
+        try:
+            save_subset_to_excel(rows, orig_path)
+        except Exception as e:
+            logger.error(f"[Writer] Failed to update local worker file {orig_path.name}: {e}")
+    else:
+        logger.debug(f"[Writer] Skipping mid-loop Excel save for large file ({len(rows)} rows).")
 
     # ── Part B: Daily Fusion Handler ──
     input_folder = orig_path.parent.name

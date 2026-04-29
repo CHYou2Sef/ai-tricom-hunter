@@ -22,6 +22,7 @@ from common.text_cleaner import clean_html_to_text
 from domain.search.phone_extractor import extract_phones, get_best_phone, normalize_phone
 from common.json_parser import parse_ai_mode_json
 from infra.intelligence.ollama_client import ollama_client
+from services.phone_verifier import verify_phone_numverify, verify_phone_consensus
 
 logger = get_logger(__name__)
 
@@ -383,10 +384,25 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
         # Mark LOW_CONF so the operator can review it — never auto-DONE.
         if row.enriched_fields.get("validation_error") == "SIREN_MISMATCH":
             row.status = "LOW_CONF"
-            logger.warning(
-                f"⚠️ [Row {progress_str}] Status: LOW_CONF (SIREN mismatch) — "
-                f"phone kept for review: {row.phone}"
-            )
+            
+            # ── [Phase 1: Scale-Up] Automated Verification ──
+            # If we have a mismatch but a deterministic API validates the number,
+            # we can upgrade the status to DONE with a warning.
+            v_res = verify_phone_numverify(row.phone)
+            if v_res.get("valid"):
+                row.status = "DONE"
+                row.enriched_fields["verified"] = True
+                row.enriched_fields["verification_metadata"] = v_res
+                logger.info(f"✨ [Verification] SIREN mismatch resolved by Numverify for {row.phone}")
+            elif verify_phone_consensus(row.phone, harvested):
+                row.status = "DONE"
+                row.enriched_fields["verified"] = "consensus"
+                logger.info(f"✨ [Verification] SIREN mismatch resolved by Consensus for {row.phone}")
+            else:
+                logger.warning(
+                    f"⚠️ [Row {progress_str}] Status: LOW_CONF (SIREN mismatch) — "
+                    f"phone kept for review: {row.phone}"
+                )
         else:
             row.status = "DONE"
 
