@@ -21,6 +21,7 @@ setuptools>=69.0.0  # Required for undetected-chromedriver in Python 3.12+
 #   Driver(uc=True, headless=False) — stealth binary renaming + CDP
 #   After install: seleniumbase install chromedriver  (auto-managed)
 seleniumbase>=4.29.0
+firecrawl-py>=1.0.0
 # Tier 2: Patchright — Drop-in replacement for Playwright, patched for stealth.
 #   Passes: Cloudflare, Kasada, Akamai, Datadome, Fingerprint.com, Sannysoft.
 #   API: 100% identical to Playwright — only the import line changed.

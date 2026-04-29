@@ -369,6 +369,34 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
                 for p in candidates:
                     add_unique(p, 85, "web_scrap")
 
+    # 3.5 Firecrawl Premium Extraction (High Confidence Fallback)
+    if not any(h['score'] >= 90 for h in harvested) and config.FIRECRAWL_ENABLED:
+        # If we have discovery links from earlier, use the top one
+        fc_urls = []
+        if last_meta and last_meta.get("social_links", {}).get("website"):
+            fc_urls = last_meta["social_links"]["website"][:2]
+        
+        if fc_urls and hasattr(agent, "firecrawl_agent") and agent.firecrawl_agent:
+            logger.info(f"🔥 [Firecrawl] Premium Extracting from: {fc_urls}")
+            fc_prompt = f"Extract the official telephone number for {nom} at {adr}. Verify if it matches SIREN {siren} if possible."
+            fc_schema = {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string"},
+                    "is_official": {"type": "boolean"},
+                    "siren_match": {"type": "string"}
+                }
+            }
+            fc_res = await agent.firecrawl_agent.extract(fc_urls, fc_prompt, schema=fc_schema)
+            if fc_res and fc_res.get("data"):
+                # Extract could return multiple or single
+                data = fc_res["data"]
+                if isinstance(data, list): data = data[0]
+                
+                if data.get("phone"):
+                    add_unique(data["phone"], 96, "firecrawl_premium")
+                    logger.info(f"✨ [Firecrawl] Found phone: {data['phone']}")
+
     # 4. Final results mapping
     row.processing_end_ts = time.perf_counter()
     elapsed = round(row.processing_end_ts - row.processing_start_ts, 1)

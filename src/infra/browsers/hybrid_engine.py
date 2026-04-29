@@ -207,13 +207,23 @@ class HybridAutomationEngine:
                 if not config.CAMOUFOX_ENABLED:
                     logger.warning("[HybridEngine] Tier 5 (Camoufox) is DISABLED in config. Skipping.")
                     return False
-                async with self._tier4_global_lock:  # reuse global lock for Camoufox
+                async with self._tier4_global_lock:
                     from infra.browsers.camoufox_agent import CamoufoxAgent
                     self._tier5 = CamoufoxAgent(worker_id=self._worker_id)
                     await self._tier5.start()
                     logger.info(
                         f"[HybridEngine] ✅ Tier 5 🦊 (Camoufox) started for worker {self.worker_id} (Global Lock Acquired)."
                     )
+            
+            # ── Tier 6: FirecrawlAgent (Premium managed) ───────────────────
+            elif tier == 6 and not self._tier6:
+                if not config.FIRECRAWL_ENABLED:
+                    logger.warning("[HybridEngine] Tier 6 (Firecrawl) is DISABLED in config. Skipping.")
+                    return False
+                from infra.browsers.firecrawl_agent import FirecrawlAgent
+                self._tier6 = FirecrawlAgent()
+                await self._tier6.start()
+                logger.info(f"[HybridEngine] ✅ Tier 6 (Firecrawl) started for worker {self.worker_id}.")
 
             return True
         except ImportError as ie:
@@ -230,7 +240,7 @@ class HybridAutomationEngine:
         """Explicitly close a specific tier to free resources before escalation."""
         agent_map = {
             0: self._tier0, 1: self._tier1, 2: self._tier2,
-            3: self._tier3, 4: self._tier4, 5: self._tier5,
+            3: self._tier3, 4: self._tier4, 5: self._tier5, 6: self._tier6,
         }
         agent = agent_map.get(tier)
         if agent:
@@ -246,6 +256,7 @@ class HybridAutomationEngine:
         elif tier == 3: self._tier3 = None
         elif tier == 4: self._tier4 = None
         elif tier == 5: self._tier5 = None
+        elif tier == 6: self._tier6 = None
 
         # 🧹 PROACTIVE CLEANUP
         try:
@@ -254,7 +265,7 @@ class HybridAutomationEngine:
         except: pass
 
     async def stop_all(self) -> None:
-        for tier in [0, 1, 2, 3, 4, 5]:
+        for tier in [0, 1, 2, 3, 4, 5, 6]:
             await self.stop_tier(tier)
 
     async def close(self) -> None:
@@ -329,7 +340,10 @@ class HybridAutomationEngine:
             tier_sequence = [1, 2, 3]
         else:
             # "full" mode or unknown
-            max_t = 5 if config.CAMOUFOX_ENABLED else 4
+            max_t = 4
+            if config.CAMOUFOX_ENABLED: max_t = 5
+            if config.FIRECRAWL_ENABLED: max_t = 6
+            
             max_t = max(max_t, config.HYBRID_DEFAULT_TIER)
             tier_sequence = list(range(config.HYBRID_DEFAULT_TIER, max_t + 1))
             
@@ -364,7 +378,7 @@ class HybridAutomationEngine:
 
             agent_map = {
                 0: self._tier0, 1: self._tier1, 2: self._tier2,
-                3: self._tier3, 4: self._tier4, 5: self._tier5,
+                3: self._tier3, 4: self._tier4, 5: self._tier5, 6: self._tier6,
             }
             agent = agent_map[tier]
 
