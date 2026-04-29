@@ -83,32 +83,35 @@ def _apply_pro_formatting(writer, df, rows: List, sheet_name="Results"):
         worksheet.write(0, i, str(col_name), header_fmt)
 
     # --- 5. Conditional Row/Cell Highlighting ---
-    for row_idx, excel_row in enumerate(rows):
+    for row_idx in range(len(df)):
         row_num = row_idx + 1  # Offset by 1 for headers
         
-        # Determine if this is a "New Row" (clone)
-        is_clone = getattr(excel_row, 'is_clone', False)
+        # Get the original ExcelRow object if available for deep inspection (filled_fmt, is_clone)
+        excel_row = rows[row_idx] if row_idx < len(rows) else None
+        is_clone = getattr(excel_row, 'is_clone', False) if excel_row else False
         
         for col_idx, col_name in enumerate(df.columns):
             # Check if this specific field was enriched from an EMPTY state
             is_filled = False
-            
-            # Map column name back to enricher field keys
-            # (e.g. AI_Email -> email, AI_Siren -> siren)
-            field_key = str(col_name).replace("AI_", "").lower()
-            
-            if field_key in excel_row.enriched_fields:
-                if excel_row.enriched_fields[field_key].get("was_empty"):
-                    is_filled = True
+            if excel_row:
+                # Map column name back to enricher field keys
+                field_key = str(col_name).replace("AI_", "").lower()
+                if field_key in excel_row.enriched_fields:
+                    if excel_row.enriched_fields[field_key].get("was_empty"):
+                        is_filled = True
             
             # Special case: Status column highlights
             if col_name == config.STATUS_COLUMN_NAME:
-                val = df.iloc[row_idx, col_idx]
+                val = str(df.iloc[row_idx, col_idx]).upper()
                 if val == "DONE":
                     worksheet.write(row_num, col_idx, val, ai_col_fmt)
                     continue
                 elif val == "LOW_CONF":
                     worksheet.write(row_num, col_idx, val, clone_fmt)
+                    continue
+                elif "NO" in val and "TEL" in val:
+                    # Light formatting for NO TEL too? Optional, but keeps it clean
+                    worksheet.write(row_num, col_idx, val, ai_col_fmt)
                     continue
 
             # Apply formatting
@@ -118,6 +121,7 @@ def _apply_pro_formatting(writer, df, rows: List, sheet_name="Results"):
             elif is_clone:
                 target_fmt = clone_fmt
             elif str(col_name).startswith("AI_"):
+                # All columns added by AI (Phone, Email, Score, Latency...) get light blue
                 target_fmt = ai_col_fmt
                 
             if target_fmt:

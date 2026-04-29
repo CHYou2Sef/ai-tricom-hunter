@@ -606,6 +606,7 @@ FAKE_PHONE_BLOCKLIST: set = {
     "0500000000",
     "0900000000",
     "0107142857",   # Dummy/repeated number reported by user
+    "0333131113",   # Dummy/repeated number reported by user
 }
 
 # ═══════════════════════════════════════════════════════════════════
