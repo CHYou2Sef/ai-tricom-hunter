@@ -98,7 +98,8 @@ def _apply_pro_formatting(writer, df, rows: List, sheet_name="Results"):
                 # Map column name back to enricher field keys
                 field_key = str(col_name).replace("AI_", "").lower()
                 if field_key in excel_row.enriched_fields:
-                    if excel_row.enriched_fields[field_key].get("was_empty"):
+                    data = excel_row.enriched_fields[field_key]
+                    if isinstance(data, dict) and data.get("was_empty"):
                         is_filled = True
             
             # Special case: Status column highlights

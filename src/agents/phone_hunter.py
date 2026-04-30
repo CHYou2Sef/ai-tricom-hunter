@@ -19,7 +19,7 @@ from core import config
 from domain.excel.reader import ExcelRow
 from core.logger import get_logger
 from common.text_cleaner import clean_html_to_text
-from domain.search.phone_extractor import extract_phones, get_best_phone, normalize_phone
+from domain.search.phone_extractor import extract_phones, get_best_phone, normalize_phone, get_phone_metadata
 from common.json_parser import parse_ai_mode_json
 from infra.intelligence.ollama_client import ollama_client
 from services.phone_verifier import verify_phone_numverify, verify_phone_consensus
@@ -246,27 +246,46 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
 
 def _calculate_row_confidence(row: ExcelRow) -> int:
     """
-    Compute a composite confidence score (0-100) for the row.
-    Factors: extraction source quality, SIREN validation penalty.
-
-    Args:
-        row : ExcelRow containing harvested phones and validation state
-
-    Returns:
-        Integer confidence percentage.
+    Compute a composite confidence score (0-100) for the row based on the Num_tel_report model.
+    Factors: SIRET match, phonenumbers validity, blacklist absence, source quality, line type, and occurrences.
     """
     if not row.phone: return 0
     
-    phone_list = row.enriched_fields.get("phone_list", [])
-    if not phone_list: return 50   # Default mid-confidence when no metadata
+    score = 0
     
-    best_score = max(h.get('score', 0) for h in phone_list)
-    
-    # Penalise hallucination risk when SIREN extracted ≠ SIREN input
-    if row.enriched_fields.get("validation_error") == "SIREN_MISMATCH":
-        best_score -= 30
+    # 1. SIRET Match (25 pts)
+    if row.enriched_fields.get("validation_error") != "SIREN_MISMATCH":
+        score += 25
         
-    return max(0, best_score)
+    # 2. phonenumbers validity (20 pts)
+    # 3. Not in Blacklist (20 pts)
+    # If the number is in row.phone, it passed normalize_phone which strictly enforces both.
+    score += 40
+    
+    # 4. Official Source URL / High trust source (15 pts)
+    phone_list = row.enriched_fields.get("phone_list", [])
+    sources = [h.get("source", "") for h in phone_list if h.get("num") == row.phone]
+    
+    official_sources = ["google_kp", "ai_expert", "ai_std", "discovery_web", "firecrawl_premium"]
+    if any(s in official_sources for s in sources):
+        score += 15
+    elif sources:
+        score += 5 # Baseline for web scrape fallback
+        
+    # 5. Line Type (10 pts)
+    meta = get_phone_metadata(row.phone)
+    if meta.get("type") in ("FIXED_LINE", "FIXED_LINE_OR_MOBILE", "TOLL_FREE"):
+        score += 10
+    elif meta.get("type") == "MOBILE":
+        score += 5
+        
+    # 6. Occurrences (10 pts)
+    if len(sources) > 1:
+        score += 10
+    elif sources:
+        score += 5
+        
+    return min(100, max(0, score))
 
 async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Optional[int] = None) -> List[dict]:
     """

@@ -32,6 +32,14 @@ class FirecrawlAgent:
             except Exception as e:
                 logger.error(f"[Firecrawl] Failed to initialize: {e}")
                 self.enabled = False
+        
+    async def start(self):
+        """No-op for Firecrawl SDK as it's stateless."""
+        return True
+
+    async def get_page_source(self) -> str:
+        """Firecrawl doesn't have a persistent browser session to grab source from."""
+        return "[Firecrawl] Source not available in stateless mode."
 
     async def scrape(self, url: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """Scrape a single URL to Markdown/HTML."""

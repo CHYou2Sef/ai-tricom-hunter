@@ -79,11 +79,16 @@ def classify_url(url: str) -> int:
 
 TIER_NAMES = {
     0: "selenium_legacy",
-    1: "seleniumbase",
-    2: "patchright",
-    3: "nodriver",
-    4: "crawl4ai",
-    5: "camoufox",
+    1: "scrapy_agent",
+    2: "seleniumbase",
+    3: "botasaurus",
+    4: "patchright",
+    5: "nodriver",
+    6: "crawl4ai",
+    7: "camoufox",
+    8: "firecrawl",
+    9: "jina",
+    10: "crawlee",
 }
 
 
@@ -107,11 +112,16 @@ class HybridAutomationEngine:
     def __init__(self, worker_id: int = 0):
         self._worker_id = worker_id
         self._tier0: Optional[object] = None   # SeleniumAgent      (Legacy/Benchmark)
-        self._tier1: Optional[object] = None   # SeleniumBaseAgent  (UC Driver — Tier 1)
-        self._tier2: Optional[object] = None   # PatchrightAgent    (Chrome stealth)
-        self._tier3: Optional[object] = None   # NodriverAgent      (Chrome CDP)
-        self._tier4: Optional[object] = None   # Crawl4AIAgent      (Chrome managed)
-        self._tier5: Optional[object] = None   # CamoufoxAgent      (Firefox anti-detect)
+        self._tier1: Optional[object] = None   # ScrapyAgent        (AI Selector Fast-Path)
+        self._tier2: Optional[object] = None   # SeleniumBaseAgent  (UC Driver)
+        self._tier3: Optional[object] = None   # BotasaurusAgent    (Anti-detect)
+        self._tier4: Optional[object] = None   # PatchrightAgent    (Chrome stealth)
+        self._tier5: Optional[object] = None   # NodriverAgent      (Chrome CDP)
+        self._tier6: Optional[object] = None   # Crawl4AIAgent      (Chrome managed)
+        self._tier7: Optional[object] = None   # CamoufoxAgent      (Firefox anti-detect)
+        self._tier8: Optional[object] = None   # FirecrawlAgent     (Premium managed)
+        self._tier9: Optional[object] = None   # JinaAgent          (High-speed Markdown)
+        self._tier10: Optional[object] = None  # CrawleeAgent       (Industrial crawler)
         self._current_tier = 1
 
         # ── Circuit Breaker state ─────────────────────────────────────────────
@@ -126,17 +136,37 @@ class HybridAutomationEngine:
         self.last_successful_tier_used: Optional[int] = None # For per-row export
 
         self._stats: Dict[int, Dict[str, Any]] = {
-            0: {"attempts": 0, "successes": 0, "total_ms": 0},  # SeleniumAgent (legacy)
-            1: {"attempts": 0, "successes": 0, "total_ms": 0},  # SeleniumBase UC
-            2: {"attempts": 0, "successes": 0, "total_ms": 0},  # Patchright
-            3: {"attempts": 0, "successes": 0, "total_ms": 0},  # Nodriver
-            4: {"attempts": 0, "successes": 0, "total_ms": 0},  # Crawl4AI
-            5: {"attempts": 0, "successes": 0, "total_ms": 0},  # Camoufox
+            0: {"attempts": 0, "successes": 0, "total_ms": 0},
+            1: {"attempts": 0, "successes": 0, "total_ms": 0},  # Scrapy
+            2: {"attempts": 0, "successes": 0, "total_ms": 0},  # SeleniumBase
+            3: {"attempts": 0, "successes": 0, "total_ms": 0},  # Botasaurus
+            4: {"attempts": 0, "successes": 0, "total_ms": 0},  # Patchright
+            5: {"attempts": 0, "successes": 0, "total_ms": 0},  # Nodriver
+            6: {"attempts": 0, "successes": 0, "total_ms": 0},  # Crawl4AI
+            7: {"attempts": 0, "successes": 0, "total_ms": 0},  # Camoufox
+            8: {"attempts": 0, "successes": 0, "total_ms": 0},  # Firecrawl
+            9: {"attempts": 0, "successes": 0, "total_ms": 0},  # Jina
+            10: {"attempts": 0, "successes": 0, "total_ms": 0}, # Crawlee
         }
 
     @property
     def worker_id(self):
         return self._worker_id
+
+    @property
+    def firecrawl_agent(self):
+        """Expose Tier 8 for direct access by specialized agents (e.g. phone_hunter)."""
+        return self._tier8
+
+    @property
+    def jina_agent(self):
+        """Expose Tier 9 for direct access (Jina Reader)."""
+        return self._tier9
+
+    @property
+    def crawlee_agent(self):
+        """Expose Tier 10 for direct access (Crawlee)."""
+        return self._tier10
 
     # ── Context manager support ────────────────────────────────────────────
 
@@ -153,7 +183,8 @@ class HybridAutomationEngine:
             # 1. Check if existing agent is alive
             agent_map = {
                 0: self._tier0, 1: self._tier1, 2: self._tier2,
-                3: self._tier3, 4: self._tier4, 5: self._tier5,
+                3: self._tier3, 4: self._tier4, 5: self._tier5, 
+                6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
             }
             agent = agent_map.get(tier)
             if agent:
@@ -171,59 +202,124 @@ class HybridAutomationEngine:
                 await self._tier0.start()
                 logger.info(f"[HybridEngine] ✅ Tier 0 (SeleniumUCD/Legacy) started for worker {self.worker_id}.")
 
-            # ── Tier 1: SeleniumBase UC Driver (PRIMARY) ───────────────────
+            # ── Tier 1: ScrapyAgent (AI Selector Fast-Path) ───────────────────
             elif tier == 1 and not self._tier1:
+                class MockScrapyAgent:
+                    def __init__(self):
+                        self.last_url = None
+                        self.last_data = {}
+                    async def start(self): pass
+                    async def stop(self): pass
+                    async def close(self): pass
+                    async def goto_url(self, url: str) -> bool:
+                        self.last_url = url
+                        return True
+                    async def get_page_source(self) -> str:
+                        from infra.scrapers.agent_scraper import run_ai_spider
+                        if self.last_url:
+                            self.last_data = await run_ai_spider(self.last_url)
+                            return str(self.last_data)
+                        return ""
+                    async def extract_universal_data(self) -> dict:
+                        if not self.last_data and self.last_url:
+                            from infra.scrapers.agent_scraper import run_ai_spider
+                            self.last_data = await run_ai_spider(self.last_url)
+                        
+                        phones = []
+                        if self.last_data and self.last_data.get("phone"):
+                            phones.append(self.last_data["phone"])
+                        
+                        return {
+                            "heuristic_phones": phones,
+                            "raw_scrapy_data": self.last_data
+                        }
+                
+                self._tier1 = MockScrapyAgent()
+                logger.info(f"[HybridEngine] ✅ Tier 1 🕷️ (Scrapy) started for worker {self.worker_id}.")
+
+            # ── Tier 2: SeleniumBase UC Driver (PRIMARY) ───────────────────
+            elif tier == 2 and not self._tier2:
                 if not getattr(config, "SELENIUMBASE_ENABLED", True):
-                    logger.warning("[HybridEngine] Tier 1 (SeleniumBase) is DISABLED in config. Skipping.")
+                    logger.warning("[HybridEngine] Tier 2 (SeleniumBase) is DISABLED in config. Skipping.")
                     return False
                 from infra.browsers.seleniumbase_agent import SeleniumBaseAgent
-                self._tier1 = SeleniumBaseAgent(worker_id=self._worker_id)
-                await self._tier1.start()
-                logger.info(f"[HybridEngine] ✅ Tier 1 ⭐ (SeleniumBase UC) started for worker {self.worker_id}.")
-
-            # ── Tier 2: PatchrightAgent (Chrome stealth) ───────────────────
-            elif tier == 2 and not self._tier2:
-                from infra.browsers.patchright_agent import PatchrightAgent
-                self._tier2 = PatchrightAgent(worker_id=self._worker_id)
+                self._tier2 = SeleniumBaseAgent(worker_id=self._worker_id)
                 await self._tier2.start()
-                logger.info(f"[HybridEngine] ✅ Tier 2 (Patchright/Chrome) started for worker {self.worker_id}.")
+                logger.info(f"[HybridEngine] ✅ Tier 2 ⭐ (SeleniumBase UC) started for worker {self.worker_id}.")
 
-            # ── Tier 3: NodriverAgent (Chrome CDP) ────────────────────────
+            # ── Tier 3: BotasaurusAgent (Anti-detect) ─────────────────────────
             elif tier == 3 and not self._tier3:
-                from infra.browsers.nodriver_agent import NodriverAgent
-                self._tier3 = NodriverAgent(worker_id=self._worker_id)
+                if not getattr(config, "BOTASAURUS_ENABLED", True):
+                    logger.warning("[HybridEngine] Tier 3 (Botasaurus) is DISABLED in config. Skipping.")
+                    return False
+                from infra.browsers.botasaurus_agent import BotasaurusAgent
+                self._tier3 = BotasaurusAgent(worker_id=self._worker_id)
                 await self._tier3.start()
-                logger.info(f"[HybridEngine] ✅ Tier 3 (Nodriver/Chrome CDP) started for worker {self.worker_id}.")
+                logger.info(f"[HybridEngine] ✅ Tier 3 🦖 (Botasaurus) started for worker {self.worker_id}.")
 
-            # ── Tier 4: Crawl4AIAgent (Chrome managed) ────────────────────
+            # ── Tier 4: PatchrightAgent (Chrome stealth) ───────────────────
             elif tier == 4 and not self._tier4:
-                from infra.browsers.crawl4ai_agent import Crawl4AIAgent
-                self._tier4 = Crawl4AIAgent()
+                from infra.browsers.patchright_agent import PatchrightAgent
+                self._tier4 = PatchrightAgent(worker_id=self._worker_id)
                 await self._tier4.start()
-                logger.info(f"[HybridEngine] ✅ Tier 4 (Crawl4AI/Chrome) started for worker {self.worker_id}.")
+                logger.info(f"[HybridEngine] ✅ Tier 4 (Patchright/Chrome) started for worker {self.worker_id}.")
 
-            # ── Tier 5: CamoufoxAgent (Firefox anti-detect — last resort) ─
+            # ── Tier 5: NodriverAgent (Chrome CDP) ────────────────────────
             elif tier == 5 and not self._tier5:
+                from infra.browsers.nodriver_agent import NodriverAgent
+                self._tier5 = NodriverAgent(worker_id=self._worker_id)
+                await self._tier5.start()
+                logger.info(f"[HybridEngine] ✅ Tier 5 (Nodriver/Chrome CDP) started for worker {self.worker_id}.")
+
+            # ── Tier 6: Crawl4AIAgent (Chrome managed) ────────────────────
+            elif tier == 6 and not self._tier6:
+                from infra.browsers.crawl4ai_agent import Crawl4AIAgent
+                self._tier6 = Crawl4AIAgent()
+                await self._tier6.start()
+                logger.info(f"[HybridEngine] ✅ Tier 6 (Crawl4AI/Chrome) started for worker {self.worker_id}.")
+
+            # ── Tier 7: CamoufoxAgent (Firefox anti-detect — last resort) ─
+            elif tier == 7 and not self._tier7:
                 if not config.CAMOUFOX_ENABLED:
-                    logger.warning("[HybridEngine] Tier 5 (Camoufox) is DISABLED in config. Skipping.")
+                    logger.warning("[HybridEngine] Tier 7 (Camoufox) is DISABLED in config. Skipping.")
                     return False
                 async with self._tier4_global_lock:
                     from infra.browsers.camoufox_agent import CamoufoxAgent
-                    self._tier5 = CamoufoxAgent(worker_id=self._worker_id)
-                    await self._tier5.start()
+                    self._tier7 = CamoufoxAgent(worker_id=self._worker_id)
+                    await self._tier7.start()
                     logger.info(
-                        f"[HybridEngine] ✅ Tier 5 🦊 (Camoufox) started for worker {self.worker_id} (Global Lock Acquired)."
+                        f"[HybridEngine] ✅ Tier 7 🦊 (Camoufox) started for worker {self.worker_id} (Global Lock Acquired)."
                     )
             
-            # ── Tier 6: FirecrawlAgent (Premium managed) ───────────────────
-            elif tier == 6 and not self._tier6:
+            # ── Tier 8: FirecrawlAgent (Premium managed) ───────────────────
+            elif tier == 8 and not self._tier8:
                 if not config.FIRECRAWL_ENABLED:
-                    logger.warning("[HybridEngine] Tier 6 (Firecrawl) is DISABLED in config. Skipping.")
+                    logger.warning("[HybridEngine] Tier 8 (Firecrawl) is DISABLED in config. Skipping.")
                     return False
                 from infra.browsers.firecrawl_agent import FirecrawlAgent
-                self._tier6 = FirecrawlAgent()
-                await self._tier6.start()
-                logger.info(f"[HybridEngine] ✅ Tier 6 (Firecrawl) started for worker {self.worker_id}.")
+                self._tier8 = FirecrawlAgent()
+                await self._tier8.start()
+                logger.info(f"[HybridEngine] ✅ Tier 8 (Firecrawl) started for worker {self.worker_id}.")
+
+            # ── Tier 9: JinaAgent (High-speed Markdown Reader) ────────────
+            elif tier == 9 and not self._tier9:
+                if not config.JINA_ENABLED:
+                    logger.warning("[HybridEngine] Tier 9 (Jina) is DISABLED in config. Skipping.")
+                    return False
+                from infra.browsers.jina_agent import JinaAgent
+                self._tier9 = JinaAgent(worker_id=self._worker_id)
+                await self._tier9.start()
+                logger.info(f"[HybridEngine] ✅ Tier 9 (Jina Reader) started for worker {self.worker_id}.")
+
+            # ── Tier 10: CrawleeAgent (Industrial Crawler) ─────────────────
+            elif tier == 10 and not self._tier10:
+                if not config.CRAWLEE_ENABLED:
+                    logger.warning("[HybridEngine] Tier 9 (Crawlee) is DISABLED in config. Skipping.")
+                    return False
+                from infra.browsers.crawlee_agent import CrawleeAgent
+                self._tier9 = CrawleeAgent(worker_id=self._worker_id)
+                await self._tier9.start()
+                logger.info(f"[HybridEngine] ✅ Tier 9 (Crawlee) started for worker {self.worker_id}.")
 
             return True
         except ImportError as ie:
@@ -240,7 +336,8 @@ class HybridAutomationEngine:
         """Explicitly close a specific tier to free resources before escalation."""
         agent_map = {
             0: self._tier0, 1: self._tier1, 2: self._tier2,
-            3: self._tier3, 4: self._tier4, 5: self._tier5, 6: self._tier6,
+            3: self._tier3, 4: self._tier4, 5: self._tier5, 
+            6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
         }
         agent = agent_map.get(tier)
         if agent:
@@ -257,6 +354,10 @@ class HybridAutomationEngine:
         elif tier == 4: self._tier4 = None
         elif tier == 5: self._tier5 = None
         elif tier == 6: self._tier6 = None
+        elif tier == 7: self._tier7 = None
+        elif tier == 8: self._tier8 = None
+        elif tier == 9: self._tier9 = None
+        elif tier == 10: self._tier10 = None
 
         # 🧹 PROACTIVE CLEANUP
         try:
@@ -265,7 +366,7 @@ class HybridAutomationEngine:
         except: pass
 
     async def stop_all(self) -> None:
-        for tier in [0, 1, 2, 3, 4, 5, 6]:
+        for tier in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
             await self.stop_tier(tier)
 
     async def close(self) -> None:
@@ -273,7 +374,11 @@ class HybridAutomationEngine:
 
     async def rotate_proxy(self):
         """Forward proxy rotation to the currently active agent."""
-        agent_map = {0: self._tier0, 1: self._tier1, 2: self._tier2, 3: self._tier3}
+        agent_map = {
+            0: self._tier0, 1: self._tier1, 2: self._tier2, 
+            3: self._tier3, 4: self._tier4, 5: self._tier5,
+            6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
+        }
         agent = agent_map.get(self._current_tier)
         if agent and hasattr(agent, "rotate_proxy"):
             await agent.rotate_proxy()
@@ -289,6 +394,7 @@ class HybridAutomationEngine:
 
         Args:
             method_name : Browser method to call (e.g. "search_google_ai_mode")
+            use_browser : bool, optional. If True, bypass Tier 1 (Scrapy) and go straight to headless.
             *args, **kwargs : Passed verbatim to that method
 
         Returns:
@@ -333,16 +439,18 @@ class HybridAutomationEngine:
         p_mode = getattr(config, "PERFORMANCE_MODE", "full")
         
         if p_mode == "simple":
-            tier_sequence = [1, 2]
+            tier_sequence = [1, 2, 3] # Scrapy + SelBase + Bota
         elif p_mode == "stealth":
-            tier_sequence = [1, 3]
+            tier_sequence = [1, 2, 3] # Scrapy + SelBase + Botasaurus
         elif p_mode == "balanced":
-            tier_sequence = [1, 2, 3]
+            tier_sequence = [1, 2, 3, 4] # Scrapy + SelBase + Bota + Patchright
         else:
             # "full" mode or unknown
-            max_t = 4
-            if config.CAMOUFOX_ENABLED: max_t = 5
-            if config.FIRECRAWL_ENABLED: max_t = 6
+            max_t = 6
+            if config.CAMOUFOX_ENABLED: max_t = 7
+            if config.FIRECRAWL_ENABLED: max_t = 8
+            if config.JINA_ENABLED:      max_t = 9
+            if config.CRAWLEE_ENABLED:   max_t = 10
             
             max_t = max(max_t, config.HYBRID_DEFAULT_TIER)
             tier_sequence = list(range(config.HYBRID_DEFAULT_TIER, max_t + 1))
@@ -355,6 +463,11 @@ class HybridAutomationEngine:
         # If legacy Selenium is enabled, prepend it as Tier 0
         if getattr(config, "SELENIUM_ENABLED", False):
             tier_sequence.insert(0, 0)
+            
+        use_browser = kwargs.pop("use_browser", False)
+        if use_browser and 1 in tier_sequence:
+            logger.info("[HybridEngine] LLM override: use_browser=True. Skipping Scrapy (Tier 1).")
+            tier_sequence.remove(1)
 
         if self.last_successful_tier_used and self.last_successful_tier_used in tier_sequence:
             # Move it to the front of the list
@@ -378,7 +491,8 @@ class HybridAutomationEngine:
 
             agent_map = {
                 0: self._tier0, 1: self._tier1, 2: self._tier2,
-                3: self._tier3, 4: self._tier4, 5: self._tier5, 6: self._tier6,
+                3: self._tier3, 4: self._tier4, 5: self._tier5, 
+                6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
             }
             agent = agent_map[tier]
 
@@ -546,8 +660,8 @@ class HybridAutomationEngine:
     async def submit_google_search(self, query: str) -> bool:
         return await self._execute_with_waterfall("submit_google_search", query)
         
-    async def extract_universal_data(self) -> dict:
-        return await self._execute_with_waterfall("extract_universal_data")
+    async def extract_universal_data(self, use_browser: bool = False) -> dict:
+        return await self._execute_with_waterfall("extract_universal_data", use_browser=use_browser)
 
     async def search_google_ai(self, query: str) -> Optional[str]:
         return await self._execute_with_waterfall("search_google_ai", query)
@@ -578,14 +692,19 @@ class HybridAutomationEngine:
         # Friendly names for the console report
         FRIENDLY_NAMES = {
             0: "SeleniumUCD 🟧",
-            1: "SBase-UC   ⭐",
-            2: "Patchright 🟦",
-            3: "Nodriver   🟢",
-            4: "Crawl4AI   🟡",
-            5: "Camoufox 🦊 ",
+            1: "Scrapy 🕷️   ",
+            2: "SBase-UC   ⭐",
+            3: "Botasaurus 🦖",
+            4: "Patchright 🟦",
+            5: "Nodriver   🟢",
+            6: "Crawl4AI   🟡",
+            7: "Camoufox 🦊 ",
+            8: "Firecrawl 🔥 ",
+            9: "Jina Reader⚡ ",
+            10: "Crawlee 🛠️  ",
         }
         print("\n" + "═" * 68)
-        print("📊  Hybrid Engine Performance Report (6-Tier, SeleniumBase=Tier 1)")
+        print("📊  Hybrid Engine Performance Report (10-Tier, Scrapy=Tier 1)")
         print("═" * 68)
         for tier, data in self.get_engine_stats().items():
             name = FRIENDLY_NAMES.get(tier, f"Tier {tier}")

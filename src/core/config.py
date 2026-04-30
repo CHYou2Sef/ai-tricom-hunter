@@ -124,8 +124,16 @@ NUMVERIFY_ENABLED = os.getenv("NUMVERIFY_ENABLED", "false").lower() == "true"
 
 # ── FIRECRAWL INTEGRATION (Premium Tier 6) ──
 # Firecrawl: managed scraping/crawling with AI-powered extraction.
+USE_FIRECRAWL_FALLBACK = os.getenv("USE_FIRECRAWL_FALLBACK", "true").lower() == "true"
+FIRECRAWL_ENABLED = os.getenv("FIRECRAWL_ENABLED", "true").lower() == "true"
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
-FIRECRAWL_ENABLED = os.getenv("FIRECRAWL_ENABLED", "false").lower() == "true"
+
+# Jina Reader (Tier 7 - Benchmark)
+JINA_ENABLED = os.getenv("JINA_ENABLED", "true").lower() == "true"
+JINA_API_KEY = os.getenv("JINA_API_KEY", "") # Optional for public API
+
+# Crawlee (Tier 8 - Benchmark)
+CRAWLEE_ENABLED = os.getenv("CRAWLEE_ENABLED", "true").lower() == "true"
 FIRECRAWL_BASE_URL = os.getenv("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev")
 
 # Number of rows per RETRY chunk file sent back to incoming/.
@@ -251,19 +259,24 @@ SELENIUMBASE_RECONNECT_TIME = float(os.getenv("SELENIUMBASE_RECONNECT_TIME", "4"
 # Tier 5 (Camoufox) is heavy. Disable it to save resources if not needed.
 CAMOUFOX_ENABLED = os.getenv("CAMOUFOX_ENABLED", "false").lower() == "true"
 
+# ── Tier 2: Botasaurus (Undefeatable Anti-Detect) ────────────────────────
+BOTASAURUS_ENABLED = os.getenv("BOTASAURUS_ENABLED", "true").lower() == "true"
+BOTASAURUS_CACHE = os.getenv("BOTASAURUS_CACHE", "true").lower() == "true"
+BOTASAURUS_CACHE_MAX_AGE_HOURS = int(os.getenv("BOTASAURUS_CACHE_MAX_AGE_HOURS", "24"))
+
 # ── Performance & Tier Complexity ──
 # PERFORMANCE_MODE:
 #   "simple"   → Tiers 1-2 (SeleniumBase + Patchright).
 #   "stealth"  → Tiers 1 + 3 ONLY (SeleniumBase + Nodriver). Skips Patchright.
 #   "balanced" → Tiers 1-3 (SeleniumBase + Patchright + Nodriver).
-#   "full"     → All 6 Tiers (includes Firecrawl if enabled).
-PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "simple").lower()
+#   "full"     → All 5 Tiers (includes Firecrawl if enabled).
+PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "stealth").lower()
 
-# Strict cap on waterfall depth (default 2 = Tier 1 & 2 only)
-MAX_WATERFALL_TIER = int(os.getenv("MAX_WATERFALL_TIER", "2"))
+# Strict cap on waterfall depth (3 allows Tier 3 - Nodriver)
+MAX_WATERFALL_TIER = int(os.getenv("MAX_WATERFALL_TIER", "3"))
 
-# If True, Firecrawl will be used as the ultimate fallback (Tier 6)
-USE_FIRECRAWL_FALLBACK = os.getenv("USE_FIRECRAWL_FALLBACK", "true").lower() == "true"
+# If True, Firecrawl will be used as the ultimate fallback (Tier 5)
+USE_FIRECRAWL_FALLBACK = os.getenv("USE_FIRECRAWL_FALLBACK", "false").lower() == "true"
 
 # ── Obsolete / Fail-safe (For backward compatibility) ──
 # This is no longer used by the Hybrid Waterfall engine but kept as a 
@@ -623,6 +636,7 @@ FAKE_PHONE_BLOCKLIST: set = {
     "0500000000",
     "0900000000",
     "0107142857",   # Dummy/repeated number reported by user
+    "0917189833",   # Recurring technical/directory number reported by user
     "0333131113",   # Dummy/repeated number reported by user
 }
 
@@ -638,6 +652,8 @@ NULL_VALUE_STRINGS: set = {
     "non communiqué", "pas de téléphone",
     "aucun", "aucune", "aucun numéro",
     "data_not_found", "missing", "not identified", "non trouvé", "non-disponible",
+    "information non disponible publiquement", "non identifié", "non diffusé",
+    "numéro non communiqué", "information non disponible",
     "", ".", "-", "_",
 }
 

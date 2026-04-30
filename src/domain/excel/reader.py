@@ -37,13 +37,14 @@ class ExcelRow:
         self.raw       = raw
         self.row_index = row_index
 
+        _null_values = {s.upper() for s in config.NULL_VALUE_STRINGS}
         def get(concept: str) -> Optional[str]:
             col = mapping.get(concept)
             if col and col in raw:
                 val = raw[col]
                 if pd.isna(val) or val is None: return None
                 s = str(val).strip()
-                return s if s and s.lower() not in ("none", "nan", "") else None
+                return s if s and s.upper() not in _null_values else None
             return None
 
         self.nom     = get("raison_sociale") or get("enseigne") or get("nom_commercial")

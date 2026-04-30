@@ -21,7 +21,10 @@
 """
 
 import re
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+import phonenumbers
+from phonenumbers import PhoneNumberFormat
+from phonenumbers.phonenumberutil import number_type, PhoneNumberType
 
 from core import config
 from core.logger import get_logger
@@ -179,18 +182,8 @@ def _dedupe_and_log(phones: List[str], source_label: Optional[str] = None) -> Li
 
 def is_valid_french_phone(digits: str) -> bool:
     """
-    Structural anti-hallucination validator for 10-digit French numbers.
-
-    Rejects:
-      - Known blocklisted demo/test numbers (from config.FAKE_PHONE_BLOCKLIST)
-      - All-same-digit numbers (e.g. '0333333333')
-      - Strictly sequential ascending numbers (e.g. '0123456789')
-
-    Args:
-        digits: Cleaned 10-digit string starting with '0' (no spaces/dots)
-
-    Returns:
-        False if the number looks fake/hallucinated.
+    Structural anti-hallucination validator. Uses blocklist and structural checks
+    before passing to the deep phonenumbers validation.
     """
     # 1. Hard blocklist (exact matches)
     if digits in config.FAKE_PHONE_BLOCKLIST:
@@ -209,40 +202,69 @@ def is_valid_french_phone(digits: str) -> bool:
 
     return True
 
+def get_phone_metadata(phone_str: str) -> Dict[str, Any]:
+    """Returns metadata for a valid phone number, including line type."""
+    meta = {"type": "UNKNOWN"}
+    if not phone_str:
+        return meta
+    try:
+        num = phonenumbers.parse(phone_str, "FR")
+        ptype = number_type(num)
+        if ptype == PhoneNumberType.MOBILE:
+            meta["type"] = "MOBILE"
+        elif ptype == PhoneNumberType.FIXED_LINE:
+            meta["type"] = "FIXED_LINE"
+        elif ptype == PhoneNumberType.FIXED_LINE_OR_MOBILE:
+            meta["type"] = "FIXED_LINE_OR_MOBILE"
+        elif ptype == PhoneNumberType.TOLL_FREE:
+            meta["type"] = "TOLL_FREE"
+        elif ptype == PhoneNumberType.PREMIUM_RATE:
+            meta["type"] = "PREMIUM_RATE"
+        elif ptype == PhoneNumberType.VOIP:
+            meta["type"] = "VOIP"
+    except Exception:
+        pass
+    return meta
 
 def normalize_phone(phone: Optional[str]) -> Optional[str]:
     """
-    Normalise a raw phone string:
-      - Remove spaces, dots, dashes
-      - Validate length (9–15 digits)
+    Normalise a raw phone string using `phonenumbers`:
       - Reject fake/hallucinated numbers via blocklist + structural checks
+      - Validate structurally and syntactically using libphonenumber
       - Format French numbers as 'XX XX XX XX XX'
     """
     if not phone:
         return None
 
     digits_only = re.sub(r'[\s\.\-\(\)]', '', str(phone)).strip()
-
-    if not re.match(r'^\+?\d{9,15}$', digits_only):
+    
+    # Quick sanity checks to avoid parsing junk
+    if len(digits_only) < 9 or len(digits_only) > 15:
         return None
+        
+    # Convert +33XXXXXXXXX to 0XXXXXXXXX for our blocklist checks
+    fr_digits = digits_only
+    if fr_digits.startswith('+33') and len(fr_digits) == 12:
+        fr_digits = '0' + fr_digits[3:]
 
-    # Convert +33XXXXXXXXX → 0XXXXXXXXX
-    if digits_only.startswith('+33') and len(digits_only) == 12:
-        digits_only = '0' + digits_only[3:]
-
-    if digits_only.startswith('0') and len(digits_only) == 10:
-        # Anti-hallucination structural validation
-        if not is_valid_french_phone(digits_only):
+    # Apply hallucination rules (Blocklist + sequential checks)
+    if fr_digits.startswith('0') and len(fr_digits) == 10:
+        if not is_valid_french_phone(fr_digits):
             return None
-        return format_french(digits_only)
 
-    # Return raw for non-French formats (e.g. +44…)
-    return digits_only
-
-
-def format_french(digits: str) -> str:
-    """Format a 10-digit French number as 'XX XX XX XX XX'."""
-    if len(digits) != 10:
-        return digits
-    groups = [digits[i:i+2] for i in range(0, 10, 2)]
-    return ' '.join(groups)
+    try:
+        # Use phonenumbers to parse (defaults to France if no + code)
+        num = phonenumbers.parse(phone, "FR")
+        
+        if not phonenumbers.is_valid_number(num):
+            logger.debug(f"[PhoneExtractor] Blocked (phonenumbers invalid): {phone}")
+            return None
+            
+        # Format uniformly (NATIONAL for FR numbers -> 0X XX XX XX XX)
+        if num.country_code == 33:
+            return phonenumbers.format_number(num, PhoneNumberFormat.NATIONAL)
+        else:
+            return phonenumbers.format_number(num, PhoneNumberFormat.INTERNATIONAL)
+            
+    except phonenumbers.NumberParseException:
+        return None
