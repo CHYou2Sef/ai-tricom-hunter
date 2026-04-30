@@ -79,7 +79,9 @@ def classify_url(url: str) -> int:
 
 TIER_NAMES = {
     0: "selenium_legacy",
-    1: "scrapy_agent",
+    # NOTE: Scrapy is NOT a waterfall tier — it's a post-discovery bonus step.
+    # It activates inside search_google_ai_mode() when a website URL is found
+    # but no phone number was returned by the browser tier.
     2: "seleniumbase",
     3: "botasaurus",
     4: "patchright",
@@ -112,8 +114,8 @@ class HybridAutomationEngine:
     def __init__(self, worker_id: int = 0):
         self._worker_id = worker_id
         self._tier0: Optional[object] = None   # SeleniumAgent      (Legacy/Benchmark)
-        self._tier1: Optional[object] = None   # ScrapyAgent        (AI Selector Fast-Path)
-        self._tier2: Optional[object] = None   # SeleniumBaseAgent  (UC Driver)
+        # Tier 1 slot removed — Scrapy is now a post-discovery bonus, not a waterfall tier.
+        self._tier2: Optional[object] = None   # SeleniumBaseAgent  (UC Driver) ⭐ PRIMARY
         self._tier3: Optional[object] = None   # BotasaurusAgent    (Anti-detect)
         self._tier4: Optional[object] = None   # PatchrightAgent    (Chrome stealth)
         self._tier5: Optional[object] = None   # NodriverAgent      (Chrome CDP)
@@ -122,7 +124,7 @@ class HybridAutomationEngine:
         self._tier8: Optional[object] = None   # FirecrawlAgent     (Premium managed)
         self._tier9: Optional[object] = None   # JinaAgent          (High-speed Markdown)
         self._tier10: Optional[object] = None  # CrawleeAgent       (Industrial crawler)
-        self._current_tier = 1
+        self._current_tier = 2
 
         # ── Circuit Breaker state ─────────────────────────────────────────────
         # Prevents infinite retry storms when ALL tiers fail due to IP banning.
@@ -136,9 +138,10 @@ class HybridAutomationEngine:
         self.last_successful_tier_used: Optional[int] = None # For per-row export
 
         self._stats: Dict[int, Dict[str, Any]] = {
-            0: {"attempts": 0, "successes": 0, "total_ms": 0},
-            1: {"attempts": 0, "successes": 0, "total_ms": 0},  # Scrapy
-            2: {"attempts": 0, "successes": 0, "total_ms": 0},  # SeleniumBase
+            0:  {"attempts": 0, "successes": 0, "total_ms": 0},
+            # Scrapy bonus step tracked separately
+            "scrapy_bonus": {"attempts": 0, "successes": 0, "total_ms": 0},
+            2:  {"attempts": 0, "successes": 0, "total_ms": 0},  # SeleniumBase
             3: {"attempts": 0, "successes": 0, "total_ms": 0},  # Botasaurus
             4: {"attempts": 0, "successes": 0, "total_ms": 0},  # Patchright
             5: {"attempts": 0, "successes": 0, "total_ms": 0},  # Nodriver
@@ -202,42 +205,7 @@ class HybridAutomationEngine:
                 await self._tier0.start()
                 logger.info(f"[HybridEngine] ✅ Tier 0 (SeleniumUCD/Legacy) started for worker {self.worker_id}.")
 
-            # ── Tier 1: ScrapyAgent (AI Selector Fast-Path) ───────────────────
-            elif tier == 1 and not self._tier1:
-                class MockScrapyAgent:
-                    def __init__(self):
-                        self.last_url = None
-                        self.last_data = {}
-                    async def start(self): pass
-                    async def stop(self): pass
-                    async def close(self): pass
-                    async def goto_url(self, url: str) -> bool:
-                        self.last_url = url
-                        return True
-                    async def get_page_source(self) -> str:
-                        from infra.scrapers.agent_scraper import run_ai_spider
-                        if self.last_url:
-                            self.last_data = await run_ai_spider(self.last_url)
-                            return str(self.last_data)
-                        return ""
-                    async def extract_universal_data(self) -> dict:
-                        if not self.last_data and self.last_url:
-                            from infra.scrapers.agent_scraper import run_ai_spider
-                            self.last_data = await run_ai_spider(self.last_url)
-                        
-                        phones = []
-                        if self.last_data and self.last_data.get("phone"):
-                            phones.append(self.last_data["phone"])
-                        
-                        return {
-                            "heuristic_phones": phones,
-                            "raw_scrapy_data": self.last_data
-                        }
-                
-                self._tier1 = MockScrapyAgent()
-                logger.info(f"[HybridEngine] ✅ Tier 1 🕷️ (Scrapy) started for worker {self.worker_id}.")
-
-            # ── Tier 2: SeleniumBase UC Driver (PRIMARY) ───────────────────
+            # ── Tier 2: SeleniumBase UC Driver (PRIMARY ⭐) ────────────────
             elif tier == 2 and not self._tier2:
                 if not getattr(config, "SELENIUMBASE_ENABLED", True):
                     logger.warning("[HybridEngine] Tier 2 (SeleniumBase) is DISABLED in config. Skipping.")
@@ -366,7 +334,7 @@ class HybridAutomationEngine:
         except: pass
 
     async def stop_all(self) -> None:
-        for tier in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
+        for tier in [0, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
             await self.stop_tier(tier)
 
     async def close(self) -> None:
@@ -438,12 +406,14 @@ class HybridAutomationEngine:
         # PERFORMANCE_MODE escalation caps
         p_mode = getattr(config, "PERFORMANCE_MODE", "full")
         
+        # Browser waterfall: starts at Tier 2 (SeleniumBase).
+        # Scrapy is NOT in this sequence — it fires as a bonus inside search_google_ai_mode.
         if p_mode == "simple":
-            tier_sequence = [1, 2, 3] # Scrapy + SelBase + Bota
+            tier_sequence = [2, 3]        # SeleniumBase + Botasaurus
         elif p_mode == "stealth":
-            tier_sequence = [1, 2, 3] # Scrapy + SelBase + Botasaurus
+            tier_sequence = [2, 5]        # SeleniumBase + Nodriver
         elif p_mode == "balanced":
-            tier_sequence = [1, 2, 3, 4] # Scrapy + SelBase + Bota + Patchright
+            tier_sequence = [2, 3, 4]     # SeleniumBase + Botasaurus + Patchright
         else:
             # "full" mode or unknown
             max_t = 6
@@ -451,23 +421,20 @@ class HybridAutomationEngine:
             if config.FIRECRAWL_ENABLED: max_t = 8
             if config.JINA_ENABLED:      max_t = 9
             if config.CRAWLEE_ENABLED:   max_t = 10
-            
-            max_t = max(max_t, config.HYBRID_DEFAULT_TIER)
-            tier_sequence = list(range(config.HYBRID_DEFAULT_TIER, max_t + 1))
-            
+            start_t = max(2, config.HYBRID_DEFAULT_TIER)  # Never below Tier 2
+            tier_sequence = list(range(start_t, max_t + 1))
+
         # Apply strict global cap from config
         tier_sequence = [t for t in tier_sequence if t <= config.MAX_WATERFALL_TIER]
-        
-        max_tier = max(tier_sequence) if tier_sequence else config.HYBRID_DEFAULT_TIER
+
+        max_tier = max(tier_sequence) if tier_sequence else 2
 
         # If legacy Selenium is enabled, prepend it as Tier 0
         if getattr(config, "SELENIUM_ENABLED", False):
             tier_sequence.insert(0, 0)
-            
-        use_browser = kwargs.pop("use_browser", False)
-        if use_browser and 1 in tier_sequence:
-            logger.info("[HybridEngine] LLM override: use_browser=True. Skipping Scrapy (Tier 1).")
-            tier_sequence.remove(1)
+
+        # use_browser kwarg kept for backward compat but no longer skips Scrapy
+        kwargs.pop("use_browser", None)
 
         if self.last_successful_tier_used and self.last_successful_tier_used in tier_sequence:
             # Move it to the front of the list
@@ -655,7 +622,59 @@ class HybridAutomationEngine:
     # These act as drop-in replacements for PatchrightAgent methods.
     
     async def search_google_ai_mode(self, prompt: str) -> Optional[str]:
-        return await self._execute_with_waterfall("search_google_ai_mode", prompt)
+        """AI Mode search via browser waterfall, then Scrapy bonus if URL found but no phone."""
+        result = await self._execute_with_waterfall("search_google_ai_mode", prompt)
+
+        # ── Scrapy Post-Discovery Bonus ──────────────────────────────────────────────
+        # If the browser found a website URL in the JSON but no phone,
+        # fire Scrapy for a cheap, fast HTTP extraction before escalating.
+        if result and self._should_run_scrapy_bonus(result):
+            website = self._extract_website_from_result(result)
+            if website:
+                try:
+                    t0 = time.perf_counter()
+                    self._stats["scrapy_bonus"]["attempts"] += 1
+                    from infra.scrapers.agent_scraper import run_ai_spider
+                    scrapy_data = await asyncio.wait_for(
+                        run_ai_spider(website), timeout=12.0
+                    )
+                    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                    phone = scrapy_data.get("phone") or scrapy_data.get("telephone")
+                    if phone:
+                        self._stats["scrapy_bonus"]["successes"] += 1
+                        logger.info(
+                            f"[HybridEngine] ⚡ Scrapy bonus hit! Phone={phone} "
+                            f"from {website} in {elapsed_ms}ms"
+                        )
+                        # Inject phone into result string so upstream can parse it
+                        return f'{result}\n[scrapy_bonus_phone: {phone}]'
+                except Exception as exc:
+                    logger.debug(f"[HybridEngine] Scrapy bonus failed ({website}): {exc}")
+        return result
+
+    def _should_run_scrapy_bonus(self, result: str) -> bool:
+        """Return True if the browser result has a website but no phone number."""
+        import re
+        has_phone = bool(re.search(r'0[1-9](?:[\s.-]?\d{2}){4}', result))
+        has_website = any(kw in result.lower() for kw in ('"website"', 'http://', 'https://'))
+        return has_website and not has_phone
+
+    def _extract_website_from_result(self, result: str) -> Optional[str]:
+        """Extract the first website URL from an AI Mode JSON/text result."""
+        import re, json as _json
+        # Try JSON parse first
+        m = re.search(r'\{.*\}', result, re.DOTALL)
+        if m:
+            try:
+                data = _json.loads(m.group(0))
+                url = data.get("website") or data.get("site_web") or data.get("url")
+                if url and url.startswith("http"):
+                    return url
+            except Exception:
+                pass
+        # Fallback: regex URL extraction
+        m2 = re.search(r'https?://[^\s"\'>]+', result)
+        return m2.group(0) if m2 else None
 
     async def submit_google_search(self, query: str) -> bool:
         return await self._execute_with_waterfall("submit_google_search", query)

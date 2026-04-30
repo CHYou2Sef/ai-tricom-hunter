@@ -7,8 +7,16 @@ from scrapy.signalmanager import dispatcher
 from scrapy import signals
 import crochet
 
-# Initialize Crochet for running Twisted inside an asyncio app
-crochet.setup()
+# Lazy crochet initialisation — call setup() only once, on first actual use.
+# Calling crochet.setup() at module import time starts Twisted reactor immediately,
+# which can conflict with asyncio when agent_scraper is merely imported but not used.
+_CROCHET_READY = False
+
+def _ensure_crochet():
+    global _CROCHET_READY
+    if not _CROCHET_READY:
+        crochet.setup()
+        _CROCHET_READY = True
 
 # Hard-coded B2B fallback selectors
 FALLBACK_SELECTORS = {
@@ -67,6 +75,7 @@ def _run_spider_crochet(url: str, extraction_rules: dict, results_list: list):
     Run the Scrapy spider synchronously but without blocking the main event loop
     thanks to crochet.
     """
+    _ensure_crochet()  # Ensure Twisted reactor is ready before use
     def crawler_results(signal, sender, item, response, spider):
         results_list.append(item)
         

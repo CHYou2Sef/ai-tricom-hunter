@@ -75,11 +75,6 @@ AI_RESPONSE_SELECTORS = [
     "div[jsname='yEVEwb']",
     "div[class*='osrp']",
 ]
-
-
-
-
-
 class SeleniumBaseAgent(BaseBrowserAgent):
     """
     Tier 1 browser agent powered by SeleniumBase UC Driver.

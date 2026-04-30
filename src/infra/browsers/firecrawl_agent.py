@@ -20,7 +20,8 @@ class FirecrawlAgent:
     Wrapper for the Firecrawl SDK.
     Provides high-level methods for scraping, crawling, and AI-powered extraction.
     """
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, worker_id: int = 0, api_key: Optional[str] = None):
+        self.worker_id = worker_id
         self.api_key = api_key or config.FIRECRAWL_API_KEY
         self.enabled = config.FIRECRAWL_ENABLED and bool(self.api_key)
         self._app = None

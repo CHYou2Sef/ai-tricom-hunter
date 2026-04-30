@@ -11,7 +11,7 @@
  
 import asyncio
 from typing import Optional
-from crawlee.playwright_crawler import PlaywrightCrawler, PlaywrightCrawlingContext
+from crawlee.crawlers import PlaywrightCrawler, PlaywrightCrawlingContext
 
 from agents.base_agent import BaseBrowserAgent
 from core.logger import get_logger

@@ -270,10 +270,10 @@ BOTASAURUS_CACHE_MAX_AGE_HOURS = int(os.getenv("BOTASAURUS_CACHE_MAX_AGE_HOURS",
 #   "stealth"  → Tiers 1 + 3 ONLY (SeleniumBase + Nodriver). Skips Patchright.
 #   "balanced" → Tiers 1-3 (SeleniumBase + Patchright + Nodriver).
 #   "full"     → All 5 Tiers (includes Firecrawl if enabled).
-PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "stealth").lower()
+PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "full").lower()
 
 # Strict cap on waterfall depth (3 allows Tier 3 - Nodriver)
-MAX_WATERFALL_TIER = int(os.getenv("MAX_WATERFALL_TIER", "3"))
+MAX_WATERFALL_TIER = int(os.getenv("MAX_WATERFALL_TIER", "4"))
 
 # If True, Firecrawl will be used as the ultimate fallback (Tier 5)
 USE_FIRECRAWL_FALLBACK = os.getenv("USE_FIRECRAWL_FALLBACK", "false").lower() == "true"

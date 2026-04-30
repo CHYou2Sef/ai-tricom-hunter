@@ -27,6 +27,10 @@ from typing import Optional, List
 from core import config
 from core.logger import get_logger, alert
 
+import os
+# Fix: Prevent Crawl4AI from trying to create its database in the (read-only) home directory
+os.environ["CRAWL4_AI_BASE_DIRECTORY"] = os.path.join(config.WORK_DIR, ".crawl4ai")
+
 logger = get_logger(__name__)
 
 
@@ -43,8 +47,8 @@ class Crawl4AIAgent(BaseBrowserAgent):
     It returns clean Markdown content suitable for LLM extraction.
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, worker_id: int = 0):
+        super().__init__(worker_id)
         self._crawler = None
 
     async def get_page_source(self) -> str:

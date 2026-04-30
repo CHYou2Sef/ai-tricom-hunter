@@ -28,7 +28,7 @@ logger = get_logger(__name__)
 # The Botas_plan says: "keep scraping tasks as standalone functions".
 
 from botasaurus.browser import browser, Driver
-from botasaurus.profile import Profile
+
 
 # ── STANDALONE BOTASAURUS TASKS ──
 
