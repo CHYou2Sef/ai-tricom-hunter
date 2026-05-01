@@ -12,6 +12,8 @@ venv.bak/
 # Project metadata
 /scratch/
 docs/
+profiles/
+browser_profiles/
 AGENTS.md
 ARCHITECTURE.md
 CLAUDE.md
@@ -20,7 +22,7 @@ GEMINI.md
 TODO.md
 
 # ── Project Specific ──
-browser_profiles/
+WORK/browser_profiles/
 .crawl4ai_cache/
 .playwright/
 .code-review-graph/
@@ -32,14 +34,8 @@ browser_profiles/
 *.json
 benchmark_checkpoint.json
 telemetry.json
-browser_profiles/**
-!browser_profiles/
 
-# ── Work Pipeline (Temporary Data) ──
-WORK/**/*
-!WORK/
-!WORK/**/.gitkeep
-WORK/active_processing.json
+
 
 # ── Logs and databases ──
 *.log
@@ -66,6 +62,9 @@ __pycache__/
 htmlcov/
 .mypy_cache/
 .pytype/
+WORK/.agent_lock
+WORK/.prepare_output.json
+WORK/.crawl4ai
 
 # ── IDEs ──
 .claude

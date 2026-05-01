@@ -43,7 +43,7 @@ import argparse
 import time
 import datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 # ── Ensure src/ is on sys.path ───────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent
@@ -131,14 +131,12 @@ def parse_args() -> argparse.Namespace:
 # ── Telemetry helpers ─────────────────────────────────────────────────────────
 
 def _record(engine: str, row_idx: int, status: str, latency: float,
-            interruption: Optional[str], telemetry: BenchmarkTelemetry) -> None:
+            interruption: Optional[str], telemetry: BenchmarkTelemetry,
+            method: str = "unknown") -> None:
     try:
-        telemetry.record(engine, row_idx, status, latency, interruption)
-    except TypeError:
-        try:
-            telemetry.record(engine, row_idx, status, latency)
-        except Exception:
-            pass
+        telemetry.record(engine, row_idx, status, latency, interruption, method_name=method)
+    except Exception:
+        pass
 
 
 # ── Preflight Health Check ────────────────────────────────────────────────────
@@ -374,21 +372,15 @@ async def _extract_phone_for_row(
     row: "ExcelRow",
     is_scrapy: bool,
     search_only: bool,
-) -> Optional[str]:
+) -> Tuple[Optional[str], str]:
     """
     Attempt phone extraction for a single row using one agent/tier.
-    Mirrors the production phone_hunter pipeline:
-
-      1. [Scrapy]   Direct HTTP scrape of company website (if URL known)
-      2. [Browser]  Google AI Mode — Standard prompt → JSON parse
-      3. [Browser]  Google AI Mode — Expert prompt (retry if step 2 fails)
-      4. [Both]     Regex fallback on raw text
-      5.            normalize_phone() + NULL_VALUE_STRINGS filter
-
-    Returns the first valid phone string, or None.
+    Mirrors the production phone_hunter pipeline but in isolation.
+    Returns (phone_string, method_name).
     """
     from domain.search.phone_extractor import extract_phones, normalize_phone
-    import re as _re
+    import re
+    import json
 
     _null_upper = {s.upper() for s in config.NULL_VALUE_STRINGS}
 
@@ -398,10 +390,32 @@ async def _extract_phone_for_row(
     category = getattr(row, "category", "") or ""
     extra    = getattr(row, "raw_context", "")[:200]
 
+    def _parse_json_safe(text: str) -> Optional[dict]:
+        try:
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+            return json.loads(text)
+        except Exception:
+            return None
+
+    def _extract_website(text: str) -> Optional[str]:
+        match = re.search(r'https?://[^\s<>"]+|www\.[^\s<>"]+', text)
+        if match:
+            return match.group(0)
+        return None
+
+    async def _run_scrapy_bonus(url: str) -> Optional[str]:
+        try:
+            from infra.scrapers.agent_scraper import run_ai_spider
+            res = await run_ai_spider(url)
+            return res.get("phone")
+        except Exception:
+            return None
+
     def _pick_phone_from_json(data: dict) -> Optional[str]:
-        """Extract and normalize the best phone from a parsed JSON dict."""
         candidates = []
-        # Try standard phone fields
         for key in ("phone_numbers", "telephone", "phone",
                     "director_direct_phone", "tel_direct"):
             val = data.get(key)
@@ -410,127 +424,75 @@ async def _extract_phone_for_row(
             elif isinstance(val, str) and val.strip():
                 candidates.append(val.strip())
         for raw in candidates:
-            if raw.upper() in _null_upper:
-                continue
+            if raw.upper() in _null_upper: continue
             normed = normalize_phone(raw)
-            if normed:
-                return normed
+            if normed: return normed
         return None
 
     def _pick_phone_from_text(text: str, label: str) -> Optional[str]:
-        """Regex extraction on plain text as a last resort."""
         phones = extract_phones(text, source_label=label)
         for p in phones:
             if str(p).upper() not in _null_upper:
-                n = normalize_phone(p)
-                if n:
-                    return n
+                normed = normalize_phone(p)
+                if normed: return normed
         return None
-
-    def _parse_json_safe(text: str) -> Optional[dict]:
-        """Try to parse JSON from AI Mode response (handles markdown code blocks)."""
-        if not text:
-            return None
-        # Strip markdown ```json ... ``` wrapper
-        clean = _re.sub(r"```(?:json)?\s*", "", text).replace("```", "").strip()
-        # Find first { ... } block
-        m = _re.search(r"\{.*\}", clean, _re.DOTALL)
-        if m:
-            try:
-                return json.loads(m.group(0))
-            except json.JSONDecodeError:
-                pass
-        return None
-
-    # Helper: Extract website from AI Mode result
-    def _extract_website(text: str) -> Optional[str]:
-        if not text: return None
-        # Try JSON parse
-        m = _re.search(r'\{.*\}', text, _re.DOTALL)
-        if m:
-            try:
-                data = json.loads(m.group(0))
-                u = data.get("website") or data.get("site_web") or data.get("url")
-                if u and u.startswith("http"): return u
-            except: pass
-        # Regex fallback
-        m2 = _re.search(r'https?://[^\s"\'>]+', text)
-        return m2.group(0) if m2 else None
-
-    # Helper: Run Scrapy bonus
-    async def _run_scrapy_bonus(website: str) -> Optional[str]:
-        try:
-            from infra.scrapers.agent_scraper import run_ai_spider
-            data = await asyncio.wait_for(run_ai_spider(website), timeout=12.0)
-            raw_p = data.get("phone") or data.get("telephone")
-            if raw_p and raw_p.upper() not in _null_upper:
-                return normalize_phone(raw_p)
-        except: pass
-        return None
-
-    # ══ PATH A: DEPRECATED — Scrapy no longer a standalone tier ══════════════
-    if is_scrapy:
-        return None # Should not happen with new ENGINE_REGISTRY
-
-    # ══ PATH B: Browser tiers — Google AI Mode ════════════════════════════════
 
     # Step 1 — Standard prompt
     prompt = config.AI_MODE_SEARCH_PROMPT.format(
         nom=nom, adresse=adr, siren=siren, category=category, extra=extra
     )
     raw_result = await agent.search_google_ai_mode(prompt)
-
     if raw_result:
         parsed = _parse_json_safe(raw_result)
         if parsed:
             phone = _pick_phone_from_json(parsed)
-            if phone: return phone
+            if phone: return phone, "google_ai_mode"
         
         # Scrapy Bonus Step (if website found but no phone)
         if not search_only:
             website = _extract_website(raw_result)
             if website:
                 phone = await _run_scrapy_bonus(website)
-                if phone: return phone
+                if phone: return phone, "scrapy_bonus"
 
         # Regex fallback on raw text
         phone = _pick_phone_from_text(raw_result, engine_name)
-        if phone: return phone
+        if phone: return phone, "regex_fallback"
 
     # Step 2 — Expert retry prompt
     expert_prompt = config.AI_MODE_EXPERT_PROMPT.format(
         nom=nom, adresse=adr, siren=siren, category=category, extra=extra
     )
     raw_expert = await agent.search_google_ai_mode(expert_prompt)
-
     if raw_expert:
         parsed = _parse_json_safe(raw_expert)
         if parsed:
             phone = _pick_phone_from_json(parsed)
-            if phone: return phone
+            if phone: return phone, "google_ai_expert"
         
         # Scrapy Bonus Step on Expert Result
         if not search_only:
             website = _extract_website(raw_expert)
             if website:
                 phone = await _run_scrapy_bonus(website)
-                if phone: return phone
+                if phone: return phone, "scrapy_bonus_expert"
 
         phone = _pick_phone_from_text(raw_expert, f"{engine_name}_expert")
-        if phone: return phone
+        if phone: return phone, "regex_fallback_expert"
 
     # Step 3 — Website crawl (if not search_only and agent supports crawl_website)
     if not search_only and hasattr(agent, "crawl_website"):
-        website = getattr(row, "website", None) or _extract_website(raw_result) or _extract_website(raw_expert)
+        website = getattr(row, "website", None) or _extract_website(raw_result or "") or _extract_website(raw_expert or "")
         if website:
             if not website.startswith("http"): website = "https://" + website
             try:
                 crawl_text = await asyncio.wait_for(agent.crawl_website(website), timeout=20.0)
                 phone = _pick_phone_from_text(crawl_text or "", f"{engine_name}_crawl")
-                if phone: return phone
+                if phone: return phone, "browser_crawl"
             except: pass
 
-    return None
+    return None, "none"
+
 
 
 # ── Per-engine runner ─────────────────────────────────────────────────────────
@@ -573,10 +535,11 @@ async def run_engine_benchmark(
         status = "ERROR"
         interruption_reason: Optional[str] = None
         phone: Optional[str] = None
+        method: str = "none"
 
         try:
             # ── Full phone extraction pipeline (mirrors production phone_hunter) ──
-            phone = await _extract_phone_for_row(
+            phone, method = await _extract_phone_for_row(
                 agent=agent,
                 engine_name=engine_name,
                 row=row,
@@ -606,7 +569,7 @@ async def run_engine_benchmark(
         latency = time.perf_counter() - row_start
         row.status = status
         row.phone = phone
-        _record(engine_name, start_idx + i, status, latency, interruption_reason, telemetry)
+        _record(engine_name, start_idx + i, status, latency, interruption_reason, telemetry, method=method)
 
         # Progress heartbeat every 25 rows
         if i % 25 == 0 or i == len(rows):

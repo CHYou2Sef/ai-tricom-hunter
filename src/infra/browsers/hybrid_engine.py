@@ -185,7 +185,7 @@ class HybridAutomationEngine:
         try:
             # 1. Check if existing agent is alive
             agent_map = {
-                0: self._tier0, 1: self._tier1, 2: self._tier2,
+                0: self._tier0, 2: self._tier2,
                 3: self._tier3, 4: self._tier4, 5: self._tier5, 
                 6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
             }
@@ -282,12 +282,12 @@ class HybridAutomationEngine:
             # ── Tier 10: CrawleeAgent (Industrial Crawler) ─────────────────
             elif tier == 10 and not self._tier10:
                 if not config.CRAWLEE_ENABLED:
-                    logger.warning("[HybridEngine] Tier 9 (Crawlee) is DISABLED in config. Skipping.")
+                    logger.warning("[HybridEngine] Tier 10 (Crawlee) is DISABLED in config. Skipping.")
                     return False
                 from infra.browsers.crawlee_agent import CrawleeAgent
-                self._tier9 = CrawleeAgent(worker_id=self._worker_id)
-                await self._tier9.start()
-                logger.info(f"[HybridEngine] ✅ Tier 9 (Crawlee) started for worker {self.worker_id}.")
+                self._tier10 = CrawleeAgent(worker_id=self._worker_id)
+                await self._tier10.start()
+                logger.info(f"[HybridEngine] ✅ Tier 10 (Crawlee) started for worker {self.worker_id}.")
 
             return True
         except ImportError as ie:
@@ -303,7 +303,7 @@ class HybridAutomationEngine:
     async def stop_tier(self, tier: int) -> None:
         """Explicitly close a specific tier to free resources before escalation."""
         agent_map = {
-            0: self._tier0, 1: self._tier1, 2: self._tier2,
+            0: self._tier0, 2: self._tier2,
             3: self._tier3, 4: self._tier4, 5: self._tier5, 
             6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
         }
@@ -316,7 +316,6 @@ class HybridAutomationEngine:
                 logger.warning(f"[HybridEngine] Tier {tier} close error: {exc}")
 
         if tier == 0:   self._tier0 = None
-        elif tier == 1: self._tier1 = None
         elif tier == 2: self._tier2 = None
         elif tier == 3: self._tier3 = None
         elif tier == 4: self._tier4 = None
@@ -343,7 +342,7 @@ class HybridAutomationEngine:
     async def rotate_proxy(self):
         """Forward proxy rotation to the currently active agent."""
         agent_map = {
-            0: self._tier0, 1: self._tier1, 2: self._tier2, 
+            0: self._tier0, 2: self._tier2, 
             3: self._tier3, 4: self._tier4, 5: self._tier5,
             6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
         }
@@ -457,7 +456,7 @@ class HybridAutomationEngine:
                 continue
 
             agent_map = {
-                0: self._tier0, 1: self._tier1, 2: self._tier2,
+                0: self._tier0, 2: self._tier2,
                 3: self._tier3, 4: self._tier4, 5: self._tier5, 
                 6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
             }
