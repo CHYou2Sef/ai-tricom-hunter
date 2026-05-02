@@ -1,10 +1,12 @@
 # Industrial AI Hunter Stack
 
 services:
-  agent:
+  # 🤖 3-Layer Autonomous Supervisor
+  # Manages Layer 0 (Ingest), Layer 1 (Phone Hunter), and Layer 2 (Social Fallback)
+  supervisor:
     build: .
     image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-youssef}/ai_tricom_hunter:latest
-    container_name: tricom_ai_agent
+    container_name: tricom_supervisor
     restart: unless-stopped
     # 🏎️ Industrial Optimisations
     shm_size: '2gb'           # Prevents Chrome "Aw, Snap!" crashes due to low shared memory
@@ -15,68 +17,36 @@ services:
       - CHROMIUM_BINARY_PATH=/usr/bin/google-chrome
       - DOCKER_ENV=true
       - PYTHONPATH=/app/src
+      - LAYER0_ENABLED=true
+      - LAYER2_ENABLED=true
 
     # ── Windows/Mac Performance Hack ──────────────────────────────────
-    # Prevents slow I/O on host-mounted volumes for browser profiles
     tmpfs:
       - /app/WORK/browser_profiles:size=1G
     
     env_file:
       - .env.prod
     volumes:
-      # Direct Wormhole: Map your Windows Host folder to the Container's WORK directory
       - ${HOST_WORK_DIR:-./WORK}:/app/WORK:Z
       - ${HOST_LOG_DIR:-./logs}:/app/logs:Z
       - ./scripts:/app/scripts:ro,Z
-      # browser_profiles is handled by tmpfs above for speed
     
-    # ── Automatic Launch Mode ───────────────────────────────────────────
-    # Starts both the agent worker AND the FastAPI monitoring API (:8000)
-    command: ["/bin/bash", "/app/scripts/start_with_monitoring.sh"]
+    command: python run/supervisor.py
     
     ports:
-      - "8000:8000"           # Expose API for Monitoring/Prometheus
+      - "8000:8000"           # Expose API for Monitoring/Prometheus (Metrics served via supervisor)
     
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/metrics"]
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 8.8.8.8)); s.close()"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-      
+    
     logging:
       driver: "json-file"
       options:
         max-size: "20m"
-        max-file: "3"
-    
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-          cpus: '4.0'
-
-  # ── Ingestion Service (Pillar 0) ───────────────────────────────────
-  # Watches INCOMING/ and prepares files for the agent.
-  ingest:
-    build: .
-    container_name: tricom_ingest
-    restart: unless-stopped
-    environment:
-      - DOCKER_ENV=true
-      - PYTHONPATH=/app/src
-    env_file:
-      - .env.prod
-    volumes:
-      - ${HOST_WORK_DIR:-./WORK}:/app/WORK:Z
-      - ${HOST_LOG_DIR:-./logs}:/app/logs:Z
-      - ./scripts:/app/scripts:ro,Z
-    command: python run/ingest.py
-
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
         max-file: "3"
 
   # ── Metrics Storage ───────────────────────────────────────────────

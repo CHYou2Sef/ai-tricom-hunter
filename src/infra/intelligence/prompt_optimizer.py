@@ -42,7 +42,10 @@ def caveman_optimize(prompt: str) -> str:
         r"search and show me\s*", r"show me\s*", r"tell me\s*", r"give me\s*",
         r"identifiez\s*", r"trouvez\s*", r"récupérez\s*", r"fouillez\s*",
         r"analyze the context\s*", r"follow eeat\s*", r"analysez\s*",
-        r"suivez les principes\s*", r"priorisez\s*", r"extrais\s*", r"extraire\s*"
+        r"suivez les principes\s*", r"priorisez\s*", r"extrais\s*", r"extraire\s*",
+        r"as an ai\s*", r"i am thinking\s*", r"based on the following\s*",
+        r"selon les informations\s*", r"je vais\s*", r"i will\s*",
+        r"voici le résultat\s*", r"here is the result\s*"
     ]
     for pattern in pleasantries:
         prompt = re.sub(pattern, "", prompt, flags=re.IGNORECASE)
@@ -51,7 +54,8 @@ def caveman_optimize(prompt: str) -> str:
     fillers = [
         r"\ba\b", r"\ban\b", r"\bthe\b", r"\ble\b", r"\bla\b", r"\bles\b", r"\bun\b", r"\bune\b",
         r"\ball\b", r"\btout\b", r"\btous\b", r"\btoutes\b", r"\bof\b", r"\bde\b", r"\bdu\b", r"\bd'\b", r"\bl'\b",
-        r"\bme\b", r"\bmy\b", r"\byour\b", r"\bmost\b", r"\bvery\b", r"\breally\b"
+        r"\bme\b", r"\bmy\b", r"\byour\b", r"\bmost\b", r"\bvery\b", r"\breally\b",
+        r"\bcurrent\b", r"\bauctuel\b", r"\bavailable\b", r"\bdisponible\b"
     ]
     for pattern in fillers:
         prompt = re.sub(pattern, "", prompt, flags=re.IGNORECASE)
@@ -61,10 +65,12 @@ def caveman_optimize(prompt: str) -> str:
 
     # 4. Enforce one line per instruction (splitting by periods or typical separators)
     # But preserve JSON blocks which use curly braces
+    # We use a non-destructive split that keeps JSON intact
     lines = []
-    # Simplified splitting logic that respects JSON
-    parts = re.split(r'(?<=[.!?])\s+', prompt)
+    # Match JSON blocks or text segments
+    parts = re.split(r'(\{.*?\}|(?<=[.!?])\s+)', prompt, flags=re.DOTALL)
     for part in parts:
+        if not part: continue
         clean_part = part.strip()
         if clean_part:
             lines.append(clean_part)

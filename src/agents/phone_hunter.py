@@ -416,6 +416,29 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
                     add_unique(data["phone"], 96, "firecrawl_premium")
                     logger.info(f"✨ [Firecrawl] Found phone: {data['phone']}")
 
+    # 3.6 Layer 2 — Social URL Fallback (LangGraph)
+    # Activates when Layer 1 is fully depleted but social/web URLs were discovered.
+    # Scrapes Facebook /about, LinkedIn /about, and company website contact pages.
+    if not any(h['score'] >= 90 for h in harvested) and getattr(config, "LAYER2_ENABLED", True):
+        l2_social: dict = {}
+        if last_meta:
+            sl = last_meta.get("social_links", {})
+            if sl.get("facebook"): l2_social["facebook"] = sl["facebook"]
+            if sl.get("linkedin"): l2_social["linkedin"] = sl["linkedin"]
+            if sl.get("website"):  l2_social["website"]  = sl["website"]
+        # Also check fields already enriched on the row (from AI Mode pass)
+        if getattr(row, "facebook", None) and "facebook" not in l2_social:
+            l2_social["facebook"] = [row.facebook]
+        if getattr(row, "linkedin", None) and "linkedin" not in l2_social:
+            l2_social["linkedin"] = [row.linkedin]
+
+        if l2_social:
+            from agents.layer2 import run_layer2_graph
+            logger.info(f"🔗 [Layer2] Activating for row #{row.row_index} — sources: {list(l2_social.keys())}")
+            l2_result = await run_layer2_graph(row, l2_social, agent)
+            if l2_result:
+                add_unique(l2_result["num"], l2_result["score"], l2_result["source"])
+
     # 4. Final results mapping
     row.processing_end_ts = time.perf_counter()
     elapsed = round(row.processing_end_ts - row.processing_start_ts, 1)

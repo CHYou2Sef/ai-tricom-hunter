@@ -92,3 +92,14 @@ pytest-mock>=3.10.0
 httpx[http2]
 fastapi
 uvicorn
+
+# ── LangGraph / LangChain — 3-Layer Autonomous Pipeline ──────────────────
+# Layer 0 (Ingest LangGraph) + Layer 2 (Social URL Fallback LangGraph)
+langgraph>=0.2.0
+langchain>=0.2.0
+langchain-core>=0.2.0
+
+# Layer 2 Tools
+# Public Facebook page scraping (no login, no API key required)
+facebook-scraper>=0.2.59
+# Note: httpx and beautifulsoup4 already listed above (website + linkedin tools)

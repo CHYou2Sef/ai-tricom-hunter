@@ -128,6 +128,25 @@ USE_FIRECRAWL_FALLBACK = os.getenv("USE_FIRECRAWL_FALLBACK", "true").lower() == 
 FIRECRAWL_ENABLED = os.getenv("FIRECRAWL_ENABLED", "true").lower() == "true"
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
 
+# ── LAYER 0 — Ingest LangGraph ──────────────────────────────────────────
+# Controls the LangGraph ingest state machine (run/supervisor.py).
+# When False, supervisor falls back to a plain watchdog (like ingest.py).
+LAYER0_ENABLED              = os.getenv("LAYER0_ENABLED", "true").lower() == "true"
+# Move invalid/malformed files to WORK/QUARANTINE/ instead of silently deleting.
+LAYER0_QUARANTINE_ON_ERROR  = os.getenv("LAYER0_QUARANTINE_ON_ERROR", "true").lower() == "true"
+
+# ── LAYER 2 — Social URL Fallback LangGraph ─────────────────────────────
+# Activates after Layer 1 waterfall is exhausted with no phone found.
+# Scrapes Facebook, LinkedIn, and company website using LangChain tools.
+LAYER2_ENABLED              = os.getenv("LAYER2_ENABLED", "true").lower() == "true"
+# Comma-separated list of source types Layer 2 is allowed to scrape.
+LAYER2_ENABLED_SOURCES      = os.getenv("LAYER2_ENABLED_SOURCES", "facebook,linkedin,website")
+# Maximum URLs to scrape per source type (bounds total Layer 2 time).
+LAYER2_MAX_URLS_PER_SOURCE  = int(os.getenv("LAYER2_MAX_URLS_PER_SOURCE", "2"))
+# Hard timeout (seconds) for the entire Layer 2 graph per row.
+LAYER2_TIMEOUT_SEC          = float(os.getenv("LAYER2_TIMEOUT_SEC", "30"))
+
+
 # Jina Reader (Tier 7 - Benchmark)
 JINA_ENABLED = os.getenv("JINA_ENABLED", "true").lower() == "true"
 JINA_API_KEY = os.getenv("JINA_API_KEY", "") # Optional for public API

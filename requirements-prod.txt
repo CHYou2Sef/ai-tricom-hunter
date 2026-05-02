@@ -58,3 +58,12 @@ bandit>=1.7.7
 pytest>=8.0.0
 pytest-asyncio>=0.24.0
 pytest-mock>=3.10.0
+
+# ── LangGraph / LangChain — 3-Layer Autonomous Pipeline ──────────────────
+# Layer 0 (Ingest) + Layer 2 (Social Fallback)
+langgraph>=0.2.0
+langchain>=0.2.0
+langchain-core>=0.2.0
+
+# Layer 2 Social Tools
+facebook-scraper>=0.2.59

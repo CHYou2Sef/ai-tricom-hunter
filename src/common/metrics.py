@@ -356,3 +356,92 @@ class BenchmarkTelemetry:
             logger.debug(f"[Telemetry] ✅ Metrics flushed to: {TELEMETRY_PATH}")
         except Exception as exc:
             logger.error(f"[Telemetry] Failed to write telemetry.json: {exc}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# LAYER 3 — LayerTelemetry  (supervision for Layer 0, Layer 1, Layer 2)
+# ══════════════════════════════════════════════════════════════════════════
+
+class LayerStats:
+    """Tracks performance and success for a logical pipeline layer (e.g. Layer 0, Layer 2)."""
+
+    def __init__(self, layer_name: str):
+        self.layer_name = layer_name
+        self.processed_count = 0
+        self.success_count = 0
+        self.error_count = 0
+        self.total_duration = 0.0
+        self.last_run_ts = 0.0
+        # Specific metrics (e.g. row_count for L0, source_type for L2)
+        self.extra_metrics: Dict[str, Any] = {}
+
+    def record_event(self, success: bool, duration: float, **kwargs) -> None:
+        self.processed_count += 1
+        self.total_duration += duration
+        self.last_run_ts = time.time()
+        if success:
+            self.success_count += 1
+        else:
+            self.error_count += 1
+        
+        # Merge extra metrics
+        for k, v in kwargs.items():
+            if isinstance(v, (int, float)):
+                self.extra_metrics[k] = self.extra_metrics.get(k, 0) + v
+            else:
+                self.extra_metrics[k] = v
+
+    def compute(self) -> Dict[str, Any]:
+        success_rate = round(self.success_count / self.processed_count * 100, 1) if self.processed_count else 0.0
+        avg_duration = round(self.total_duration / self.processed_count, 3) if self.processed_count else 0.0
+        return {
+            "layer": self.layer_name,
+            "processed": self.processed_count,
+            "success": self.success_count,
+            "errors": self.error_count,
+            "success_rate_pct": success_rate,
+            "avg_duration_sec": avg_duration,
+            "total_duration_sec": round(self.total_duration, 2),
+            "extra": self.extra_metrics,
+        }
+
+class LayerTelemetry:
+    """Singleton-style coordinator for Layer supervision."""
+    
+    _instance: Optional["LayerTelemetry"] = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(LayerTelemetry, cls).__new__(cls)
+            cls._instance._layers = {}
+        return cls._instance
+
+    def record(self, layer_name: str, success: bool, duration: float, **kwargs) -> None:
+        if layer_name not in self._layers:
+            self._layers[layer_name] = LayerStats(layer_name)
+        self._layers[layer_name].record_event(success, duration, **kwargs)
+
+    def get_report(self) -> str:
+        report = "\n📊  LAYER SUPERVISION REPORT\n"
+        report += "═" * 40 + "\n"
+        for name in sorted(self._layers.keys()):
+            m = self._layers[name].compute()
+            report += (
+                f"  {name:<10} | SR: {m['success_rate_pct']:>5}% | "
+                f"Avg: {m['avg_duration_sec']}s | Count: {m['processed']}\n"
+            )
+        report += "═" * 40
+        return report
+
+    def save_to_json(self) -> None:
+        path = config.WORK_DIR / "layer_metrics.json"
+        data = {name: l.compute() for name, l in self._layers.items()}
+        data["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error(f"[LayerTelemetry] Save failed: {e}")
+
+def get_layer_telemetry() -> LayerTelemetry:
+    return LayerTelemetry()

@@ -7,18 +7,29 @@
 **95% success rate** with **4-tier hybrid browser waterfall**, **proxy circuit breaker**, **CDP fingerprinting**, and **24/7 watchdog**.
 
 ## 🎯 What It Does
+**AI Tricom Hunter** is a 24/7 autonomous lead enrichment system organized into **3 distinct layers**:
 
-```
-Excel Input (1000s companies)
-  ↓ Pre-process (Pandas → ExcelRow)
-  ↓ Async Orchestrator (Agent Pool)
-  ↓ Hybrid Waterfall (Patchright→Nodriver→Crawl4AI→Camoufox)
-  ↓ EEAT Phone Extractor (JSON-LD + tel: + Regex)
-  ↓ Pro-Excel Output (SUCCEED/FAILED/ + Daily Fusion)
+```mermaid
+graph TD
+    subgraph L0 [Layer 0: Ingest]
+        Watchdog --> Validate[Validate & Clean]
+        Validate --> Classify[Classify: SIRET/RS/ADR]
+        Classify --> Route[Route to L1 Queue]
+    end
+    subgraph L1 [Layer 1: Phone Hunter]
+        Route --> Waterfall[10-Tier Browser Waterfall]
+        Waterfall --> Extractor[EEAT Extraction]
+    end
+    subgraph L2 [Layer 2: Social Fallback]
+        Extractor -- No Phone Found? --> Social[Scrape FB/LI/Web]
+        Social --> Validate2[Validate Social Candidates]
+    end
+    Validate2 --> Output[Pro-Excel Output]
 ```
 
-**Input**: `WORK/INCOMING/*.xlsx` (columns: Nom, Adresse, SIREN optional)
-**Output**: `WORK/ARCHIVE/SUCCEED/*.xlsx` (phones + enriched: email, LinkedIn)
+1. **Layer 0 (Ingest)**: Watches `INCOMING/` 24/7. Automatically validates, cleans, and classifies Excel files.
+2. **Layer 1 (Phone Hunter)**: Orchestrates a 10-tier browser waterfall (Patchright, Nodriver, Crawl4AI, etc.) to find phones on Google and company sites.
+3. **Layer 2 (Social Fallback)**: Automatically triggers if Layer 1 fails but social URLs were found. Scrapes Facebook, LinkedIn, and internal website pages.
 
 ## ⚙️ Quick Start
 
@@ -43,8 +54,8 @@ tail -f logs/agent.log
 # Setup (1 command)
 ./scripts/setup_dev.sh
 
-# Run Agent
-python -m src.app.orchestrator
+# Run the 3-Layer Autonomous Supervisor
+python run/supervisor.py
 
 ### Kubernetes (Production Cluster)
 
