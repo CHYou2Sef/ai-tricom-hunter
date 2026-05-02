@@ -257,14 +257,18 @@ def normalize_phone(phone: Optional[str]) -> Optional[str]:
         num = phonenumbers.parse(phone, "FR")
         
         if not phonenumbers.is_valid_number(num):
-            logger.debug(f"[PhoneExtractor] Blocked (phonenumbers invalid): {phone}")
+            logger.debug(f"[PhoneExtractor] ❌ Blocked (phonenumbers invalid): '{phone}'")
             return None
             
         # Format uniformly (NATIONAL for FR numbers -> 0X XX XX XX XX)
         if num.country_code == 33:
-            return phonenumbers.format_number(num, PhoneNumberFormat.NATIONAL)
+            formatted = phonenumbers.format_number(num, PhoneNumberFormat.NATIONAL)
         else:
-            return phonenumbers.format_number(num, PhoneNumberFormat.INTERNATIONAL)
+            formatted = phonenumbers.format_number(num, PhoneNumberFormat.INTERNATIONAL)
             
-    except phonenumbers.NumberParseException:
+        logger.info(f"[Phonenumbers] ✅ Validated & Formatted: '{phone}' -> '{formatted}'")
+        return formatted
+            
+    except phonenumbers.NumberParseException as e:
+        logger.debug(f"[PhoneExtractor] ⚠️ Parse Exception for '{phone}': {e}")
         return None

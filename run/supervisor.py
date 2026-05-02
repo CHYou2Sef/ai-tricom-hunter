@@ -43,15 +43,22 @@ except ImportError:
 logger = get_logger("supervisor")
 
 
-def check_internet(host: str = "8.8.8.8", port: int = 53, timeout: int = 3) -> bool:
-    """Check basic internet connectivity."""
+def check_internet(host: str = "www.google.com", port: int = 443, timeout: int = 5) -> bool:
+    """Check basic internet connectivity with a fallback to a second host."""
     try:
+        # Try primary host
         socket.setdefaulttimeout(timeout)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((host, port))
         return True
     except Exception:
-        return False
+        try:
+            # Fallback to secondary host (Cloudflare)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect(("1.1.1.1", 53))
+            return True
+        except Exception:
+            return False
 
 
 class IngestHandler(FileSystemEventHandler):
@@ -130,8 +137,9 @@ async def main() -> None:
     set_l1_queue(file_queue)
 
     if not check_internet():
-        logger.error("[Supervisor] ❌ No internet connection. Cannot start.")
-        return
+        logger.warning("[Supervisor] ⚠️  Internet check failed. Continuing anyway, but scraping may fail.")
+    else:
+        logger.info("[Supervisor] 🌐 Internet connectivity confirmed.")
 
     # 1. Start Monitoring API in background
     config_uvicorn = uvicorn.Config(

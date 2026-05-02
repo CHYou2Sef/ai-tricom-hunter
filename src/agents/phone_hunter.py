@@ -38,7 +38,7 @@ def build_agent_query(row: ExcelRow) -> str:
     """Build a targeted agent-phone prompt (director/mobile lines)."""
     nom     = row.get_search_name()
     adresse = row.adresse or ""
-    return config.AGENT_PHONE_PROMPT_TEMPLATE.format(nom=nom, adresse=adresse)
+    return config.AGENT_PHONE_PROMPT_TEMPLATE.replace("{nom}", str(nom)).replace("{adresse}", str(adresse))
 
 async def _search_knowledge_panel_phone(row: ExcelRow, agent, query: str) -> Optional[str]:
     """
@@ -109,11 +109,7 @@ async def _extract_geo_phone(row: ExcelRow, agent, page_content: str) -> Optiona
     logger.info(f"    [GEO] Initializing Local LLM (Ollama) fallback...")
     # Clamp context to 8k chars to fit small models (3B params) and avoid OOM
     context = clean_html_to_text(page_content)[:8000].strip()
-    geo_prompt = config.GEO_FALLBACK_PROMPT.format(
-        nom=row.nom or row.siren,
-        adresse=row.adresse,
-        raw_web_context=context
-    )
+    geo_prompt = config.GEO_FALLBACK_PROMPT.replace("{nom}", str(nom or row.siren)).replace("{adresse}", str(row.adresse or "")).replace("{raw_web_context}", str(context))
     geo_response = await ollama_client.complete(geo_prompt)
     if geo_response:
         row.raw_ai_responses.append({"text": geo_response, "source": "ollama_local", "query": geo_prompt[:200]})
@@ -340,7 +336,7 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
     for prompt_key, tag in [(config.AI_MODE_SEARCH_PROMPT, "ai_std"), (config.AI_MODE_EXPERT_PROMPT, "ai_expert")]:
         if any(h['score'] >= 90 for h in harvested): break
             
-        prompt = prompt_key.format(nom=nom, adresse=adr, siren=siren, category=category, extra=extra)
+        prompt = prompt_key.replace("{nom}", str(nom)).replace("{adresse}", str(adr)).replace("{siren}", str(siren)).replace("{category}", str(category)).replace("{extra}", str(extra))
         ai_raw = await agent.search_google_ai_mode(prompt)
         last_meta = getattr(agent, "last_metadata", None)
         

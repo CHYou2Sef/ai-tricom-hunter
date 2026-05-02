@@ -35,6 +35,11 @@ WORK/browser_profiles/
 benchmark_checkpoint.json
 telemetry.json
 
+# AI Debugger (Dev Env Only)
+src/agents/debugger/
+WORK/debug_state.json
+WORK/debug_reports/
+
 
 
 # ── Logs and databases ──

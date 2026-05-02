@@ -657,6 +657,7 @@ FAKE_PHONE_BLOCKLIST: set = {
     "0107142857",   # Dummy/repeated number reported by user
     "0917189833",   # Recurring technical/directory number reported by user
     "0333131113",   # Dummy/repeated number reported by user
+    "0742136299",   # Recurring parasitic directory number (Direct Service)
 }
 
 # ═══════════════════════════════════════════════════════════════════

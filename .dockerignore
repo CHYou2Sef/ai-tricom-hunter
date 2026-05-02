@@ -34,3 +34,4 @@ k8s/
 .agents/
 .claude/
 agent.yaml
+src/agents/debugger/
