@@ -2,7 +2,7 @@
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  services/phone_verifier.py                                              ║
 ║                                                                          ║
-║  Role: Deterministic phone validation via external APIs (Numverify).      ║
+║  Role: Deterministic phone validation via external APIs (Neutrino).      ║
 ║  Used to break ties or confirm LOW_CONF (SIREN mismatch) numbers.        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """

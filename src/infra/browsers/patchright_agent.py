@@ -374,10 +374,25 @@ class PatchrightAgent(BaseBrowserAgent):
         
         async with self._lock:
             try:
+                import re
+                import urllib.parse
                 from common.search_engine import generate_google_ai_url
-                ai_mode_url = generate_google_ai_url(prompt)
+
+                # Extraction des termes de recherche essentiels (Nom + Adresse)
+                search_query = prompt
+                if len(prompt) > 200 or "###" in prompt:
+                    name_match = re.search(r"NAME:\s*(.*)", prompt)
+                    addr_match = re.search(r"ADDRESS:\s*(.*)", prompt)
+                    if name_match:
+                        search_query = name_match.group(1).strip()
+                        if addr_match:
+                            search_query += f" {addr_match.group(1).strip()}"
+                    else:
+                        search_query = prompt[:150]
+
+                ai_mode_url = generate_google_ai_url(search_query)
                 
-                logger.info(f"🤖 [AI Mode] Navigating to: {ai_mode_url}")
+                logger.info(f"🤖 [AI Mode] Navigating to: {ai_mode_url} (Query: {search_query})")
                 await self.page.goto(ai_mode_url, wait_until="load", timeout=30000)
                 await asyncio.sleep(2)
                 

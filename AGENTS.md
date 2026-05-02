@@ -4,55 +4,35 @@
 
 - PRIMARY path: AI Mode search → JSON parse → phone extract
 - FALLBACK 1: Knowledge Panel (UUE heuristic)
-- FALLBACK 2: Domain scrape → local Ollama GEO extraction
-- SKIP condition: row already DONE in progress tracker
-- RETRY condition: config.REPROCESS_FAILED_ROWS = True
+- FALLBACK 2: Deep Discovery (Social Media & Website crawl)
+- VALIDATION: Every phone number is checked via **Neutrino API** (Phase 5).
+- SKIP condition: Row already marked as `DONE` in progress tracker.
+- RETRY condition: `config.REPROCESS_FAILED_ROWS = True`.
 
-## HybridEngine waterfall
+## HybridEngine Waterfall (10 Tiers)
 
-Tier 1 (Patchright) → Tier 2 (Nodriver) → Tier 3 (Crawl4AI) → Tier 4 (Camoufox)
-Each tier: start → execute → if None → stop → cool 5s → next tier
-Circuit breaker: 5 consecutive total failures → pause 300s → proxy rotate
+L'infrastructure utilise une cascade de 10 tiers pour garantir l'extraction :
 
-## Enricher
+1.  **Tier 2 (SeleniumBase UC)** : ⭐ Primaire. Stealth maximal, gère Cloudflare Turnstile.
+2.  **Tier 3 (Botasaurus)** : 🦖 Anti-détection robuste avec rotation de profils.
+3.  **Tier 4 (Patchright)** : 🟦 Chrome patché pour la discrétion.
+4.  **Tier 5 (Nodriver)** : 🟢 Pilotage CDP direct (sans WebDriver), idéal pour les WAF durs.
+5.  **Tier 6 (Crawl4AI)** : 🟡 Rendu JS managé pour les sites e-commerce.
+6.  **Tier 7 (Camoufox)** : 🦊 Firefox anti-detect (très puissant, dernier recours Chrome).
+7.  **Tier 8 (Firecrawl)** : 🔥 API managée premium (Scale).
+8.  **Tier 9 (Jina Reader)** : ⚡ Conversion Markdown haute vitesse.
+9.  **Tier 10 (Crawlee)** : 🛠️ Crawling industriel Playwright.
+10. **Tier 0 (Legacy)** : 🟧 Selenium standard pour benchmark de comparaison.
 
-Source priority: google_ai_mode (0.97) > aeo_schema (1.00) > gemini_json (0.90)
-Never overwrite field with existing non-empty value
+**Scrapy Sniper** : Activé en bonus post-découverte si l'URL est trouvée mais que le numéro échappe aux navigateurs.
 
-## MCP Tools: code-review-graph
+## Enricher (Phase 4)
 
-**IMPORTANT: This project has a knowledge graph. ALWAYS use the
-code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
-the codebase.** The graph is faster, cheaper (fewer tokens), and gives
-you structural context (callers, dependents, test coverage) that file
-scanning cannot.
+- **Priorité des sources** : google_ai_mode (0.97) > aeo_schema (1.00) > gemini_json (0.90)
+- **Règle d'or** : Ne jamais écraser un champ déjà renseigné par une valeur vide.
 
-### When to use graph tools FIRST
+## MCP Tools: code-review-graph & Jina
 
-- **Exploring code**: `semantic_search_nodes` or `query_graph` instead of Grep
-- **Understanding impact**: `get_impact_radius` instead of manually tracing imports
-- **Code review**: `detect_changes` + `get_review_context` instead of reading entire files
-- **Finding relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for
-- **Architecture questions**: `get_architecture_overview` + `list_communities`
-
-Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
-
-### Key Tools
-
-| Tool                        | Use when                                               |
-| --------------------------- | ------------------------------------------------------ |
-| `detect_changes`            | Reviewing code changes — gives risk-scored analysis    |
-| `get_review_context`        | Need source snippets for review — token-efficient      |
-| `get_impact_radius`         | Understanding blast radius of a change                 |
-| `get_affected_flows`        | Finding which execution paths are impacted             |
-| `query_graph`               | Tracing callers, callees, imports, tests, dependencies |
-| `semantic_search_nodes`     | Finding functions/classes by name or keyword           |
-| `get_architecture_overview` | Understanding high-level codebase structure            |
-| `refactor_tool`             | Planning renames, finding dead code                    |
-
-### Workflow
-
-1. The graph auto-updates on file changes (via hooks).
-2. Use `detect_changes` for code review.
-3. Use `get_affected_flows` to understand impact.
-4. Use `query_graph` pattern="tests_for" to check coverage.
+**IMPORTANT** : Ce projet utilise des graphes de connaissance et des serveurs MCP.
+- **code-review-graph** : Utilisez-le pour explorer la structure du code (callers, tests).
+- **jina** : Utilisez-le pour effectuer des recherches web en Markdown ou lire des URLs en direct via l'assistant.

@@ -11,20 +11,22 @@ import os
 from typing import Optional, Dict, Any, List
 from firecrawl import FirecrawlApp
 from core import config
+from agents.base_agent import BaseBrowserAgent
 from core.logger import get_logger
 
 logger = get_logger(__name__)
 
-class FirecrawlAgent:
+class FirecrawlAgent(BaseBrowserAgent):
     """
     Wrapper for the Firecrawl SDK.
     Provides high-level methods for scraping, crawling, and AI-powered extraction.
     """
     def __init__(self, worker_id: int = 0, api_key: Optional[str] = None):
-        self.worker_id = worker_id
+        super().__init__(worker_id)
         self.api_key = api_key or config.FIRECRAWL_API_KEY
         self.enabled = config.FIRECRAWL_ENABLED and bool(self.api_key)
         self._app = None
+        self._last_content: str = ""
         
         if self.enabled:
             try:
@@ -39,8 +41,24 @@ class FirecrawlAgent:
         return True
 
     async def get_page_source(self) -> str:
-        """Firecrawl doesn't have a persistent browser session to grab source from."""
-        return "[Firecrawl] Source not available in stateless mode."
+        """Returns the last scraped markdown content."""
+        return self._last_content
+
+    async def goto_url(self, url: str) -> bool:
+        """
+        Fetch a URL via Firecrawl scrape.
+        """
+        params = {
+            "formats": ["markdown"],
+            "only_main_content": True
+        }
+        
+        logger.info(f"[Firecrawl] Navigating to: {url}")
+        result = await self.scrape(url, params=params)
+        if result and isinstance(result, dict):
+            self._last_content = result.get('markdown') or result.get('content') or ""
+            return bool(self._last_content)
+        return False
 
     async def scrape(self, url: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """Scrape a single URL to Markdown/HTML."""
@@ -49,9 +67,8 @@ class FirecrawlAgent:
             
         logger.info(f"[Firecrawl] Scraping: {url}")
         try:
-            # SDK is synchronous, but we can run in thread if needed. 
-            # For now, simple direct call as this is typically called in async worker.
-            result = self._app.scrape_url(url, params=params)
+            # Le SDK Firecrawl attend les options en keyword arguments, pas dans un dict 'params'
+            result = self._app.scrape(url, **(params or {}))
             return result
         except Exception as e:
             logger.error(f"[Firecrawl] Scrape failed for {url}: {e}")
@@ -66,10 +83,8 @@ class FirecrawlAgent:
             
         logger.info(f"[Firecrawl] Extracting from {len(urls)} URLs...")
         try:
-            result = self._app.extract(urls, {
-                "prompt": prompt,
-                "schema": schema
-            } if schema else {"prompt": prompt})
+            # Le SDK Firecrawl attend prompt et schema en keyword arguments
+            result = self._app.extract(urls, prompt=prompt, schema=schema)
             return result
         except Exception as e:
             logger.error(f"[Firecrawl] Extraction failed: {e}")
@@ -82,7 +97,7 @@ class FirecrawlAgent:
             
         logger.info(f"[Firecrawl] Mapping site: {url}")
         try:
-            result = self._app.map_url(url)
+            result = self._app.map(url)
             return result.get("links", [])
         except Exception as e:
             logger.error(f"[Firecrawl] Map failed for {url}: {e}")
@@ -95,9 +110,12 @@ class FirecrawlAgent:
             
         logger.info(f"[Firecrawl] Starting crawl: {url} (limit={limit})")
         try:
-            # This returns a job ID; we'd need to poll in a real implementation
-            # or use the wait_until_done parameter if supported by SDK.
-            result = self._app.crawl_url(url, params={"limit": limit, "scrapeOptions": {"formats": ["markdown"]}})
+            # Le SDK Firecrawl attend limit et scrape_options en keyword arguments
+            result = self._app.crawl(
+                url, 
+                limit=limit, 
+                scrape_options={"formats": ["markdown"]}
+            )
             return result
         except Exception as e:
             logger.error(f"[Firecrawl] Crawl failed for {url}: {e}")
@@ -105,4 +123,43 @@ class FirecrawlAgent:
 
     async def close(self):
         """Cleanup (Firecrawl SDK handles its own sessions)."""
+        pass
+
+    # ── Stub methods for BaseBrowserAgent contract ─────────────────────────
+
+    async def search_google_ai_mode(self, prompt: str) -> Optional[str]:
+        """Adaptateur pour la recherche Google via Firecrawl."""
+        if not self.enabled:
+            return None
+        import urllib.parse
+        import re
+
+        # Extraction des termes de recherche essentiels (Nom + Adresse)
+        search_query = prompt
+        if len(prompt) > 200 or "###" in prompt:
+            name_match = re.search(r"NAME:\s*(.*)", prompt)
+            addr_match = re.search(r"ADDRESS:\s*(.*)", prompt)
+            if name_match:
+                search_query = name_match.group(1).strip()
+                if addr_match:
+                    search_query += f" {addr_match.group(1).strip()}"
+            else:
+                search_query = prompt[:150]
+
+        url = f"https://www.google.com/search?q={urllib.parse.quote(search_query)}"
+        logger.info(f"[Firecrawl] Tentative de recherche Google pour: {search_query}")
+        
+        if await self.goto_url(url):
+            return self._last_content
+        return None
+
+    async def search_google_ai(self, query: str) -> Optional[str]:
+        return await self.search_google_ai_mode(query)
+
+    async def submit_google_search(self, query: str) -> bool:
+        """Pas de session interactive pour soumettre un formulaire."""
+        return False
+
+    async def rotate_proxy(self) -> None:
+        """Firecrawl gère sa propre rotation d'IP."""
         pass

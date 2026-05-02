@@ -98,9 +98,32 @@ class CrawleeAgent(BaseBrowserAgent):
     # ── Stub methods for BaseBrowserAgent contract ─────────────────────────
     
     async def search_google_ai_mode(self, prompt: str) -> Optional[str]:
-        """Crawlee is best for direct scraping, not search engine interaction."""
-        return None 
+        """
+        Implémentation de la recherche pour Crawlee (Tier 8).
+        Extrait les termes de recherche et lance un mini-crawl sur Google Search.
+        """
+        import re
+        import urllib.parse
+        from common.search_engine import generate_google_ai_url
 
+        # Extraction des termes de recherche essentiels (Nom + Adresse)
+        search_query = prompt
+        if len(prompt) > 200 or "###" in prompt:
+            name_match = re.search(r"NAME:\s*(.*)", prompt)
+            addr_match = re.search(r"ADDRESS:\s*(.*)", prompt)
+            if name_match:
+                search_query = name_match.group(1).strip()
+                if addr_match:
+                    search_query += f" {addr_match.group(1).strip()}"
+            else:
+                search_query = prompt[:150]
+
+        url = generate_google_ai_url(search_query)
+        logger.info(f"[Crawlee] 🔍 Recherche Google pour: {search_query}")
+        
+        if await self.goto_url(url):
+            return self._last_html
+        return None
     async def submit_google_search(self, query: str) -> bool:
         return False
 

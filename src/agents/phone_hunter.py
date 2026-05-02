@@ -476,7 +476,7 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
                 row.status = "DONE"
                 row.enriched_fields["verified"] = True
                 row.enriched_fields["verification_metadata"] = v_res
-                logger.info(f"✨ [Verification] SIREN mismatch resolved by Numverify for {row.phone}")
+                logger.info(f"✨ [Verification] SIREN mismatch resolved by Neutrino for {row.phone}")
             elif verify_phone_consensus(row.phone, harvested):
                 row.status = "DONE"
                 row.enriched_fields["verified"] = "consensus"

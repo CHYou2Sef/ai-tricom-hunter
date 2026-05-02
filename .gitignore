@@ -21,9 +21,13 @@ GEMINI.md
 .agents/
 TODO.md
 error_logs/
+storage/
+WORK/browser_profiles/
+
 
 # ── Project Specific ──
-WORK/browser_profiles/
+WORK/benchmark_checkpoint
+
 .crawl4ai_cache/
 .playwright/
 .code-review-graph/
