@@ -332,10 +332,10 @@ class BenchmarkTelemetry:
             "engines": [stats.compute() for stats in self._engines.values()],
         }
 
-        # ── Rank engines by MTTI (best continuity = highest MTTI) ─────────
+        # ── Rank engines by Success Rate first, then by Speed (lowest latency) ──
         ranked = sorted(
             payload["engines"],
-            key=lambda e: (-e["mtti_sec"], -e["success_rate_pct"]),
+            key=lambda e: (-e["success_rate_pct"], e["avg_latency_sec"]),
         )
         payload["ranking"] = [
             {"rank": i + 1, "engine": e["engine"], "mtti_sec": e["mtti_sec"], "success_rate_pct": e["success_rate_pct"]}

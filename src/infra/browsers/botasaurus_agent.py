@@ -33,10 +33,10 @@ from botasaurus.browser import browser, Driver
 # ── STANDALONE BOTASAURUS TASKS ──
 
 @browser(
-    headless=False,
-    profile="botasaurus_default",
+    headless=True,  # Plus stable sur serveur Linux
     block_images=True,
-    cache=False  # We rely on our own AUDIT.json for persistence
+    cache=False,
+    args=["--no-sandbox", "--disable-dev-shm-usage"] # Indispensable sur Linux
 )
 def search_google_ai_task(driver: Driver, data: dict):
     query = data.get("query")
@@ -50,10 +50,10 @@ def search_google_ai_task(driver: Driver, data: dict):
     return driver.page_html
 
 @browser(
-    headless=False,
-    profile="botasaurus_default",
+    headless=True,
     block_images=True,
-    cache=False
+    cache=False,
+    args=["--no-sandbox", "--disable-dev-shm-usage"]
 )
 def crawl_url_task(driver: Driver, data: dict):
     url = data.get("url")
@@ -62,10 +62,10 @@ def crawl_url_task(driver: Driver, data: dict):
     return driver.page_html
 
 @browser(
-    headless=False,
-    profile="botasaurus_default",
+    headless=True,
     block_images=True,
-    cache=False
+    cache=False,
+    args=["--no-sandbox", "--disable-dev-shm-usage"]
 )
 def submit_google_search_task(driver: Driver, data: dict):
     query = data.get("query")
@@ -78,10 +78,10 @@ def submit_google_search_task(driver: Driver, data: dict):
     return bool(html and len(html) > 500)
 
 @browser(
-    headless=False,
-    profile="botasaurus_default",
+    headless=True,
     block_images=True,
-    cache=False
+    cache=False,
+    args=["--no-sandbox", "--disable-dev-shm-usage"]
 )
 def search_gemini_ai_task(driver: Driver, data: dict):
     query = data.get("query")
@@ -153,7 +153,12 @@ class BotasaurusAgent(BaseBrowserAgent):
     async def search_google_ai(self, query: str) -> Optional[str]:
         logger.info(f"[Botasaurus] 🔍 Google AI Mode: {query}")
         try:
-            html = await asyncio.to_thread(search_google_ai_task, {"query": query})
+            # On passe le profil dynamiquement via les data si nécessaire, 
+            # ou on laisse Botasaurus gérer des profils temporaires isolés.
+            html = await asyncio.to_thread(search_google_ai_task, {
+                "query": query,
+                "profile": f"botasaurus_worker_{self.worker_id}"
+            })
             return html
         except Exception as e:
             logger.error(f"[Botasaurus] Error: {e}")

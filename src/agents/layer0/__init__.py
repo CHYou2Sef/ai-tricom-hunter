@@ -102,8 +102,8 @@ def process_incoming_file(file_path: str) -> Layer0State:
         telemetry.save_to_json()
 
         logger.info(
-            f"[Layer0] {p.name} → {final.get('final_status')} "
-            f"({len(final.get('emitted_events', []))} file(s) emitted to L1) | {duration:.2f}s"
+            f"[Layer 0] ✅ Processing complete for {p.name} → Status: {final.get('final_status')} "
+            f"({len(final.get('emitted_events', []))} chunk(s) emitted to Layer 1 queue) | {duration:.2f}s"
         )
         return final
 

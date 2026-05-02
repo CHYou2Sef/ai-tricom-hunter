@@ -223,6 +223,8 @@ CAPTCHA_INDICATORS = [
     "captcha",
     "access denied",
     "blocked",
+    "checking your browser before accessing",
+    "performance & security by cloudflare",
 ]
 
 

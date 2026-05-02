@@ -30,6 +30,7 @@ COLUMN_KEYWORDS = {
     "raison_sociale": [
         "raison sociale", "raison_sociale",
         "denomination", "dénomination",
+        "denominationusuelle", "denominationusuelleetablissement",
         "denominationunite",       # INSEE: denominationUniteLegale
         "nom commercial", "nomcommercial",
         "nom de l'entreprise", "nom entreprise",

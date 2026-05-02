@@ -2,7 +2,7 @@
 utils/universal_extractor.py
 
 Universal Unified Extractor (UUE)
-This module acts as the central brain for all 4 browser tiers. 
+This module acts as the central brain for all browser tiers. 
 Instead of browsers attempting to parse data via Javascript or CSS locators dynamically 
 (which often fails and triggers false alerts), the browsers simply pass the full HTML DOM 
 string here.

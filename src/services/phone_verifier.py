@@ -14,9 +14,9 @@ from core.logger import get_logger
 
 logger = get_logger(__name__)
 
-def verify_phone_numverify(phone: str) -> Dict[str, Any]:
+def verify_phone_neutrino(phone: str) -> Dict[str, Any]:
     """
-    Validate a phone number using the Numverify API.
+    Validate a phone number using the Neutrino API.
     
     Args:
         phone: The phone number string to validate.
@@ -24,35 +24,47 @@ def verify_phone_numverify(phone: str) -> Dict[str, Any]:
     Returns:
         A dict containing 'valid' (bool) and other metadata.
     """
-    if not config.NUMVERIFY_ENABLED or not config.NUMVERIFY_API_KEY:
-        logger.debug("[Verifier] Numverify is disabled or missing API key.")
+    if not config.NEUTRINO_ENABLED or not config.NEUTRINO_API_KEY or not config.NEUTRINO_USER_ID:
+        logger.debug("[Verifier] Neutrino is disabled or missing credentials.")
         return {"valid": None, "reason": "disabled"}
 
     # Clean phone for API (remove spaces, etc.)
     clean_phone = "".join(filter(str.isdigit, phone))
     # Ensure it starts with 33 for France if it starts with 0
     if clean_phone.startswith("0") and len(clean_phone) == 10:
-        clean_phone = "33" + clean_phone[1:]
+        clean_phone = "+33" + clean_phone[1:]
     
     try:
-        url = f"http://apilayer.net/api/validate?access_key={config.NUMVERIFY_API_KEY}&number={clean_phone}"
-        response = requests.get(url, timeout=10)
+        url = "https://neutrinoapi.net/phone-validate"
+        headers = {
+            "user-id": config.NEUTRINO_USER_ID,
+            "api-key": config.NEUTRINO_API_KEY
+        }
+        params = {
+            "number": clean_phone
+        }
+        response = requests.get(url, headers=headers, params=params, timeout=10)
         data = response.json()
         
+        # Neutrino API error handling
+        if response.status_code != 200 or "api-error" in data:
+            logger.error(f"[Verifier] Neutrino API error: {data.get('api-error-msg', 'Unknown Error')}")
+            return {"valid": None, "reason": "error"}
+
         if not data.get("valid"):
-            logger.warning(f"❌ [Verifier] Numverify rejected number {phone}: {data.get('error', 'Invalid')}")
-            return {"valid": False, "carrier": data.get("carrier"), "line_type": data.get("line_type")}
+            logger.warning(f"❌ [Verifier] Neutrino rejected number {phone}")
+            return {"valid": False, "carrier": None, "line_type": None}
         
-        logger.info(f"✅ [Verifier] Numverify VALIDATED number {phone} ({data.get('line_type')})")
+        logger.info(f"✅ [Verifier] Neutrino VALIDATED number {phone} ({data.get('type')})")
         return {
             "valid": True,
-            "carrier": data.get("carrier"),
-            "line_type": data.get("line_type"),
+            "carrier": None, # Neutrino often doesn't provide carrier in the basic response
+            "line_type": data.get("type"), # 'mobile', 'fixed-line', etc.
             "location": data.get("location"),
-            "country_name": data.get("country_name")
+            "country_name": data.get("country")
         }
     except Exception as e:
-        logger.error(f"[Verifier] Numverify API error: {e}")
+        logger.error(f"[Verifier] Neutrino exception: {e}")
         return {"valid": None, "reason": "error"}
 
 def verify_phone_consensus(phone: str, harvested_list: list) -> bool:

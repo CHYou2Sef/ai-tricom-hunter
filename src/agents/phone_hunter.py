@@ -22,7 +22,7 @@ from common.text_cleaner import clean_html_to_text
 from domain.search.phone_extractor import extract_phones, get_best_phone, normalize_phone, get_phone_metadata
 from common.json_parser import parse_ai_mode_json
 from infra.intelligence.ollama_client import ollama_client
-from services.phone_verifier import verify_phone_numverify, verify_phone_consensus
+from services.phone_verifier import verify_phone_neutrino, verify_phone_consensus
 
 logger = get_logger(__name__)
 
@@ -109,7 +109,11 @@ async def _extract_geo_phone(row: ExcelRow, agent, page_content: str) -> Optiona
     logger.info(f"    [GEO] Initializing Local LLM (Ollama) fallback...")
     # Clamp context to 8k chars to fit small models (3B params) and avoid OOM
     context = clean_html_to_text(page_content)[:8000].strip()
-    geo_prompt = config.GEO_FALLBACK_PROMPT.replace("{nom}", str(nom or row.siren)).replace("{adresse}", str(row.adresse or "")).replace("{raw_web_context}", str(context))
+    
+    # FIX: 'nom' was undefined, using row.nom or row.siren as fallback
+    company_name = row.nom or row.siren or "Entreprise Inconnue"
+    
+    geo_prompt = config.GEO_FALLBACK_PROMPT.replace("{nom}", str(company_name)).replace("{adresse}", str(row.adresse or "")).replace("{raw_web_context}", str(context))
     geo_response = await ollama_client.complete(geo_prompt)
     if geo_response:
         row.raw_ai_responses.append({"text": geo_response, "source": "ollama_local", "query": geo_prompt[:200]})
@@ -219,6 +223,15 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
             elif isinstance(val, list): val = ", ".join(str(v) for v in val if v)
             if val and str(val).strip().upper() not in _null_values:
                 clean_val = str(val).strip()
+                
+                # BUG FIX: Systematically normalize phone fields to apply blocklist/validation
+                if row_key == "direct_phone":
+                    norm_val = normalize_phone(clean_val)
+                    if not norm_val:
+                        logger.debug(f"[PhoneHunter] Rejected direct_phone (blocked/invalid): {clean_val}")
+                        continue
+                    clean_val = norm_val
+
                 row.enriched_fields[row_key] = {"value": clean_val, "source": "google_ai_mode", "confidence": 0.97}
                 if attr and not getattr(row, attr, None):
                     setattr(row, attr, clean_val)
@@ -299,7 +312,7 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
     if hasattr(agent, 'current_row_index'):
         agent.current_row_index = row.row_index
         
-    logger.info(f"🔍 [Verification] Row {progress_str} | Target: '{row.nom}' | SIREN: {siren_log} | Localité: '{row.adresse}'")
+    logger.info(f"🔍 [Layer 1] Row {progress_str} | Target: '{row.nom}' | SIREN: {siren_log} | Localité: '{row.adresse}'")
     
     row.processing_start_ts = time.perf_counter()
     harvested = [] # List of {'num', 'score', 'source'}
@@ -357,7 +370,11 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
         
         for url, source_tag in targets[:3]: # Cap at 3 discovery visits
             if any(h['score'] >= 90 for h in harvested): break
-            logger.info(f"🔎 [DeepDiscovery] Opening: {url}")
+            platform_name = "Website"
+            if "facebook" in url.lower() or "fb" in source_tag: platform_name = "Facebook"
+            elif "linkedin" in url.lower() or "li" in source_tag: platform_name = "LinkedIn"
+            elif "instagram" in url.lower() or "ig" in source_tag: platform_name = "Instagram"
+            logger.info(f"🔎 [Layer 1] DeepDiscovery ({platform_name}) | Opening: {url}")
             if await agent.goto_url(url):
                 source = await agent.get_page_source()
                 if source:
@@ -454,7 +471,7 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
             # ── [Phase 1: Scale-Up] Automated Verification ──
             # If we have a mismatch but a deterministic API validates the number,
             # we can upgrade the status to DONE with a warning.
-            v_res = verify_phone_numverify(row.phone)
+            v_res = verify_phone_neutrino(row.phone)
             if v_res.get("valid"):
                 row.status = "DONE"
                 row.enriched_fields["verified"] = True

@@ -118,9 +118,10 @@ ENRICH_ENABLED = os.getenv("ENRICH_ENABLED", "true").lower() == "true"
 ENRICH_FORCE_RETRY = os.getenv("ENRICH_FORCE_RETRY", "false").lower() == "true"
 
 # ── PHONE VERIFICATION (Phase 5) ──
-# Numverify API: deterministic validation for high-risk phone numbers.
-NUMVERIFY_API_KEY = os.getenv("NUMVERIFY_API_KEY", "")
-NUMVERIFY_ENABLED = os.getenv("NUMVERIFY_ENABLED", "false").lower() == "true"
+# Neutrino API: high-accuracy phone validation.
+NEUTRINO_USER_ID = os.getenv("NEUTRINO_USER_ID", "")
+NEUTRINO_API_KEY = os.getenv("NEUTRINO_API_KEY", "")
+NEUTRINO_ENABLED = os.getenv("NEUTRINO_ENABLED", "true").lower() == "true"
 
 # ── FIRECRAWL INTEGRATION (Premium Tier 6) ──
 # Firecrawl: managed scraping/crawling with AI-powered extraction.
@@ -336,7 +337,7 @@ def get_worker_profile_path(worker_id: int, tier: str = "default") -> str:
 # ── Human Noise / Session Seasoning ──
 # Occasionally visiting "Trust Sites" (YouTube, Wikipedia) to build profile trust.
 ENABLE_HUMAN_NOISE = os.getenv("ENABLE_HUMAN_NOISE", "true").lower() == "true"
-HUMAN_NOISE_INTERVAL = int(os.getenv("HUMAN_NOISE_INTERVAL", "15")) # Every 15 rows
+HUMAN_NOISE_INTERVAL = int(os.getenv("HUMAN_NOISE_INTERVAL", "8")) # Every 8 rows
 HUMAN_NOISE_SITES = [
     "https://www.youtube.com",
     "https://www.wikipedia.org",
@@ -457,17 +458,17 @@ def _opt(prompt: str) -> str:
 # {nom}     → replaced by company name (Raison Sociale) or SIREN
 # {adresse} → replaced by the company address
 SEARCH_PROMPT_TEMPLATE = _opt(
-    "En tant qu'expert en recherche B2B, identifiez les informations de contact les plus fiables et récentes pour l'entreprise '{nom}' à '{adresse}'. Suivez les principes EEAT : priorisez les sources officielles (site web, Infogreffe, LinkedIn). Trouvez le numéro de téléphone exact, l'adresse postale complète et le SIREN/SIRET. Si plusieurs numéros existent, donnez le plus crédible. Output in json format."
+    "En tant qu'expert en recherche B2B, identifiez les informations de contact les plus fiables et récentes pour l'entreprise '{nom}' à '{adresse}' (Secteur/Activité: {category}). Suivez les principes EEAT : priorisez les sources officielles (site web, Infogreffe, LinkedIn). Trouvez le numéro de téléphone exact, l'adresse postale complète et le SIREN/SIRET. Si plusieurs numéros existent, donnez le plus crédible. Output in json format."
 )
 
 # Template for SIREN-based search (Expertise-focused)
 SIREN_SEARCH_TEMPLATE = _opt(
-    "En tant qu'expert B2B, identifiez la Raison Sociale, l'adresse complète et le téléphone officiel pour le SIREN {siren}. Priorisez les bases de données d'autorité (INSEE, Infogreffe, Pappers). Output in json format."
+    "En tant qu'expert B2B, identifiez la Raison Sociale, l'adresse complète et le téléphone officiel pour le SIREN {siren} (Activité: {category}). Priorisez les bases de données d'autorité (INSEE, Infogreffe, Pappers). Output in json format."
 )
 
 # Specific prompt for agent phone number (Experience-focused)
 AGENT_PHONE_PROMPT_TEMPLATE = _opt(
-    "Identifiez le numéro de téléphone direct d'un agent commercial ou responsable pour '{nom}' à '{adresse}'. Utilisez des sources d'expérience (LinkedIn, facebook, pages contact) pour garantir la fiabilité EEAT. Output in json format."
+    "Identifiez le numéro de téléphone direct d'un agent commercial ou responsable pour '{nom}' à '{adresse}' (Secteur: {category}). Utilisez des sources d'expérience (LinkedIn, facebook, pages contact) pour garantir la fiabilité EEAT. Output in json format."
 )
 
 # ── SQO (Search Query Optimization) ──
@@ -517,7 +518,7 @@ AI_MODE_EXPERT_PROMPT = _opt("""
 Advanced Data Forensic Agent for the French B2B Market.
 
 ### MISSION
-The standard search failed. Conduct a deep-dive investigation on '{nom}' at '{adresse}' (SIREN: {siren}).
+The standard search failed. Conduct a deep-dive investigation on '{nom}' at '{adresse}' (SIREN: {siren}, CATEGORY: {category}).
 Target Activity: {category}
 
 ### STEPS
@@ -586,8 +587,8 @@ CONTACT_KEYWORDS = ["contact", "propos", "mentions", "legal", "qui-sommes-nous",
 
 # Random delay (seconds) between each search request.
 # The agent picks a random value in [MIN, MAX] each time.
-MIN_DELAY_SECONDS = 4
-MAX_DELAY_SECONDS = 11
+MIN_DELAY_SECONDS = 8
+MAX_DELAY_SECONDS = 20
 
 # How long (seconds) the agent PAUSES and waits for YOU to solve a CAPTCHA
 # manually in the browser window before moving on to the next row.

@@ -438,9 +438,7 @@ async def _extract_phone_for_row(
         return None
 
     # Step 1 — Standard prompt
-    prompt = config.AI_MODE_SEARCH_PROMPT.format(
-        nom=nom, adresse=adr, siren=siren, category=category, extra=extra
-    )
+    prompt = config.AI_MODE_SEARCH_PROMPT.replace("{nom}", str(nom)).replace("{adresse}", str(adr)).replace("{siren}", str(siren)).replace("{category}", str(category)).replace("{extra}", str(extra))
     raw_result = await agent.search_google_ai_mode(prompt)
     if raw_result:
         parsed = _parse_json_safe(raw_result)
@@ -460,9 +458,7 @@ async def _extract_phone_for_row(
         if phone: return phone, "regex_fallback"
 
     # Step 2 — Expert retry prompt
-    expert_prompt = config.AI_MODE_EXPERT_PROMPT.format(
-        nom=nom, adresse=adr, siren=siren, category=category, extra=extra
-    )
+    expert_prompt = config.AI_MODE_EXPERT_PROMPT.replace("{nom}", str(nom)).replace("{adresse}", str(adr)).replace("{siren}", str(siren)).replace("{category}", str(category)).replace("{extra}", str(extra))
     raw_expert = await agent.search_google_ai_mode(expert_prompt)
     if raw_expert:
         parsed = _parse_json_safe(raw_expert)

@@ -193,12 +193,15 @@ def read_excel(filepath: str) -> Tuple[List[ExcelRow], dict]:
     mapping = detect_columns(headers)
     validation = validate_mapping(mapping)
 
-    if not validation["can_search_rs"] and not validation["can_search_siren"]:
-        logger.warning("[Reader] Heuristics failed. Trying LLM mapping...")
+    # On force le LLM si les heuristiques ont raté la Raison Sociale, l'Adresse ou l'Activité
+    # afin de récupérer un maximum de contexte pour la recherche.
+    if not validation.get("has_raison_sociale") or not validation.get("has_adresse") or not mapping.get("activite"):
+        logger.warning("[Reader] Missing key fields (RS, Address, or Activity). Trying LLM mapping via OpenRouter...")
         sample_data = df.head(3).values.tolist()
         llm_mapping = asyncio.run(detect_columns_with_llm(headers, sample_data))
         if llm_mapping:
-            mapping.update({k: v for k, v in llm_mapping.items() if v})
+            # On ne met à jour que les clés trouvées par le LLM (sans écraser avec des None)
+            mapping.update({k: v for k, v in llm_mapping.items() if v is not None})
             validation = validate_mapping(mapping)
 
     rows: List[ExcelRow] = []
