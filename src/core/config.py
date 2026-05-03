@@ -248,11 +248,13 @@ CAPTCHA_SOLVER  = os.getenv("CAPTCHA_SOLVER", "manual")   # "manual" | "2captcha
 CAPTCHA_API_KEY = os.getenv("CAPTCHA_API_KEY", "")        # Leave blank to use manual mode
 
 # ══ Tier Classification (docs/Gemini.md blueprint) ───────────────────────────
-#   Tier 1 → SeleniumBaseAgent (UC Mode — PRIMARY, stealth + CDP)
-#   Tier 2 → PatchrightAgent   (Chrome stealth, patched binary)
-#   Tier 3 → NodriverAgent     (CDP-only, suits Cloudflare sites)
-#   Tier 4 → Crawl4AIAgent     (managed JS rendering, e-commerce)
-#   Tier 5 → CamoufoxAgent     (Firefox anti-detect, last resort)
+#   Tier 1 → (Reserved)
+#   Tier 2 → SeleniumBaseAgent (UC Mode — PRIMARY, stealth + CDP)
+#   Tier 3 → BotasaurusAgent    (Anti-detect, profile rotation)
+#   Tier 4 → CloakAgent         (Supreme Stealth, C++ patched binary)
+#   Tier 5 → NodriverAgent      (CDP-only, suits Cloudflare sites)
+#   Tier 6 → Crawl4AIAgent      (managed JS rendering, e-commerce)
+#   Tier 7 → CamoufoxAgent      (Firefox anti-detect, last resort)
 HYBRID_TIER2_DOMAINS = [
     "cloudflare", "linkedin.com", "facebook.com",
     "instagram.com", "leboncoin.fr",
@@ -271,6 +273,9 @@ SELENIUM_ENABLED = os.getenv("SELENIUM_ENABLED", "false").lower() == "true"
 # Per docs/Gemini.md: "Use Driver(uc=True, headless=False)"
 # "Ne jamais utiliser headless=True avec le mode UC/CDP sur Linux"
 SELENIUMBASE_ENABLED         = os.getenv("SELENIUMBASE_ENABLED", "true").lower() == "true"
+
+# ── Tier 4: CloakBrowser (Supreme Stealth — C++ patched) ────────────────
+CLOAKBROWSER_ENABLED         = os.getenv("CLOAKBROWSER_ENABLED", "true").lower() == "true"
 
 # Reconnect-time (seconds) after a Turnstile/Cloudflare challenge.
 # Gemini.md §2: "Toujours inclure reconnect_time si un défi Turnstile est suspecte."
@@ -292,8 +297,8 @@ BOTASAURUS_CACHE_MAX_AGE_HOURS = int(os.getenv("BOTASAURUS_CACHE_MAX_AGE_HOURS",
 #   "full"     → All 5 Tiers (includes Firecrawl if enabled).
 PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "full").lower()
 
-# Strict cap on waterfall depth (3 allows Tier 3 - Nodriver)
-MAX_WATERFALL_TIER = int(os.getenv("MAX_WATERFALL_TIER", "4"))
+# Strict cap on waterfall depth (10 allows full waterfall)
+MAX_WATERFALL_TIER = int(os.getenv("MAX_WATERFALL_TIER", "10"))
 
 # If True, Firecrawl will be used as the ultimate fallback (Tier 5)
 USE_FIRECRAWL_FALLBACK = os.getenv("USE_FIRECRAWL_FALLBACK", "false").lower() == "true"
@@ -402,6 +407,54 @@ def find_chrome_executable() -> str:
         if os.path.exists(p):
             return p
             
+    # 4. Fallback: CloakBrowser Stealth Binary
+    cloak_path = find_cloak_binary()
+    if cloak_path:
+        return cloak_path
+
+    return ""
+
+def find_cloak_binary() -> str:
+    """
+    Detects the CloakBrowser supreme stealth binary.
+    Resolution: Package CLI > system 'cloakbrowser' CLI > ~/.cloakbrowser cache.
+    """
+    import subprocess
+    import sys
+    import shutil
+    
+    # 1. Try python module (works if in venv or global python)
+    try:
+        res = subprocess.run(
+            [sys.executable, "-m", "cloakbrowser", "info"],
+            capture_output=True, text=True, timeout=2
+        )
+        for line in res.stdout.splitlines():
+            if any(k in line for k in ["Binary:", "Path:", "Executable:"]):
+                p = line.split(":", 1)[1].strip().replace("'", "").replace("\"", "")
+                if os.path.exists(p): return p
+    except: pass
+
+    # 2. Try standalone CLI if in PATH
+    cloak_cli = shutil.which("cloakbrowser")
+    if cloak_cli:
+        try:
+            res = subprocess.run([cloak_cli, "info"], capture_output=True, text=True, timeout=2)
+            for line in res.stdout.splitlines():
+                if "Binary:" in line or "Path:" in line:
+                    p = line.split(":", 1)[1].strip()
+                    if os.path.exists(p): return p
+        except: pass
+
+    # 3. Direct cache lookup (standard installation paths)
+    home = Path.home()
+    candidates = [
+        home / ".cloakbrowser" / "chrome-linux" / "chrome",
+        home / ".cache" / "cloakbrowser" / "chrome-linux" / "chrome",
+        Path("/usr/local/bin/cloakbrowser-chromium"), # Heuristic for some custom builds
+    ]
+    for c in candidates:
+        if c.exists(): return str(c.resolve())
     return ""
 
 # Source of truth for all agents

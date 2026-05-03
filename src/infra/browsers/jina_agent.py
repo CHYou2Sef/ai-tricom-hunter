@@ -62,7 +62,8 @@ class JinaAgent(BaseBrowserAgent):
                     self._last_content = response.text
                     return True
                 elif response.status_code == 402:
-                    logger.error("[Jina] 🛑 CRÉDITS ÉPUISÉS (Statut 402). Veuillez recharger votre compte sur https://jina.ai")
+                    logger.error("[Jina] 🛑 CRÉDITS ÉPUISÉS (Statut 402). Désactivation de l'agent.")
+                    self.enabled = False
                     return False
                 else:
                     logger.error(f"[Jina] Failed with status {response.status_code}")
@@ -115,7 +116,8 @@ class JinaAgent(BaseBrowserAgent):
                 if response.status_code == 200:
                     return response.text
                 elif response.status_code == 402:
-                    logger.error("[Jina] 🛑 CRÉDITS ÉPUISÉS (Statut 402). La recherche est désactivée jusqu'au rechargement.")
+                    logger.error("[Jina] 🛑 CRÉDITS ÉPUISÉS (Statut 402). Désactivation de la recherche.")
+                    self.enabled = False
                     return None
                 else:
                     logger.error(f"[Jina] Echec de la recherche (statut {response.status_code})")

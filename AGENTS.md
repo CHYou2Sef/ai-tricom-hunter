@@ -15,7 +15,7 @@ L'infrastructure utilise une cascade de 10 tiers pour garantir l'extraction :
 
 1.  **Tier 2 (SeleniumBase UC)** : ⭐ Primaire. Stealth maximal, gère Cloudflare Turnstile.
 2.  **Tier 3 (Botasaurus)** : 🦖 Anti-détection robuste avec rotation de profils.
-3.  **Tier 4 (Patchright)** : 🟦 Chrome patché pour la discrétion.
+3.  **Tier 4 (CloakBrowser)** : 🕵️ **Supreme Stealth**. Patches C++ source-level, bypass Turnstile/reCAPTCHA.
 4.  **Tier 5 (Nodriver)** : 🟢 Pilotage CDP direct (sans WebDriver), idéal pour les WAF durs.
 5.  **Tier 6 (Crawl4AI)** : 🟡 Rendu JS managé pour les sites e-commerce.
 6.  **Tier 7 (Camoufox)** : 🦊 Firefox anti-detect (très puissant, dernier recours Chrome).

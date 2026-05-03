@@ -84,7 +84,7 @@ TIER_NAMES = {
     # but no phone number was returned by the browser tier.
     2: "seleniumbase",
     3: "botasaurus",
-    4: "patchright",
+    4: "cloakbrowser",
     5: "nodriver",
     6: "crawl4ai",
     7: "camoufox",
@@ -117,7 +117,7 @@ class HybridAutomationEngine:
         # Tier 1 slot removed — Scrapy is now a post-discovery bonus, not a waterfall tier.
         self._tier2: Optional[object] = None   # SeleniumBaseAgent  (UC Driver) ⭐ PRIMARY
         self._tier3: Optional[object] = None   # BotasaurusAgent    (Anti-detect)
-        self._tier4: Optional[object] = None   # PatchrightAgent    (Chrome stealth)
+        self._tier4: Optional[object] = None   # CloakAgent         (Supreme Stealth)
         self._tier5: Optional[object] = None   # NodriverAgent      (Chrome CDP)
         self._tier6: Optional[object] = None   # Crawl4AIAgent      (Chrome managed)
         self._tier7: Optional[object] = None   # CamoufoxAgent      (Firefox anti-detect)
@@ -225,12 +225,12 @@ class HybridAutomationEngine:
                 await self._tier3.start()
                 logger.info(f"[HybridEngine] ✅ Tier 3 🦖 (Botasaurus) started for worker {self.worker_id}.")
 
-            # ── Tier 4: PatchrightAgent (Chrome stealth) ───────────────────
+            # ── Tier 4: CloakAgent (Supreme Stealth — C++ patched) ───────────
             elif tier == 4 and not self._tier4:
-                from infra.browsers.patchright_agent import PatchrightAgent
-                self._tier4 = PatchrightAgent(worker_id=self._worker_id)
+                from infra.browsers.cloak_agent import CloakAgent
+                self._tier4 = CloakAgent(worker_id=self._worker_id)
                 await self._tier4.start()
-                logger.info(f"[HybridEngine] ✅ Tier 4 (Patchright/Chrome) started for worker {self.worker_id}.")
+                logger.info(f"[HybridEngine] ✅ Tier 4 (CloakBrowser/Supreme) started for worker {self.worker_id}.")
 
             # ── Tier 5: NodriverAgent (Chrome CDP) ────────────────────────
             elif tier == 5 and not self._tier5:
@@ -713,7 +713,7 @@ class HybridAutomationEngine:
             1: "Scrapy 🕷️   ",
             2: "SBase-UC   ⭐",
             3: "Botasaurus 🦖",
-            4: "Patchright 🟦",
+            4: "CloakBrowser🕵️",
             5: "Nodriver   🟢",
             6: "Crawl4AI   🟡",
             7: "Camoufox 🦊 ",

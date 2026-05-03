@@ -44,6 +44,7 @@ jobs:
         run: |
           uv pip install --system ruff pytest
           uv pip install --system -r requirements-prod.txt
+          python -m cloakbrowser install
 
       - name: Pytest (Unit tests only)
         run: |

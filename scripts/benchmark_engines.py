@@ -64,7 +64,7 @@ BENCH_DIR: Path = config.WORK_DIR / "benchmarks"
 TIER_LABELS: Dict[str, str] = {
     "seleniumbase":  "⭐ Tier 2 — SeleniumBase UC (PRIMARY)",
     "botasaurus":    "Tier 3 — Botasaurus Anti-Detect",
-    "patchright":    "Tier 4 — Patchright Stealth",
+    "cloakbrowser":  "Tier 4 — CloakBrowser Supreme Stealth",
     "nodriver":      "Tier 5 — Nodriver CDP",
     "crawl4ai":      "Tier 6 — Crawl4AI Managed",
     "camoufox":      "Tier 7 — Camoufox Firefox",
@@ -90,7 +90,7 @@ def _import(module_path: str, class_name: str):
 ENGINE_REGISTRY = {
     "seleniumbase": lambda: _import("infra.browsers.seleniumbase_agent", "SeleniumBaseAgent"),
     "botasaurus":   lambda: _import("infra.browsers.botasaurus_agent",   "BotasaurusAgent"),
-    "patchright":   lambda: _import("infra.browsers.patchright_agent",   "PatchrightAgent"),
+    "cloakbrowser": lambda: _import("infra.browsers.cloak_agent",        "CloakAgent"),
     "nodriver":     lambda: _import("infra.browsers.nodriver_agent",     "NodriverAgent"),
     "crawl4ai":     lambda: _import("infra.browsers.crawl4ai_agent",     "Crawl4AIAgent"),
     "camoufox":     lambda: _import("infra.browsers.camoufox_agent",     "CamoufoxAgent"),

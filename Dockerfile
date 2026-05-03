@@ -59,6 +59,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 # Patchright requires custom Chromium binaries
 RUN patchright install chromium
 
+# CloakBrowser (Supreme Stealth) - C++ patched Chromium
+RUN python3 -m cloakbrowser install
+
 # SeleniumBase Tier 1 requires chromedriver (UC Mode)
 # We use the built-in installer to ensure version compatibility
 RUN seleniumbase install chromedriver \

@@ -50,7 +50,7 @@ class FirecrawlAgent(BaseBrowserAgent):
         """
         params = {
             "formats": ["markdown"],
-            "only_main_content": True
+            "only_main_content": False
         }
         
         logger.info(f"[Firecrawl] Navigating to: {url}")
@@ -71,7 +71,12 @@ class FirecrawlAgent(BaseBrowserAgent):
             result = self._app.scrape(url, **(params or {}))
             return result
         except Exception as e:
-            logger.error(f"[Firecrawl] Scrape failed for {url}: {e}")
+            err_msg = str(e)
+            if "Insufficient credits" in err_msg or "Payment Required" in err_msg:
+                logger.error("[Firecrawl] 🛑 CRÉDITS ÉPUISÉS. Impossible de scraper.")
+                self.enabled = False
+            else:
+                logger.error(f"[Firecrawl] Scrape failed for {url}: {e}")
             return None
 
     async def extract(self, urls: List[str], prompt: str, schema: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
@@ -118,7 +123,12 @@ class FirecrawlAgent(BaseBrowserAgent):
             )
             return result
         except Exception as e:
-            logger.error(f"[Firecrawl] Crawl failed for {url}: {e}")
+            err_msg = str(e)
+            if "Insufficient credits" in err_msg or "Payment Required" in err_msg:
+                logger.error("[Firecrawl] 🛑 CRÉDITS ÉPUISÉS. Impossible de crawler.")
+                self.enabled = False
+            else:
+                logger.error(f"[Firecrawl] Crawl failed for {url}: {e}")
             return None
 
     async def close(self):
@@ -146,12 +156,31 @@ class FirecrawlAgent(BaseBrowserAgent):
             else:
                 search_query = prompt[:150]
 
-        url = f"https://www.google.com/search?q={urllib.parse.quote(search_query)}"
-        logger.info(f"[Firecrawl] Tentative de recherche Google pour: {search_query}")
-        
-        if await self.goto_url(url):
-            return self._last_content
-        return None
+        logger.info(f"[Firecrawl] Recherche via endpoint natif: {search_query}")
+        try:
+            # Utilise le moteur de recherche optimisé de Firecrawl au lieu de scraper Google manuellement
+            search_result = self._app.search(search_query)
+            
+            # On convertit les résultats en texte/markdown pour l'extracteur universel
+            if search_result and isinstance(search_result, list):
+                markdown_results = []
+                for item in search_result:
+                    title = item.get('title', 'N/A')
+                    snippet = item.get('description', item.get('snippet', ''))
+                    url = item.get('url', '')
+                    markdown_results.append(f"### {title}\nURL: {url}\n{snippet}")
+                
+                self._last_content = "\n\n".join(markdown_results)
+                return self._last_content
+            return None
+        except Exception as e:
+            err_msg = str(e)
+            if "Insufficient credits" in err_msg or "Payment Required" in err_msg:
+                logger.error("[Firecrawl] 🛑 CRÉDITS ÉPUISÉS. Désactivation de l'agent pour cette session.")
+                self.enabled = False
+            else:
+                logger.error(f"[Firecrawl] Native search failed: {e}")
+            return None
 
     async def search_google_ai(self, query: str) -> Optional[str]:
         return await self.search_google_ai_mode(query)

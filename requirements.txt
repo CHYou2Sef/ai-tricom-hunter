@@ -30,6 +30,10 @@ crawlee[all]>=0.4.0
 #   API: 100% identical to Playwright — only the import line changed.
 patchright
 
+# Tier 2.5: CloakBrowser — Source-level C++ patched Chromium.
+#   Supreme stealth, bypasses Turnstile and reCAPTCHA v3.
+cloakbrowser
+
 # Tier 3: Nodriver (Stealth CDP-only agent, zero WebDriver fingerprints)
 nodriver>=0.34
 websockets>=13.0
@@ -84,7 +88,8 @@ pytest-mock>=3.10.0
 # Step 1: pip install -r requirements.txt
 # Step 2: seleniumbase install chromedriver  ← Tier 1 (SeleniumBase UC)
 # Step 3: patchright install chromium        ← Tier 2 (Chrome stealth)
-# Step 4: python -m camoufox fetch           ← Tier 5 (Firefox anti-detect)
+# Step 4: python -m cloakbrowser install     ← Tier 4 (Supreme stealth)
+# Step 5: python -m camoufox fetch           ← Tier 7 (Firefox anti-detect)
 # ──────────────────────────────────────────────────────────────────────
 
 # ollama (Removed for light version)
