@@ -36,7 +36,7 @@ cloakbrowser
 
 # Tier 3: Nodriver (Stealth CDP-only agent, zero WebDriver fingerprints)
 nodriver>=0.34
-websockets>=13.0
+websockets==13.1
 
 # Tier 4: Crawl4AI (Managed scraper, bypasses WAF, markdown support)
 crawl4ai>=0.4.0

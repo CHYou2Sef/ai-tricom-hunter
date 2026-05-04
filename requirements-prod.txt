@@ -17,6 +17,7 @@ seleniumbase>=4.24.0
 patchright>=1.51.0
 cloakbrowser>=0.1.0
 nodriver>=0.34
+websockets==13.1
 botasaurus>=3.2.0
 botasaurus-driver
 crawl4ai>=0.4.0

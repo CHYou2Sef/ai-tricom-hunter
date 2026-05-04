@@ -423,6 +423,11 @@ def find_cloak_binary() -> str:
     import sys
     import shutil
     
+    # 0. Check for explicit environment override (Highest priority)
+    env_path = os.environ.get("CLOAKBROWSER_BINARY_PATH")
+    if env_path and os.path.exists(env_path):
+        return env_path
+
     # 1. Try python module (works if in venv or global python)
     try:
         res = subprocess.run(
@@ -452,12 +457,24 @@ def find_cloak_binary() -> str:
         home / ".cloakbrowser" / "chrome-linux" / "chrome",
         home / ".cache" / "cloakbrowser" / "chrome-linux" / "chrome",
         Path("/usr/local/bin/cloakbrowser-chromium"), # Heuristic for some custom builds
+        WORK_DIR / "cloakbrowser" / "chrome-linux" / "chrome", # Project-local writable cache
     ]
+    
+    # 3b. Check custom cache dir from env
+    custom_cache = os.environ.get("CLOAKBROWSER_CACHE_DIR")
+    if custom_cache:
+        c_path = Path(custom_cache) / "chrome-linux" / "chrome"
+        if c_path.exists(): return str(c_path.resolve())
+
     for c in candidates:
-        if c.exists(): return str(c.resolve())
+        try:
+            if c.exists(): return str(c.resolve())
+        except: continue
     return ""
 
 # Source of truth for all agents
+CLOAKBROWSER_BINARY_PATH = find_cloak_binary()
+
 CHROMIUM_BINARY_PATH = find_chrome_executable()
 
 
@@ -486,6 +503,8 @@ OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "60"))
 # The `aep=42` + `udm=50` parameters bypass standard results and go straight
 # to the AI conversational interface (as seen in the user's screenshot).
 GOOGLE_AI_MODE_URL = "https://www.google.com/search?udm=50&aep=42&source=chrome.crn.rb&q="
+
+DUCKDUCKGO_AI_MODE = "https://duckduckgo.com/chat?q="
 
 # The AI Mode search input element
 GOOGLE_AI_MODE_INPUT = "textarea[name='q'], div[contenteditable='true'], .nojsq"
