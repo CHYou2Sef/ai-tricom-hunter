@@ -126,7 +126,7 @@ NEUTRINO_ENABLED = os.getenv("NEUTRINO_ENABLED", "true").lower() == "true"
 # ── FIRECRAWL INTEGRATION (Premium Tier 6) ──
 # Firecrawl: managed scraping/crawling with AI-powered extraction.
 USE_FIRECRAWL_FALLBACK = os.getenv("USE_FIRECRAWL_FALLBACK", "true").lower() == "true"
-FIRECRAWL_ENABLED = os.getenv("FIRECRAWL_ENABLED", "true").lower() == "true"
+FIRECRAWL_ENABLED = os.getenv("FIRECRAWL_ENABLED", "false").lower() == "true"
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
 
 # ── LAYER 0 — Ingest LangGraph ──────────────────────────────────────────
@@ -153,7 +153,7 @@ JINA_ENABLED = os.getenv("JINA_ENABLED", "false").lower() == "true"
 JINA_API_KEY = os.getenv("JINA_API_KEY", "") # Optional for public API
 
 # Crawlee (Tier 8 - Benchmark)
-CRAWLEE_ENABLED = os.getenv("CRAWLEE_ENABLED", "true").lower() == "true"
+CRAWLEE_ENABLED = os.getenv("CRAWLEE_ENABLED", "false").lower() == "true"
 FIRECRAWL_BASE_URL = os.getenv("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev")
 
 # Number of rows per RETRY chunk file sent back to incoming/.
@@ -705,21 +705,26 @@ PHONE_PATTERNS = [
 # is silently rejected and never stored.
 # Add new offenders here; format: digits only, no spaces.
 FAKE_PHONE_BLOCKLIST: set = {
-    "0123456789",   # Classic demo number (sequential)
-    "0000000000",   # All-zero placeholder
-    "1111111111",   # All-ones placeholder
+    # Numéros factices classiques (séquentiels ou répétitifs)
+    "0123456789",   # Classique numéro démo
+    "0000000000",   # Tous les zéros
+    "1111111111",   # Tous les uns
     "2222222222",
     "3333333333",
-    "0333333333",   # 03-prefix all-3 variant (evidence: row 15)
+    "0333333333",   # Variante avec préfixe 03
     "4444444444",
     "5555555555",
     "6666666666",
     "7777777777",
     "8888888888",
     "9999999999",
-    "0102030405",   # Sequential variant
-    "0605040302",
-    "0600000000",   # Generic mobile placeholder
+    "0102030405",   # Séquence incrémentielle
+    "0605040302",   # Séquence décrémentielle
+    "0107142857",   # Numéro factice signalé par un utilisateur
+    "0333131113",   # Numéro factice signalé par un utilisateur
+
+    # Placeholders génériques
+    "0600000000",   # Placeholder mobile
     "0700000000",
     "0100000000",
     "0200000000",
@@ -727,11 +732,40 @@ FAKE_PHONE_BLOCKLIST: set = {
     "0400000000",
     "0500000000",
     "0900000000",
-    "0107142857",   # Dummy/repeated number reported by user
-    "0917189833",   # Recurring technical/directory number reported by user
-    "0333131113",   # Dummy/repeated number reported by user
-    "0742136299",   # Recurring parasitic directory number (Direct Service)
-}
+
+    # Numéros techniques ou récurrents signalés
+    "0917189833",   # Numéro technique/répertoire récurrent
+    "0742136299",   # Numéro parasitaire répertoire (Direct Service)
+
+    # Préfixes exclusivement réservés au démarchage téléphonique (à bloquer)
+    # Source: Arcep, depuis le 1er janvier 2023
+    "0162",         # Préfixe de démarchage (France métropole)
+    "0163",
+    "0270",
+    "0271",
+    "0377",
+    "0378",
+    "0424",
+    "0425",
+    "0568",
+    "0569",
+    "0948",
+    "0949",
+    # Outre-mer
+    "09475",        # Guadeloupe, Saint-Martin, Saint-Barthélemy
+    "09476",        # Guyane
+    "09477",        # Martinique
+    "09478",        # La Réunion, Mayotte
+    "09479",        # La Réunion, Mayotte
+
+    # Préfixes pour services de revente (souvent utilisés pour des arnaques)
+    "064466",       # Numéros prépayés OnOff (signalés comme scam)
+    "064467",
+    "064468",
+    "064469",
+    "07568",
+    "07569",
+}   
 
 # ═══════════════════════════════════════════════════════════════════
 # 🚫  ANTI-HALLUCINATION: NULL VALUE STRINGS

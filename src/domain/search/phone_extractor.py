@@ -185,10 +185,12 @@ def is_valid_french_phone(digits: str) -> bool:
     Structural anti-hallucination validator. Uses blocklist and structural checks
     before passing to the deep phonenumbers validation.
     """
-    # 1. Hard blocklist (exact matches)
-    if digits in config.FAKE_PHONE_BLOCKLIST:
-        logger.debug(f"[PhoneExtractor] Blocked (blocklist): {digits}")
-        return False
+    # 1. Hard blocklist (Exact matches or Prefix matches)
+    # We use startswith() to catch both full numbers and blocked prefixes (Arcep, etc.)
+    for blocked in config.FAKE_PHONE_BLOCKLIST:
+        if digits.startswith(blocked):
+            logger.debug(f"[PhoneExtractor] Blocked (blocklist match: {blocked}): {digits}")
+            return False
 
     # 2. All same digit: '0000000000', '0666666666', etc.
     if len(set(digits)) == 1:
