@@ -153,7 +153,21 @@ async def main() -> None:
     # 2. Init browser pool for Layer 1
     await init_agent_pool(config.MAX_CONCURRENT_WORKERS)
 
-    # 3. Pre-load existing classified files
+    # 3. Process orphaned files in INCOMING_DIR
+    from common.fs import safe_mkdir
+    safe_mkdir(config.INCOMING_DIR)
+    orphaned_count = 0
+    for fname in sorted(os.listdir(config.INCOMING_DIR)):
+        if fname.startswith((".", "~")) or fname.endswith(".meta.json"): continue
+        p = Path(config.INCOMING_DIR) / fname
+        if p.is_file() and p.suffix.lower() in config.ACCEPTED_EXTENSIONS:
+            logger.info(f"[Supervisor|L0] 📂 Orphaned file detected at startup: {p.name}")
+            process_incoming_file(str(p))
+            orphaned_count += 1
+    if orphaned_count:
+        logger.info(f"[Supervisor] Processed {orphaned_count} orphaned file(s) from INCOMING.")
+
+    # 4. Pre-load existing classified files
     seen: set = set()
     pre_loaded = scan_existing_files(file_queue, seen)
     if pre_loaded:

@@ -283,17 +283,19 @@ async def finalize_file_processing(
     logger.info(f"   ✅ DONE: {len(success_rows)} | ⚠️  LOW_CONF: {len(low_conf_rows)} | 🔁 Retry: {len(retry_rows)}")
     logger.info(f"{'━' * 60}")
 
-    if success_rows:
+    if success_rows or low_conf_rows:
         target = config.OUTPUT_SUCCEED_DIR / orig_path.name
-        await asyncio.to_thread(save_subset_to_excel, success_rows, target)
-        logger.info(f"   💾 Saved to SUCCEED/ folder")
-    
-    if retry_rows:
+        folder_name = "SUCCEED"
+    else:
         target = config.OUTPUT_FAILED_DIR / orig_path.name
-        await asyncio.to_thread(save_subset_to_excel, retry_rows, target)
-        logger.info(f"   🔁 Saved to FAILED/ folder")
+        folder_name = "FAILED"
+
+    import shutil
+    try:
+        shutil.move(original_filepath, str(target))
+        logger.info(f"   💾 Moved entire file to {folder_name}/ folder")
+    except Exception as e:
+        logger.error(f"   ❌ Failed to move file to {folder_name}: {e}")
 
     if progress:
         progress.archive()
-    try: os.remove(original_filepath)
-    except: pass

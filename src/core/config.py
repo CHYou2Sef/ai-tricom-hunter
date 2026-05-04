@@ -58,7 +58,7 @@ INPUT_RS_DIR    = WORK_DIR / "RS"
 INPUT_OTHER_DIR = WORK_DIR / "OTHERS"
 
 # ── LIVE OUTPUTS ───────────────────────────────────────────────
-OUTPUT_ROOT    = WORK_DIR / "output"
+OUTPUT_ROOT    = WORK_DIR / "ARCHIVE" / "FUSION"
 OUTPUT_RS_ADR  = OUTPUT_ROOT / "RS_Adr"
 OUTPUT_SIR_ADR = OUTPUT_ROOT / "Sir_Adr"
 OUTPUT_DEFAULT = OUTPUT_ROOT / "Results"
@@ -112,7 +112,7 @@ SAVE_INTERVAL = int(os.getenv("SAVE_INTERVAL", "10"))
 
 # ── ENRICHMENT ENGINE (Phase 4) ──
 # If True, the agent will attempt to extract secondary data (Email, Siren, Director, Social)
-# Source priority: google_ai_mode (0.97) > aeo_schema (1.00) > gemini_json (0.90)
+# Source priority: aeo_schema (1.00) > gemini_json (0.97) > google_ai (0.75)
 ENRICH_ENABLED = os.getenv("ENRICH_ENABLED", "true").lower() == "true"
 # If True, the agent will re-enrich even if fields are already populated.
 ENRICH_FORCE_RETRY = os.getenv("ENRICH_FORCE_RETRY", "false").lower() == "true"
@@ -149,7 +149,7 @@ LAYER2_TIMEOUT_SEC          = float(os.getenv("LAYER2_TIMEOUT_SEC", "30"))
 
 
 # Jina Reader (Tier 7 - Benchmark)
-JINA_ENABLED = os.getenv("JINA_ENABLED", "true").lower() == "true"
+JINA_ENABLED = os.getenv("JINA_ENABLED", "false").lower() == "true"
 JINA_API_KEY = os.getenv("JINA_API_KEY", "") # Optional for public API
 
 # Crawlee (Tier 8 - Benchmark)
@@ -742,11 +742,12 @@ NULL_VALUE_STRINGS: set = {
     "not_found", "not found", "none", "null", "n/a", "na",
     "non disponible", "non spécifié", "non renseigné",
     "indisponible", "inconnu", "inconnue",
-    "non communiqué", "pas de téléphone",
+    "non communiqué", "pas de téléphone", "pas d'information",
     "aucun", "aucune", "aucun numéro",
     "data_not_found", "missing", "not identified", "non trouvé", "non-disponible",
     "information non disponible publiquement", "non identifié", "non diffusé",
-    "numéro non communiqué", "information non disponible",
+    "numéro non communiqué", "information non disponible", "non renseigné", "non renseignée",
+    "pas d'information", "pas d'info", "aucune information",
     "", ".", "-", "_",
 }
 

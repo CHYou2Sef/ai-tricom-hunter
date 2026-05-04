@@ -114,8 +114,10 @@ async def _extract_geo_phone(row: ExcelRow, agent, page_content: str) -> Optiona
     company_name = row.nom or row.siren or "Entreprise Inconnue"
     
     geo_prompt = config.GEO_FALLBACK_PROMPT.replace("{nom}", str(company_name)).replace("{adresse}", str(row.adresse or "")).replace("{raw_web_context}", str(context))
+    logger.info(f"    💬 [Ollama] Input Prompt (Context length: {len(context)} chars)")
     geo_response = await ollama_client.complete(geo_prompt)
     if geo_response:
+        logger.info(f"    🧠 [Ollama] Output Response: {geo_response.strip()[:200]}...")
         row.raw_ai_responses.append({"text": geo_response, "source": "ollama_local", "query": geo_prompt[:200]})
         try:
             # Ollama may emit markdown → strip everything outside the JSON block
@@ -185,7 +187,7 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
         best = normalize_phone(phones_raw)
     if not best:
         # Fallback: regex on the raw text if JSON key was missing
-        candidates = extract_phones(raw_text, source_label="google_ai_mode")
+        candidates = extract_phones(raw_text, source_label="gemini_json")
         best = get_best_phone(candidates)
     
     # Mapping: output key → list of possible JSON keys (handles model inconsistency)
@@ -350,10 +352,12 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
         if any(h['score'] >= 90 for h in harvested): break
             
         prompt = prompt_key.replace("{nom}", str(nom)).replace("{adresse}", str(adr)).replace("{siren}", str(siren)).replace("{category}", str(category)).replace("{extra}", str(extra))
+        logger.info(f"    💬 [Gemini] Prompt (Length: {len(prompt)}): {prompt[:150]}...")
         ai_raw = await agent.search_google_ai_mode(prompt)
         last_meta = getattr(agent, "last_metadata", None)
         
         if ai_raw:
+            logger.info(f"    🧠 [Gemini] Output (Length: {len(ai_raw)}): {ai_raw[:200]}...")
             row.raw_ai_responses.append({"text": ai_raw, "source": tag, "query": prompt[:100]})
             candidates = extract_phones(ai_raw, source_label=tag)
             for p in candidates: add_unique(p, 97, tag)
@@ -449,7 +453,7 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
             from agents.layer2 import run_layer2_graph
             logger.info(f"🔗 [Layer2] Activating for row #{row.row_index} — sources: {list(l2_social.keys())}")
             l2_result = await run_layer2_graph(row, l2_social, agent)
-            if l2_result:
+            if l2_result and l2_result.get("num"):
                 add_unique(l2_result["num"], l2_result["score"], l2_result["source"])
 
     # 4. Final results mapping

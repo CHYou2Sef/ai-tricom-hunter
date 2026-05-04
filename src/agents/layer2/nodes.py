@@ -12,6 +12,7 @@ from typing import List
 from .state import Layer2State
 from .tools import FacebookPhoneTool, LinkedInPhoneTool, WebsitePhoneTool
 from domain.search.phone_extractor import extract_phones, get_best_phone, normalize_phone
+from domain.enrichment.field_extractor import extract_all
 from core import config
 from core.logger import get_logger
 
@@ -141,18 +142,31 @@ def aggregate_node(state: Layer2State) -> Layer2State:
             continue
 
         seen.add(norm)
+        score = _SCORE_MAP.get(src_type, 80)
+        source_label = f"layer2_{src_type}"
         candidates.append({
             "num":    norm,
-            "score":  _SCORE_MAP.get(src_type, 80),
-            "source": f"layer2_{src_type}",
+            "score":  score,
+            "source": source_label,
         })
+        logger.info(f"    🧠 [Layer 2] Extracted Phone: '{norm}' from {src_type} (Score: {score})")
 
     candidates.sort(key=lambda x: x["score"], reverse=True)
     logger.info(
         f"[L2|aggregate] Row #{state['row_index']} — "
         f"{len(candidates)} unique candidate(s)"
     )
-    return {**state, "phone_candidates": candidates}
+    # --- Secondary Enrichment (Email, Website, etc.) ---
+    enriched_data = {}
+    for res in state.get("scraped_results", []):
+        raw_text = res.get("about") or res.get("text") or ""
+        if raw_text:
+            fields = extract_all(raw_text)
+            for k, v in fields.items():
+                if v and not enriched_data.get(k):
+                    enriched_data[k] = v
+
+    return {**state, "phone_candidates": candidates, "enriched_data": enriched_data}
 
 
 # ── Node 4: Validate best candidate ─────────────────────────────────────

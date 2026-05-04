@@ -105,6 +105,14 @@ async def run_layer2_graph(
         )
         telemetry.save_to_json()
 
+        # --- Merged Enrichment ---
+        enriched = final.get("enriched_data", {})
+        if enriched:
+            for k, v in enriched.items():
+                if v and not getattr(row, k, None):
+                    # Record provenance in enriched_fields
+                    row.enriched_fields[k] = {"value": v, "source": "layer2_scrape"}
+
         if final.get("best_phone"):
             candidates = final.get("phone_candidates", [])
             src = candidates[0].get("source", "layer2") if candidates else "layer2"
@@ -112,6 +120,7 @@ async def run_layer2_graph(
                 "num":    final["best_phone"],
                 "score":  final["confidence"],
                 "source": src,
+                "enriched": enriched
             }
             logger.info(
                 f"✨ [Layer2] Row #{row.row_index} → {result['num']} "
@@ -120,6 +129,9 @@ async def run_layer2_graph(
             # Persist provenance onto the row for downstream reporting
             row.enriched_fields["layer2_source"] = src
             return result
+        elif enriched:
+            # Even if no phone found, if we found data, return it
+            return {"enriched": enriched}
 
     except asyncio.TimeoutError:
         logger.warning(f"[Layer2] Timeout ({timeout}s) for row #{row.row_index}")

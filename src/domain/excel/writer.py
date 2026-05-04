@@ -141,6 +141,14 @@ def _deduplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
         df = df.loc[:, ~df.columns.duplicated(keep='last')]
     return df
 
+def _drop_unwanted_ai_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only essential AI columns in the final Excel for a clean look."""
+    allowed_ai_cols = {"AI_Phone", "AI_Phone_Responsable", config.STATUS_COLUMN_NAME}
+    extra_ai_cols = [c for c in df.columns if str(c).startswith("AI_") and c not in allowed_ai_cols]
+    if extra_ai_cols:
+        df = df.drop(columns=extra_ai_cols)
+    return df
+
 def save_subset_to_excel(rows: list, target_path: Path) -> None:
     """Save a list of ExcelRow objects using Pandas with Pro formatting."""
     if not rows: return
@@ -154,7 +162,7 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
         df = df.rename(columns={
             "__status": config.STATUS_COLUMN_NAME, 
             "__phone": "AI_Phone", 
-            "__agent_phone": "AI_Agent_Phone"
+            "__agent_phone": "AI_Phone_Responsable"
         })
     
     # 2. Drop technical internal columns (starting with __)
@@ -164,6 +172,9 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
     
     # 3. Protection against duplicate columns
     df = _deduplicate_columns(df)
+    
+    # 4. Drop non-essential AI columns for a clean Excel layout
+    df = _drop_unwanted_ai_columns(df)
 
     safe_mkdir(target_path.parent)
     suffix = target_path.suffix.lower()
@@ -233,11 +244,14 @@ def save_results(rows: list, original_filepath: str, force: bool = False) -> Non
     new_df = new_df.rename(columns={
         "__status": config.STATUS_COLUMN_NAME, 
         "__phone": "AI_Phone", 
-        "__agent_phone": "AI_Agent_Phone"
+        "__agent_phone": "AI_Phone_Responsable"
     })
     
     # Deduplicate columns in new_df
     new_df = _deduplicate_columns(new_df)
+    
+    # Drop non-essential AI columns
+    new_df = _drop_unwanted_ai_columns(new_df)
 
     # 2. Merge with existing if available
     if fusion_path.exists():

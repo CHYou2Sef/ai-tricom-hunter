@@ -104,7 +104,7 @@ class HybridAutomationEngine:
     and routes each task to the appropriate one.
     """
     # ── Configuration & Resource Locks ─────────────────────────────────────
-    _CB_THRESHOLD = 5      # Consecutive failures before opening circuit
+    _CB_THRESHOLD = 3      # Consecutive failures before opening circuit
     _CB_PAUSE_SEC  = 300   # 5 minutes pause — lets WAF cool down + proxy rotate
     
     # Tier 5 (Camoufox/Firefox) is extremely heavy (~1 GB RAM).
@@ -412,16 +412,15 @@ class HybridAutomationEngine:
         elif p_mode == "stealth":
             tier_sequence = [2, 5]        # SeleniumBase + Nodriver
         elif p_mode == "balanced":
-            tier_sequence = [2, 3, 4]     # SeleniumBase + Botasaurus + Patchright
+            tier_sequence = [2, 3, 4]     # SeleniumBase + Botasaurus + CloakBrowser
         else:
-            # "full" mode or unknown
-            max_t = 6
-            if config.CAMOUFOX_ENABLED: max_t = 7
-            if config.FIRECRAWL_ENABLED: max_t = 8
-            if config.JINA_ENABLED:      max_t = 9
-            if config.CRAWLEE_ENABLED:   max_t = 10
-            start_t = max(2, config.HYBRID_DEFAULT_TIER)  # Never below Tier 2
-            tier_sequence = list(range(start_t, max_t + 1))
+            # "full" mode or custom Golden Path sequence
+            tier_sequence = [2, 5, 4, 6]
+            
+            # Additional tiers if explicitly configured to run beyond the Golden Path
+            if config.CAMOUFOX_ENABLED: tier_sequence.append(7)
+            if config.FIRECRAWL_ENABLED: tier_sequence.append(8)
+            if config.CRAWLEE_ENABLED: tier_sequence.append(10)
 
         # Apply strict global cap from config
         tier_sequence = [t for t in tier_sequence if t <= config.MAX_WATERFALL_TIER]
@@ -490,12 +489,12 @@ class HybridAutomationEngine:
             self._stats[tier]["attempts"] += 1
 
             try:
-                # ── 2.2 THE SAFETY NET: TIMEOUT GUARD (P0 FIX) ────────────
+                # ── 2.2 THE SAFETY NET: TIMEOUT GUARD (Fail-Fast) ────────────
                 # Prevents a single hung browser from blocking the whole agent loop.
                 try:
-                    result = await asyncio.wait_for(method(*args, **kwargs), timeout=90.0)
+                    result = await asyncio.wait_for(method(*args, **kwargs), timeout=20.0)
                 except asyncio.TimeoutError:
-                    logger.warning(f"⏳ [HybridEngine] Tier {tier} TIMEOUT in '{method_name}' after 90s. Escalating...")
+                    logger.warning(f"⏳ [HybridEngine] Tier {tier} TIMEOUT in '{method_name}' after 20s. Escalating...")
                     await self.stop_tier(tier) # KILL IMMEDIATELY
                     continue # Try next tier
                 
