@@ -353,7 +353,7 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
             
         prompt = prompt_key.replace("{nom}", str(nom)).replace("{adresse}", str(adr)).replace("{siren}", str(siren)).replace("{category}", str(category)).replace("{extra}", str(extra))
         logger.info(f"    💬 [Gemini] Prompt (Length: {len(prompt)}): {prompt[:150]}...")
-        ai_raw = await agent.search_google_ai_mode(prompt)
+        ai_raw = await agent.search_google_ai_mode(prompt, row=row)
         last_meta = getattr(agent, "last_metadata", None)
         
         if ai_raw:

@@ -619,11 +619,59 @@ class HybridAutomationEngine:
     # ── Delegated Browser Methods ───────────────────────────────────────────
     # These act as drop-in replacements for PatchrightAgent methods.
     
-    async def search_google_ai_mode(self, prompt: str) -> Optional[str]:
-        """AI Mode search via browser waterfall, then Scrapy bonus if URL found but no phone."""
-        result = await self._execute_with_waterfall("search_google_ai_mode", prompt)
+    async def search_google_ai_mode(self, prompt: str, row: Optional[any] = None) -> Optional[str]:
+        """
+        AI Mode search via browser waterfall.
+        
+        Implements a dynamic engine-toggle strategy and an optional 
+        interactive human-like flow.
+        """
+        # ── 0. Optional Interactive Flow (Human-Like) ──────────────────────────
+        # If enabled in config, we bypass the direct URL generation and use
+        # the high-stealth interactive flow (navigating to Google, typing).
+        if getattr(config, "FORCE_HUMAN_INTERACTIVE", False):
+            logger.info("[HybridEngine] 🎭 Forcing Interactive (Human-Like) search flow.")
+            return await self.search_google_ai_interactive(prompt, row=row)
 
-        # ── Scrapy Post-Discovery Bonus ──────────────────────────────────────────────
+        # ── Engine selection ──────────────────────────────────────────────────
+        toggle_interval = getattr(config, "ENGINE_TOGGLE_INTERVAL", 100)
+        slot = (self.current_row_index // toggle_interval) % 2
+
+        if slot == 0:
+            primary_url   = config.GOOGLE_AI_MODE_URL
+            fallback_url  = config.DUCKDUCKGO_AI_MODE
+            provider      = "Google"
+            fallback_name = "DuckDuckGo"
+        else:
+            primary_url   = config.DUCKDUCKGO_AI_MODE
+            fallback_url  = config.GOOGLE_AI_MODE_URL
+            provider      = "DuckDuckGo"
+            fallback_name = "Google"
+
+        logger.info(
+            f"[HybridEngine] 🔄 Search provider: {provider} "
+            f"(row={self.current_row_index}, slot={slot}, interval={toggle_interval})"
+        )
+
+        # ── Primary attempt ───────────────────────────────────────────────────
+        result = await self._execute_with_waterfall(
+            "search_google_ai_mode", prompt, ai_mode_url=primary_url
+        )
+
+        # ── Cross-provider fallback ───────────────────────────────────────────
+        # Only if the primary attempt completely failed and the circuit breaker
+        # is not open (which indicates an IP-level block — switching provider
+        # would be equally useless until the cooldown period expires).
+        if not result and not self._circuit_breaker_open:
+            logger.warning(
+                f"[HybridEngine] ⚠️  {provider} returned empty — "
+                f"cross-provider fallback to {fallback_name}..."
+            )
+            result = await self._execute_with_waterfall(
+                "search_google_ai_mode", prompt, ai_mode_url=fallback_url
+            )
+
+        # ── Scrapy Post-Discovery Bonus ───────────────────────────────────────
         # If the browser found a website URL in the JSON but no phone,
         # fire Scrapy for a cheap, fast HTTP extraction before escalating.
         if result and self._should_run_scrapy_bonus(result):
@@ -644,7 +692,6 @@ class HybridAutomationEngine:
                             f"[HybridEngine] ⚡ Scrapy bonus hit! Phone={phone} "
                             f"from {website} in {elapsed_ms}ms"
                         )
-                        # Inject phone into result string so upstream can parse it
                         return f'{result}\n[scrapy_bonus_phone: {phone}]'
                 except Exception as exc:
                     logger.debug(f"[HybridEngine] Scrapy bonus failed ({website}): {exc}")
@@ -674,6 +721,35 @@ class HybridAutomationEngine:
         m2 = re.search(r'https?://[^\s"\'>]+', result)
         return m2.group(0) if m2 else None
 
+    async def generate_human_noise(self) -> None:
+        """
+        Trigger a human-behaviour "session seasoning" visit on the currently
+        active tier agent.  Delegates to the agent's own generate_human_noise()
+        implementation so tier-specific browser APIs are used correctly.
+
+        Called by the orchestrator every HUMAN_NOISE_INTERVAL rows.
+        Silently no-ops if no suitable agent is available.
+        """
+        agent_map = {
+            0: self._tier0, 2: self._tier2,
+            3: self._tier3, 4: self._tier4, 5: self._tier5,
+            6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
+        }
+        # Prefer the current tier; walk backwards to find the closest live agent
+        for tier in [self._current_tier] + list(reversed(sorted(agent_map.keys()))):
+            agent = agent_map.get(tier)
+            if agent and hasattr(agent, 'generate_human_noise'):
+                logger.info(
+                    f"[HybridEngine] 🎭 Human Noise → Tier {tier} "
+                    f"(worker={self._worker_id}, row={self.current_row_index})"
+                )
+                try:
+                    await agent.generate_human_noise()
+                except Exception as exc:
+                    logger.debug(f"[HybridEngine] Noise generation error on Tier {tier}: {exc}")
+                return
+        logger.debug("[HybridEngine] No active agent found for human noise generation.")
+
     async def submit_google_search(self, query: str) -> bool:
         return await self._execute_with_waterfall("submit_google_search", query)
         
@@ -682,6 +758,13 @@ class HybridAutomationEngine:
 
     async def search_google_ai(self, query: str) -> Optional[str]:
         return await self._execute_with_waterfall("search_google_ai", query)
+
+    async def search_google_ai_interactive(self, prompt: str, row: Optional[any] = None) -> Optional[str]:
+        """
+        Interactive high-stealth search flow (Human-Like).
+        Navigates to Google, types query, Enter, then clicks AI Mode.
+        """
+        return await self._execute_with_waterfall("search_google_ai_interactive", prompt, row=row)
 
     async def search_gemini_ai(self, prompt: str) -> Optional[str]:
         return await self._execute_with_waterfall("search_gemini_ai", prompt)

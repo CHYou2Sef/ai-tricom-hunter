@@ -265,9 +265,13 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
     # ── Search methods ────────────────────────────────────────────────────────
 
-    async def search_google_ai_mode(self, prompt: str) -> Optional[str]:
+    async def search_google_ai_mode(
+        self,
+        prompt: str,
+        ai_mode_url: Optional[str] = None,
+    ) -> Optional[str]:
         """
-        ⭐ PRIMARY SEARCH — direct navigation to Google AI Mode URL.
+        ⭐ PRIMARY SEARCH — direct navigation to Google AI Mode (or DuckDuckGo AI Chat).
 
         Implements the Gemini.md §3 pattern:
             driver.get(ai_mode_url)
@@ -275,17 +279,31 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             handle Turnstile if present
             extract stable page text
 
+        Args:
+            prompt      : The search / extraction prompt.
+            ai_mode_url : Optional URL override.  When provided (e.g. DuckDuckGo AI
+                          Chat URL injected by HybridEngine for engine toggling), this
+                          replaces the default GOOGLE_AI_MODE_URL.  If None, falls back
+                          to generate_google_ai_url(prompt) as before.
+
         Returns the page text for downstream JSON / regex extraction.
         """
         if not self._driver:
             return None
 
-        from common.search_engine import generate_google_ai_url
-        url = generate_google_ai_url(prompt)
+        # ── URL construction ─────────────────────────────────────────────
+        if ai_mode_url:
+            import urllib.parse
+            url = ai_mode_url + urllib.parse.quote_plus(prompt)
+            provider_label = "DDG-AI" if "duckduckgo" in ai_mode_url else "AI-Mode"
+        else:
+            from common.search_engine import generate_google_ai_url
+            url = generate_google_ai_url(prompt)
+            provider_label = "Google-AI-Mode"
 
         try:
             logger.info(
-                f"🤖 [SeleniumBase-AI-Mode] Navigating for prompt "
+                f"🤖 [SeleniumBase-{provider_label}] Navigating for prompt "
                 f"({len(prompt)} chars)..."
             )
             await asyncio.to_thread(self._sync_goto, url)
@@ -301,15 +319,13 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
             # ── 3. Extract data using UUE (Universal Unified Extractor) ──
             metadata = await self.extract_universal_data()
-            self.last_metadata = metadata # Persist for Deep Discovery
-            
-            # Fallback to AI mode response stability wait 
-            # (We always want the full text response for enrichment)
-            
+            self.last_metadata = metadata  # Persist for Deep Discovery
+
+            # Wait for AI response to fully render
             text = await self._wait_for_stable_response(timeout_sec=25)
             if text:
                 logger.info(
-                    f"✨ [SeleniumBase-AI-Mode] Got response ({len(text)} chars)"
+                    f"✨ [SeleniumBase-{provider_label}] Got response ({len(text)} chars)"
                 )
             return text
 
@@ -324,14 +340,115 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                 ]
             ):
                 logger.error(
-                    "[SeleniumBase] 🛑 Session/Proxy FAILED during AI search. Self-healing..."
+                    f"[SeleniumBase] 🛑 Session/Proxy FAILED during {provider_label} search. Self-healing..."
                 )
                 await self.rotate_proxy()
-                return await self.search_google_ai_mode(prompt)
+                return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url)
 
             logger.error(f"[SeleniumBase] search_google_ai_mode error: {exc}")
             await self._record_interruption("exception", str(exc))
             return None
+
+    async def search_google_ai_interactive(
+        self,
+        prompt: str,
+        row: Optional[any] = None,
+    ) -> Optional[str]:
+        """
+        🎭 HIGH-STEALTH INTERACTIVE SEARCH (Human-Like)
+        
+        Flow:
+          1. Navigate to Google.com
+          2. Dismiss cookies
+          3. Human-type: Company Name + Address + Domain
+          4. Check SERP (Search Engine Result Page) immediately for phone
+          5. If not found, click "AI Overview" / "Generate" button
+          6. Wait for stable AI response
+        """
+        if not self._driver:
+            return None
+
+        # ── 1. Navigate to Google ──────────────────────────────────────────
+        logger.info("🎭 [Human-Like] Starting interactive search cycle...")
+        if not await self.goto_url(config.GOOGLE_URL):
+            return None
+        
+        await self._accept_cookies()
+
+        # ── 2. Construct Query ─────────────────────────────────────────────
+        # If row is provided, we build a rich query. Otherwise we just use the prompt.
+        if row:
+            query = f"{getattr(row, 'company', '')} {getattr(row, 'address', '')} {getattr(row, 'domain', '')}".strip()
+        else:
+            # Fallback to a shortened version of the prompt if no row
+            query = prompt[:100]
+
+        # ── 3. Type Query ──────────────────────────────────────────────────
+        try:
+            logger.info(f"⌨️ [Human-Like] Typing query: {query}")
+            for sel in [GOOGLE_SEARCH_INPUT]:
+                await asyncio.to_thread(self._driver.wait_for_element_visible, sel, timeout=5)
+                await asyncio.to_thread(self._sync_human_type, sel, query)
+                await asyncio.to_thread(self._driver.send_keys, sel, "\n")
+                break
+        except Exception as e:
+            logger.error(f"[Human-Like] Search input failed: {e}")
+            return None
+
+        await asyncio.sleep(3)
+
+        # ── 4. Immediate Check (Phone in SERP) ─────────────────────────────
+        # As requested: "si num tel trouver dans le cycle extracter le et passe au next"
+        source = await self.get_page_source()
+        if source:
+            phone_match = re.search(r'0[1-9](?:[\s.-]?\d{2}){4}', source)
+            if phone_match:
+                logger.info(f"✨ [Human-Like] Phone found DIRECTLY on SERP: {phone_match.group(0)}")
+                return source  # Return page source for parsing
+
+        # ── 5. Trigger AI Mode ─────────────────────────────────────────────
+        # Selectors for "Générer", "Generate", "AI Overview", or "Converse"
+        ai_buttons = [
+            "button[aria-label*='Générer']",
+            "button[aria-label*='Generate']",
+            "button:contains('AI Overview')",
+            "div[role='button']:contains('AI Overview')",
+            "button:contains('Conversation')",
+            "button:contains('Ask a follow up')",
+        ]
+        
+        logger.info("[Human-Like] No phone on SERP. Attempting to trigger AI Overview...")
+        clicked = False
+        for btn in ai_buttons:
+            try:
+                # SeleniumBase specific: click with JS or GUI
+                await asyncio.to_thread(self._driver.click, btn, timeout=3)
+                clicked = True
+                logger.info(f"✅ [Human-Like] Clicked AI button: {btn}")
+                break
+            except Exception:
+                continue
+        
+        if not clicked:
+            logger.debug("[Human-Like] AI button not found (might already be active).")
+        
+        await asyncio.sleep(4)
+
+        # ── 6. Type Prompt (if follow-up input exists) ─────────────────────
+        # Sometimes we need to ask the specific prompt to get the JSON/phone
+        follow_up_input = "textarea[placeholder*='follow-up'], textarea[placeholder*='Préciser']"
+        try:
+            await asyncio.to_thread(self._driver.wait_for_element_visible, follow_up_input, timeout=5)
+            await asyncio.to_thread(self._sync_human_type, follow_up_input, prompt)
+            await asyncio.to_thread(self._driver.send_keys, follow_up_input, "\n")
+            logger.info("🤖 [Human-Like] Prompt typed in AI follow-up.")
+        except Exception:
+            # Maybe it already generated the overview based on the initial query
+            logger.debug("[Human-Like] No follow-up box, waiting for generated overview.")
+
+        # ── 7. Wait for stable response ────────────────────────────────────
+        text = await self._wait_for_stable_response(timeout_sec=30)
+        return text
 
     async def search_google_ai(self, query: str) -> Optional[str]:
         """Alias maintaining full HybridEngine / benchmark compatibility."""

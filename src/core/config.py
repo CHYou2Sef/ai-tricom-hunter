@@ -342,7 +342,13 @@ def get_worker_profile_path(worker_id: int, tier: str = "default") -> str:
 # ── Human Noise / Session Seasoning ──
 # Occasionally visiting "Trust Sites" (YouTube, Wikipedia) to build profile trust.
 ENABLE_HUMAN_NOISE = os.getenv("ENABLE_HUMAN_NOISE", "true").lower() == "true"
-HUMAN_NOISE_INTERVAL = int(os.getenv("HUMAN_NOISE_INTERVAL", "8")) # Every 8 rows
+HUMAN_NOISE_INTERVAL = int(os.getenv("HUMAN_NOISE_INTERVAL", "500"))  # Every 500 rows
+
+# ── AI Search Engine Toggle ──
+# Alternates between Google AI Mode and DuckDuckGo AI Chat every N rows to
+# distribute requests and preserve browser profile health.
+ENGINE_TOGGLE_INTERVAL = int(os.getenv("ENGINE_TOGGLE_INTERVAL", "100"))  # Switch provider every 100 rows
+FORCE_HUMAN_INTERACTIVE = os.getenv("FORCE_HUMAN_INTERACTIVE", "false").lower() == "true"
 HUMAN_NOISE_SITES = [
     "https://www.youtube.com",
     "https://www.wikipedia.org",

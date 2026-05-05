@@ -297,5 +297,42 @@ async def finalize_file_processing(
     except Exception as e:
         logger.error(f"   ❌ Failed to move file to {folder_name}: {e}")
 
+    # ── Export per-file telemetry to .meta.json ──────────────────────────────────
+    # Written alongside the moved file so every batch has a self-contained
+    # audit record: stats + performance summary + engine-level telemetry.
+    try:
+        import json as _json
+        import datetime as _dt
+
+        # Safely retrieve tracker metrics
+        perf_summary = tracker.get_metrics_summary() if tracker else {}
+
+        # Pull the current BenchmarkTelemetry snapshot (non-destructive save)
+        telemetry_snapshot = get_telemetry().save()
+
+        meta_payload = {
+            "file": orig_path.name,
+            "processed_at": _dt.datetime.now().isoformat(),
+            "folder": folder_name,
+            "stats": {
+                "total_rows":    total,
+                "done":          len(success_rows),
+                "low_conf":      len(low_conf_rows),
+                "retry":         len(retry_rows),
+                "success_rate":  round(len(success_rows) / total * 100, 1) if total else 0.0,
+            },
+            "performance": perf_summary,
+            "engines": telemetry_snapshot.get("engines", []),
+            "ranking":  telemetry_snapshot.get("ranking", []),
+        }
+
+        # Write next to the destination file (e.g. SUCCEED/myfile.xlsx.meta.json)
+        meta_path = target.parent / (target.name + ".meta.json")
+        with open(meta_path, "w", encoding="utf-8") as f:
+            _json.dump(meta_payload, f, indent=2, ensure_ascii=False)
+        logger.info(f"   📊 Telemetry exported → {meta_path.name}")
+    except Exception as meta_err:
+        logger.warning(f"   ⚠️  .meta.json export failed: {meta_err}")
+
     if progress:
         progress.archive()

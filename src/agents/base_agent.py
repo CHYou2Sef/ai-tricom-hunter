@@ -81,3 +81,10 @@ class BaseBrowserAgent:
         To be implemented by specific agent tiers.
         """
         pass
+
+    async def search_google_ai_interactive(self, prompt: str, row: Optional[any] = None) -> Optional[str]:
+        """
+        Interactive high-stealth search flow (Google.com -> type query -> Enter -> Click AI).
+        To be implemented by child classes.
+        """
+        raise NotImplementedError
