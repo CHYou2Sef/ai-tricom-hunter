@@ -63,7 +63,7 @@ RUN patchright install chromium
 RUN python3 -m cloakbrowser install
 
 # Crawl4AI Tier 6 - Chrome managed
-RUN python3 -m crawl4ai install
+RUN crawl4ai-setup
 
 # SeleniumBase Tier 1 requires chromedriver (UC Mode)
 # We use the built-in installer to ensure version compatibility
