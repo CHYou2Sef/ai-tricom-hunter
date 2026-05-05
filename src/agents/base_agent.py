@@ -16,6 +16,7 @@
 from common.anti_bot import wait_for_human_captcha_solve
 from common.anti_bot import is_captcha_page
 from common.anti_bot import get_fingerprint_bundle
+from typing import Optional, Any
 class BaseBrowserAgent:
     """
     Lean base class for all browser-based agents (Playwright, Nodriver).
@@ -82,7 +83,7 @@ class BaseBrowserAgent:
         """
         pass
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
         """
         Interactive high-stealth search flow (Google.com -> type query -> Enter -> Click AI).
         To be implemented by child classes.

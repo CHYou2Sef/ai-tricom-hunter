@@ -619,7 +619,7 @@ class HybridAutomationEngine:
     # ── Delegated Browser Methods ───────────────────────────────────────────
     # These act as drop-in replacements for PatchrightAgent methods.
     
-    async def search_google_ai_mode(self, prompt: str, row: Optional[any] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
         """
         AI Mode search via browser waterfall.
         
@@ -759,7 +759,7 @@ class HybridAutomationEngine:
     async def search_google_ai(self, query: str) -> Optional[str]:
         return await self._execute_with_waterfall("search_google_ai", query)
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
         """
         Interactive high-stealth search flow (Human-Like).
         Navigates to Google, types query, Enter, then clicks AI Mode.
