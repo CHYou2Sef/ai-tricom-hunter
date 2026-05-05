@@ -33,5 +33,4 @@ k8s/
 # Agent/AI Configs
 .agents/
 .claude/
-agent.yaml
 src/agents/debugger/

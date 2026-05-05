@@ -27,6 +27,9 @@ services:
       - browser_profiles:/app/WORK/browser_profiles
       - ${HOST_LOG_DIR:-./logs}:/app/logs:Z
       - ./src:/app/src:ro,Z
+      - ./agent.yaml:/app/agent.yaml:ro,Z
+      - ./SOUL.md:/app/SOUL.md:ro,Z
+      - ./RULES.md:/app/RULES.md:ro,Z
     
     command: python run/supervisor.py
     
