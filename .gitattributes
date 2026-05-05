@@ -1,0 +1,6 @@
+# Force LF for shell scripts to prevent Windows CRLF issues in Docker
+*.sh text eol=lf
+*.py text eol=lf
+Dockerfile text eol=lf
+requirements*.txt text eol=lf
+.env* text eol=lf

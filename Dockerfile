@@ -6,8 +6,6 @@
 FROM python:3.10-slim-bookworm
 
 # ── 1. Install System Dependencies, Chrome & Xvfb ──────────
-# We combine these into a single RUN command so we can purge wget and gnupg
-# in the exact same layer, preventing them from bloating the final image size.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gnupg \
@@ -35,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgtk-3-0 \
     libxshmfence1 \
     libglu1-mesa \
+    dos2unix \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
     && apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
@@ -76,7 +75,7 @@ COPY . .
 
 # Professional Final Pass: Ensure all shell scripts have Linux LF endings
 # and fix permissions for Windows-to-Linux transfers.
-RUN find /app/scripts -name "*.sh" -exec sed -i 's/\r$//' {} + && \
+RUN find /app/scripts -name "*.sh" -exec dos2unix {} + && \
     chmod +x /app/scripts/entrypoint.sh
 
 # ── 7. Configure Environment ──────────────────────────────────────────

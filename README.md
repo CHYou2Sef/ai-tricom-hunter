@@ -48,6 +48,23 @@ cp your_companies.xlsx WORK/INCOMING/
 tail -f logs/agent.log
 ```
 
+### 🐳 Docker Mastery (Daily Commands)
+
+| Action | Command |
+| :--- | :--- |
+| **Start Agent** | `docker compose up -d` |
+| **Live Logs** | `docker compose logs -f agent` |
+| **Stop All** | `docker compose down` |
+| **Hard Restart** | `docker compose restart agent` |
+| **Fresh Rebuild** | `docker compose build --no-cache` |
+| **Inspect Inside** | `docker exec -it ai_tricom_hunter bash` |
+| **Health Check** | `curl http://localhost:8000/metrics` |
+| **Infra Log** | `tail -f logs/startup_infra.log` |
+| **Resource Usage**| `docker stats` |
+
+> [!TIP]
+> Use `docker compose logs -f agent | grep "DONE"` to see successful extractions in real-time.
+
 ### Native Python
 
 ```bash
