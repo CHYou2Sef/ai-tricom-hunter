@@ -390,6 +390,21 @@ def find_chrome_executable() -> str:
         
     # 2. Docker Context
     if os.path.exists("/.dockerenv") or os.environ.get("DOCKER_ENV"):
+        # We prioritize our optimized/stealth binaries over system chrome to save space
+        # Try Patchright (Optimized for anti-bot)
+        patch_path = "/opt/ms-playwright/chromium-1151/chrome-linux/chrome" # Typical path
+        # But we will use a more robust way: find it via glob in case version changes
+        import glob
+        patch_candidates = glob.glob("/opt/ms-playwright/chromium-*/chrome-linux/chrome")
+        if patch_candidates and os.path.exists(patch_candidates[0]):
+            return patch_candidates[0]
+
+        # Try CloakBrowser
+        cloak_path = find_cloak_binary()
+        if cloak_path:
+            return cloak_path
+
+        # Fallback to system chrome if still exists
         docker_path = "/usr/bin/google-chrome"
         if os.path.exists(docker_path):
             return docker_path
