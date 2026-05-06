@@ -24,7 +24,7 @@ botasaurus>=3.2.0
 botasaurus-driver
 crawl4ai>=0.4.0
 firecrawl-py>=1.0.0
-crawlee[all]>=0.4.0
+crawlee[playwright]>=0.4.0
 httpx[http2]>=0.27.0
 
 # Text Extraction & Parsing
@@ -55,13 +55,8 @@ opentelemetry-sdk>=1.24.0
 opentelemetry-instrumentation-fastapi>=0.45b0
 opentelemetry-exporter-otlp>=1.24.0
 
-# Security Tools
-bandit>=1.7.7
-
-# Quality Assurance & CI/CD
-pytest>=8.0.0
-pytest-asyncio>=0.24.0
-pytest-mock>=3.10.0
+# ── Quality Assurance (Removed from production to save space) ──────────────────
+# Use requirements-dev.txt or the full requirements.txt for testing.
 
 # ── LangGraph / LangChain — 3-Layer Autonomous Pipeline ──────────────────
 # Layer 0 (Ingest) + Layer 2 (Social Fallback)

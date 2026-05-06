@@ -14,7 +14,15 @@ WORK/
 docs/
 logs/
 browser_profiles/
+profiles/
+storage/
+output/
+downloaded_files/
+error_logs/
+scratch/
 .env
+.env.prod
+*.log
 
 # Git
 .git/
@@ -23,14 +31,17 @@ browser_profiles/
 # Documentation testing
 *.pdf
 *.tex
+*.log
 
 # CI/CD & Orchestration (Not needed at runtime)
 tests/
 .pytest_cache/
 k8s/
 .github/
-
-# Agent/AI Configs
-.agents/
+.vscode/
+.idea/
 .claude/
+.agents/
+
+# Specific Exclusions
 src/agents/debugger/
