@@ -156,16 +156,31 @@ async def main() -> None:
     # 3. Process orphaned files in INCOMING_DIR
     from common.fs import safe_mkdir
     safe_mkdir(config.INCOMING_DIR)
+    
+    files_in_incoming = sorted(os.listdir(config.INCOMING_DIR))
+    logger.info(f"[Supervisor] Found {len(files_in_incoming)} total items in INCOMING.")
+    
     orphaned_count = 0
-    for fname in sorted(os.listdir(config.INCOMING_DIR)):
-        if fname.startswith((".", "~")) or fname.endswith(".meta.json"): continue
+    for fname in files_in_incoming:
+        if fname.startswith((".", "~")) or fname.endswith(".meta.json"): 
+            logger.debug(f"[Supervisor] Ignoring system/meta file: {fname}")
+            continue
+            
         p = Path(config.INCOMING_DIR) / fname
-        if p.is_file() and p.suffix.lower() in config.ACCEPTED_EXTENSIONS:
-            logger.info(f"[Supervisor|L0] 📂 Orphaned file detected at startup: {p.name}")
-            process_incoming_file(str(p))
-            orphaned_count += 1
+        if p.is_file():
+            if p.suffix.lower() in config.ACCEPTED_EXTENSIONS:
+                logger.info(f"[Supervisor|L0] 📂 Orphaned file detected at startup: {p.name}")
+                process_incoming_file(str(p))
+                orphaned_count += 1
+            else:
+                logger.warning(f"[Supervisor|L0] ⚠️ File {fname} has unsupported extension {p.suffix}. Accepted: {config.ACCEPTED_EXTENSIONS}")
+        else:
+            logger.debug(f"[Supervisor] Ignoring non-file item: {fname}")
+
     if orphaned_count:
         logger.info(f"[Supervisor] Processed {orphaned_count} orphaned file(s) from INCOMING.")
+    else:
+        logger.info("[Supervisor] No valid files found in INCOMING at startup.")
 
     # 4. Pre-load existing classified files
     seen: set = set()

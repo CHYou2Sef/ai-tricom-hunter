@@ -1,22 +1,20 @@
 import asyncio
 import json
+import logging
+import crochet
+
+# ── FIX: Initialize crochet BEFORE any Scrapy/Twisted imports ──
+# This ensures the Twisted reactor is managed in its own background thread
+# before Scrapy tries to auto-detect the asyncio loop.
+crochet.setup()
+
 import scrapy
 from scrapy.crawler import CrawlerRunner
 from twisted.internet import reactor
 from scrapy.signalmanager import dispatcher
 from scrapy import signals
-import crochet
 
-# Lazy crochet initialisation — call setup() only once, on first actual use.
-# Calling crochet.setup() at module import time starts Twisted reactor immediately,
-# which can conflict with asyncio when agent_scraper is merely imported but not used.
-_CROCHET_READY = False
-
-def _ensure_crochet():
-    global _CROCHET_READY
-    if not _CROCHET_READY:
-        crochet.setup()
-        _CROCHET_READY = True
+logger = logging.getLogger(__name__)
 
 # Hard-coded B2B fallback selectors
 FALLBACK_SELECTORS = {
@@ -72,10 +70,8 @@ class GenericSpider(scrapy.Spider):
 @crochet.wait_for(timeout=15.0)
 def _run_spider_crochet(url: str, extraction_rules: dict, results_list: list):
     """
-    Run the Scrapy spider synchronously but without blocking the main event loop
-    thanks to crochet.
+    Run the Scrapy spider via crochet.
     """
-    _ensure_crochet()  # Ensure Twisted reactor is ready before use
     def crawler_results(signal, sender, item, response, spider):
         results_list.append(item)
         
@@ -86,7 +82,10 @@ def _run_spider_crochet(url: str, extraction_rules: dict, results_list: list):
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_TIMEOUT': 10,
         'LOG_LEVEL': 'WARNING',
-        'AUTOTHROTTLE_ENABLED': True
+        'AUTOTHROTTLE_ENABLED': True,
+        # ── FIX: Explicitly disable the asyncio reactor in Scrapy settings ──
+        # This prevents the "'EventLoop' object has no attribute '_reactor'" error.
+        'TWISTED_REACTOR': 'twisted.internet.selectreactor.SelectReactor'
     }
     
     runner = CrawlerRunner(settings)
@@ -103,13 +102,16 @@ async def run_ai_spider(url: str, selectors: dict = None) -> dict:
     """
     results = []
     try:
-        # Run the crochet-wrapped spider in a thread to ensure complete async safety
+        # ── FIX: Call directly. @crochet.wait_for already makes it blocking-safe 
+        # for a background thread, but we call it in the main loop thread? 
+        # No, crochet.wait_for blocks the current thread until the deferred is done.
+        # To avoid blocking the asyncio event loop, we use to_thread.
         await asyncio.to_thread(_run_spider_crochet, url, selectors or {}, results)
         
         if results:
             return results[0]
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"[Scrapy] Error: {e}")
+        logger.error(f"[Scrapy Sniper] Error during execution: {e}")
         
     return {}
+
