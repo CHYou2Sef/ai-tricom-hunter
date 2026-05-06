@@ -40,14 +40,32 @@ class FileProgressTracker:
         self.load()
 
     def load(self):
-        """Load the checkpoint if it exists."""
-        if self.checkpoint_path.exists():
+        """Load the checkpoint if it exists, with fuzzy fallback for renamed files."""
+        target = self.checkpoint_path
+
+        # 1. Direct match
+        if not target.exists():
+            # 2. Check archived folder
+            archived = config.ARCHIVED_CHECKPOINTS_DIR / target.name
+            if archived.exists():
+                target = archived
+                logger.info(f"[Progress] Using ARCHIVED checkpoint: {target.name}")
+            else:
+                # 3. Fuzzy match (in case of _DONE or _part1 suffixes)
+                # Look for any JSON that contains the core filename stem
+                stem = self.original_path.stem  # e.g. "my_file"
+                matches = list(config.CHECKPOINTS_DIR.glob(f"*{stem}*.json"))
+                if matches:
+                    target = matches[0]
+                    logger.info(f"[Progress] Fuzzy match found: {target.name} for {self.original_path.name}")
+
+        if target.exists():
             try:
-                with open(self.checkpoint_path, 'r', encoding='utf-8') as f:
+                with open(target, 'r', encoding='utf-8') as f:
                     self.data = json.load(f)
-                logger.info(f"[Progress] Loaded {len(self.data)} rows from checkpoint: {self.checkpoint_path.name}")
+                logger.info(f"[Progress] Loaded {len(self.data)} rows from {target.name}")
             except Exception as e:
-                logger.warning(f"[Progress] Failed to load checkpoint {self.checkpoint_path.name}: {e}")
+                logger.warning(f"[Progress] Failed to load {target.name}: {e}")
                 self.data = {}
         else:
             self.data = {}

@@ -22,7 +22,7 @@ from .nodes import (
     chunk_node,
     route_to_bucket_node,
     archive_node,
-    quarantine_node,
+    handle_invalid_node,
     emit_event_node,
 )
 
@@ -38,24 +38,24 @@ def build_layer0_graph():
     g.add_node("chunk",           chunk_node)
     g.add_node("route_to_bucket", route_to_bucket_node)
     g.add_node("archive",         archive_node)
-    g.add_node("quarantine",      quarantine_node)
+    g.add_node("handle_invalid",  handle_invalid_node)
     g.add_node("emit_event",      emit_event_node)
 
     # ── Entry point ───────────────────────────────────────────────
     g.set_entry_point("validate_file")
 
-    # ── Conditional: valid file → clean | invalid → quarantine ────
+    # ── Conditional: valid file → clean | invalid → handle_invalid ────
     g.add_conditional_edges(
         "validate_file",
-        lambda s: "clean_data" if s["is_valid_format"] else "quarantine",
+        lambda s: "clean_data" if s["is_valid_format"] else "handle_invalid",
         {
-            "clean_data": "clean_data",
-            "quarantine": "quarantine",
+            "clean_data":     "clean_data",
+            "handle_invalid": "handle_invalid",
         },
     )
 
-    # ── Quarantine is a terminal node ─────────────────────────────
-    g.add_edge("quarantine", END)
+    # ── handle_invalid is a terminal node ─────────────────────────────
+    g.add_edge("handle_invalid", END)
 
     # ── Conditional: non-empty → classify | empty → END ──────────
     g.add_conditional_edges(

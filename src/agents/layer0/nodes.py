@@ -142,30 +142,17 @@ def archive_node(state: Layer0State) -> Layer0State:
     return {**state, "archived_path": str(dest)}
 
 
-# ── Node 7: Quarantine invalid files ────────────────────────────────────
-def quarantine_node(state: Layer0State) -> Layer0State:
+# ── Node 7: Handle invalid files ───────────────────────────────────────
+def handle_invalid_node(state: Layer0State) -> Layer0State:
     """
-    Move invalid / malformed files to WORK/QUARANTINE/ for human review.
-    Never silently deletes — always preserves the original for inspection.
+    Log invalid files and mark as FAILED. 
+    Original file remains in INCOMING for manual cleanup or is handled by watcher.
     """
-    from common.fs import safe_mkdir
-
-    q_dir = Path(config.WORK_DIR) / "QUARANTINE"
-    safe_mkdir(q_dir)
-
-    src = Path(state["raw_file_path"])
-    if src.exists():
-        dest = q_dir / src.name
-        if dest.exists():
-            ts   = time.strftime("%Y%m%d_%H%M%S")
-            dest = q_dir / f"{ts}_{src.name}"
-        shutil.move(str(src), str(dest))
-
-    logger.warning(
-        f"[L0|quarantine] {state['file_name']} → QUARANTINE "
-        f"(reason: {state.get('error_reason', 'unknown')})"
+    logger.error(
+        f"[L0|error] {state.get('file_name', 'Unknown')} is invalid. "
+        f"Reason: {state.get('error_reason', 'unknown')}"
     )
-    return {**state, "final_status": "QUARANTINED"}
+    return {**state, "final_status": "FAILED"}
 
 
 # ── Node 8: Emit file events to Layer 1 queue ───────────────────────────

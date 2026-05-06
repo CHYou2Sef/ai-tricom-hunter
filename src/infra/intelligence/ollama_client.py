@@ -8,6 +8,7 @@
 ║         and keeps data on-prem.  3B models (qwen2.5:3b) fit in 8 GB RAM. ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
+from typing import Optional
 
 import asyncio
 import logging

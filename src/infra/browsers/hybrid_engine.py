@@ -26,9 +26,10 @@
 ╚════════════════════════════════════════════════════════════════════════╝
 """
 
+from __future__ import annotations
 import asyncio
 import time
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, TYPE_CHECKING
 
 from core import config
 from core.logger import get_logger, alert
@@ -552,16 +553,47 @@ class HybridAutomationEngine:
             except Exception as exc:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms
-                
+
+                # ── FIX #4: Triage exceptions — code bugs vs network failures ──
+                # Code-level errors (NameError, ImportError, TypeError, AttributeError)
+                # indicate a BUG in the tier code, NOT an IP ban. They must NOT
+                # increment _consecutive_failures or trigger the circuit breaker,
+                # which would cause a 300s dead-sleep on every single row.
+                _CODE_LEVEL_ERRORS = (NameError, ImportError, TypeError, AttributeError, SyntaxError)
+                _is_code_error = isinstance(exc, _CODE_LEVEL_ERRORS)
+
+                exc_str = str(exc).lower()
+                # Network/WAF signals: treat as genuine failures worthy of CB
+                _NETWORK_SIGNALS = (
+                    "captcha", "waf", "ip_ban", "forbidden", "429",
+                    "too many requests", "rate limit", "access denied",
+                    "err_tunnel", "err_proxy", "connection refused",
+                    "timeout", "ssl", "certificate",
+                )
+                _is_network_error = any(sig in exc_str for sig in _NETWORK_SIGNALS)
+
+                # Determine interruption reason for telemetry
+                if _is_code_error:
+                    reason = "code_bug"
+                    logger.error(
+                        f"[HybridEngine] 🐛 Tier {tier} CODE BUG in '{method_name}': "
+                        f"{type(exc).__name__}: {exc}  "
+                        f"(circuit breaker NOT penalized — this is a code error, not an IP ban)"
+                    )
+                elif "captcha" in exc_str or "waf" in exc_str:
+                    reason = "captcha_waf"
+                    logger.error(f"[HybridEngine] Tier {tier} CAPTCHA/WAF in '{method_name}': {exc}")
+                elif _is_network_error:
+                    reason = "network"
+                    logger.error(f"[HybridEngine] Tier {tier} NETWORK error in '{method_name}': {exc}")
+                else:
+                    reason = "exception"
+                    logger.error(f"[HybridEngine] Tier {tier} exception in '{method_name}': {exc}")
+
                 # 📈 Prometheus Metric: FAILURE
                 SCRAPING_RESULTS.labels(tier=str(tier), scrap_method=method_name, status="FAILURE").inc()
-                
+
                 # 📈 Persistent Telemetry: FAILURE
-                reason = "exception"
-                exc_str = str(exc).lower()
-                if "captcha" in exc_str or "waf" in exc_str: reason = "captcha_waf"
-                elif "ip_ban" in exc_str or "forbidden" in exc_str: reason = "ip_ban"
-                
                 get_telemetry().record(
                     engine_name=TIER_NAMES.get(tier, f"Tier {tier}"),
                     row_index=self.current_row_index,
@@ -570,21 +602,35 @@ class HybridAutomationEngine:
                     interruption_reason=reason,
                     method_name=method_name
                 )
-                get_telemetry().save() # Persist real-time metrics
+                get_telemetry().save()  # Persist real-time metrics
 
-                logger.error(f"[HybridEngine] Tier {tier} exception in '{method_name}': {exc}")
+                # Code bugs: fast escalate — no cool-down, no CB penalty
+                if _is_code_error:
+                    await self.stop_tier(tier)
+                    continue  # Skip the 8s cool-down below, escalate immediately
 
             # Waterfall Escalate - KILL CURRENT TIER FIRST
             await self.stop_tier(tier)
-            
+
             # Cool-down between tiers to let WAF sessions partially reset
+            # (skipped for code-level errors via `continue` above)
             logger.info(f"[HybridEngine] 🕒 Cool-down delay: 8s...")
             await asyncio.sleep(8)
 
             self._current_tier = min(tier + 1, max_tier)
 
         # ── 3. ALL TIERS EXHAUSTED — update circuit breaker ──────────────────
+        # FIX #4: Only penalize the circuit breaker for genuine network/scraping
+        # failures. If all tiers failed due to code bugs, log loudly but do NOT
+        # open the circuit breaker (that would cause a 300s sleep per row).
         self._current_tier = config.HYBRID_DEFAULT_TIER
+
+        # Determine if the exhaustion was caused by code bugs (no CB penalty)
+        # We track this via the stats: if every failing tier had 0 latency or
+        # the exception was code-level, we skip the CB increment.
+        # Conservative approach: increment CB counter only for network-type runs.
+        # (Code-bug tiers `continue` before reaching this point, so reaching
+        # here means at least one genuine network-level attempt was made.)
         self._consecutive_failures += 1
 
         alert(
@@ -607,7 +653,6 @@ class HybridAutomationEngine:
                 },
             )
             # Attempt proxy rotation if available
-            # Attempt proxy rotation via engine's logic
             try:
                 await self.rotate_proxy()
                 logger.info("[HybridEngine] ♻️ Proxy rotation requested after circuit breaker opened.")

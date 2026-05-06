@@ -19,6 +19,7 @@
 ║    - Works offline                                                         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
+from typing import Optional
 
 import logging
 from core import config

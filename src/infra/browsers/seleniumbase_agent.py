@@ -28,13 +28,14 @@
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
+from __future__ import annotations
 import asyncio
 import os
 import random
 import re
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any, Dict, List, TYPE_CHECKING
 
 from core import config
 from agents.base_agent import BaseBrowserAgent
@@ -352,7 +353,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
     async def search_google_ai_interactive(
         self,
         prompt: str,
-        row: Optional[any] = None,
+        row: Optional[Any] = None,
     ) -> Optional[str]:
         """
         🎭 HIGH-STEALTH INTERACTIVE SEARCH (Human-Like)

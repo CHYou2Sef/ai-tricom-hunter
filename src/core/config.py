@@ -6,6 +6,7 @@
 ║  for basic setup.                                                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
+from typing import Any, Optional
 
 import os
 from pathlib import Path
@@ -58,7 +59,7 @@ INPUT_RS_DIR    = WORK_DIR / "RS"
 INPUT_OTHER_DIR = WORK_DIR / "OTHERS"
 
 # ── LIVE OUTPUTS ───────────────────────────────────────────────
-OUTPUT_ROOT    = WORK_DIR / "ARCHIVE" / "FUSION"
+OUTPUT_ROOT    = WORK_DIR / "ARCHIVE"
 OUTPUT_RS_ADR  = OUTPUT_ROOT / "RS_Adr"
 OUTPUT_SIR_ADR = OUTPUT_ROOT / "Sir_Adr"
 OUTPUT_DEFAULT = OUTPUT_ROOT / "Results"
@@ -70,9 +71,14 @@ OUTPUT_FAILED_DIR  = WORK_DIR / "ARCHIVE" / "FAILED"
 CHECKPOINTS_DIR    = WORK_DIR / "CHECKPOINTS"
 ARCHIVED_CHECKPOINTS_DIR = CHECKPOINTS_DIR / "archived_json"
 
+# ── READY queue — files moved here after pre-processing, before agent pickup ──
+# FIX #1: This was missing, causing AttributeError in run/supervisor.py:scan_existing_files()
+READY_DIR = WORK_DIR / "READY"
+
 from common.fs import safe_mkdir as _safe_mkdir_cfg
 _safe_mkdir_cfg(CHECKPOINTS_DIR)
 _safe_mkdir_cfg(ARCHIVED_CHECKPOINTS_DIR)
+_safe_mkdir_cfg(READY_DIR)
 
 # Compatibility aliases
 ARCHIVE_DIR        = ARCHIVE_BACKUP_DIR
@@ -88,12 +94,8 @@ _safe_mkdir_cfg(LOG_DIR)
 # We use 'Etat_IA' to avoid confusion with original 'Statut' (Active/Inactive) columns.
 STATUS_COLUMN_NAME = os.getenv("STATUS_COLUMN_NAME", "Etat_IA")
 
-# ── The FINAL queue for the Agent (Manual Override) ──
-# If you want to jump the queue, move files here.
-READY_DIR = WORK_DIR / "READY"
-
 def get_output_dir(input_folder_name: str) -> Path:
-    """Returns {WORK_DIR}/output/{input_folder_name}"""
+    """Returns {WORK_DIR}/ARCHIVE/{input_folder_name}"""
     from common.fs import safe_mkdir
     path = OUTPUT_ROOT / input_folder_name
     safe_mkdir(path)
@@ -133,8 +135,6 @@ FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
 # Controls the LangGraph ingest state machine (run/supervisor.py).
 # When False, supervisor falls back to a plain watchdog (like ingest.py).
 LAYER0_ENABLED              = os.getenv("LAYER0_ENABLED", "true").lower() == "true"
-# Move invalid/malformed files to WORK/QUARANTINE/ instead of silently deleting.
-LAYER0_QUARANTINE_ON_ERROR  = os.getenv("LAYER0_QUARANTINE_ON_ERROR", "true").lower() == "true"
 
 # ── LAYER 2 — Social URL Fallback LangGraph ─────────────────────────────
 # Activates after Layer 1 waterfall is exhausted with no phone found.

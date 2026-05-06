@@ -14,6 +14,7 @@
 ║    automatically save to files.                                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
+from typing import Optional
 
 import logging
 import os

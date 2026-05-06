@@ -13,10 +13,11 @@
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
+from __future__ import annotations
+from typing import Optional, Any, Dict, List, TYPE_CHECKING
 from common.anti_bot import wait_for_human_captcha_solve
 from common.anti_bot import is_captcha_page
 from common.anti_bot import get_fingerprint_bundle
-from typing import Optional, Any
 class BaseBrowserAgent:
     """
     Lean base class for all browser-based agents (Playwright, Nodriver).

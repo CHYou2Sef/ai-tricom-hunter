@@ -12,10 +12,13 @@ rm -f /tmp/.X1-lock /tmp/.X99-lock
 echo "📁 Creating autonomous directory structure..."
 mkdir -p /app/logs \
          /app/WORK/INCOMING \
-         /app/WORK/Queue \
-         /app/WORK/QUARANTINE \
-         /app/WORK/FUSION \
          /app/WORK/ARCHIVE \
+         /app/WORK/READY \
+         /app/WORK/STD \
+         /app/WORK/SIREN \
+         /app/WORK/RS \
+         /app/WORK/OTHERS \
+         /app/WORK/CHECKPOINTS \
          /app/WORK/browser_profiles
 
 # ── 1.5 Profile Sanitization (The Chrome Lock-Killer) ───────────────
