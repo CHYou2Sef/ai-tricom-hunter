@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  browser/selenium_agent.py                                               ║
@@ -22,7 +23,7 @@ import re
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from core import config
 from agents.base_agent import BaseBrowserAgent
@@ -32,7 +33,7 @@ from core.logger import get_logger, alert
 logger = get_logger(__name__)
 
 # ── Google selectors mirrored from patchright_agent.py ────────────────────
-GOOGLE_SEARCH_INPUT = 'textarea[name="q"], input[name="q"]'
+GOOGLE_SEARCH_INPUT = 'textarea[name="q"], input[name="q"], textarea[title="Search"], input[title="Search"], textarea[title="Rechercher"], input[title="Rechercher"], [aria-label="Search"]'
 GOOGLE_PHONE_SELECTORS = [
     "[data-attrid='kc:/local:phone'] span",
     "[data-attrid='tel'] span",
@@ -66,6 +67,8 @@ class SeleniumAgent(BaseBrowserAgent):
         self._driver = None
         self._session_start_ts: float = 0.0
         self._fingerprint = get_fingerprint_bundle()
+        self._lock = asyncio.Lock()
+        self._last_health_check = 0.0
         # Interruption metadata — read by BenchmarkTelemetry
         self.last_interruption_reason: Optional[str] = None
         self.last_interruption_ts: Optional[float] = None
@@ -198,6 +201,56 @@ class SeleniumAgent(BaseBrowserAgent):
         self._driver.set_page_load_timeout(30)
         self._driver.implicitly_wait(5)
         self._session_start_ts = time.monotonic()
+    async def is_alive(self) -> bool:
+        """Public health check with lock protection."""
+        async with self._lock:
+            if not self._driver: return False
+            try:
+                # Use execute_script for a robust liveness check
+                await asyncio.to_thread(self._driver.execute_script, "return 1+1")
+                return True
+            except Exception:
+                return False
+
+    async def _ensure_driver_alive_locked(self) -> bool:
+        """
+        Heartbeat check for the Selenium driver.
+        Restarts if dead or None.
+        """
+        now = time.time()
+        if self._driver and (now - self._last_health_check) < 5:
+            return True
+
+        if not self._driver:
+            logger.info("[Selenium] 🔄 Driver missing. Restarting...")
+            await self._start_locked()
+            return self._driver is not None
+
+        try:
+            # Heartbeat check
+            await asyncio.to_thread(self._driver.execute_script, "return 1+1")
+            self._last_health_check = now
+            return True
+        except Exception as e:
+            logger.warning(f"[Selenium] 💔 Driver unresponsive: {e}. Resurrecting...")
+            await self._close_locked()
+            await self._start_locked()
+            return self._driver is not None
+
+    async def _start_locked(self) -> None:
+        """Internal lock-free start."""
+        if self._driver: return
+        try:
+            await asyncio.to_thread(self._sync_start)
+            self._last_health_check = time.time()
+        except Exception as exc:
+            await self._record_interruption("startup_failure", f"Failed to start: {exc}")
+            raise
+
+    async def _close_locked(self) -> None:
+        """Internal lock-free close."""
+        await asyncio.to_thread(self._sync_close)
+        self._driver = None
 
     async def close(self) -> None:
         """Terminate the ChromeDriver subprocess and release all handles."""
@@ -328,38 +381,41 @@ class SeleniumAgent(BaseBrowserAgent):
 
     async def get_page_source(self) -> str:
         """Return the raw HTML of the current page."""
-        if not self._driver:
-            return ""
-        try:
-            return await asyncio.to_thread(lambda: self._driver.page_source)
-        except Exception:
-            return ""
+        async with self._lock:
+            if not await self._ensure_driver_alive_locked():
+                return ""
+            try:
+                return await asyncio.to_thread(lambda: self._driver.page_source)
+            except Exception:
+                return ""
 
     async def goto_url(self, url: str) -> bool:
         """Navigate to an arbitrary URL."""
-        if not self._driver:
-            return False
-        try:
-            await asyncio.to_thread(self._driver.get, url)
-            await self._handle_captcha_if_present()
-            return True
-        except Exception as exc:
-            msg = str(exc)
-            if any(err in msg for err in ["ERR_TUNNEL_CONNECTION_FAILED", "ERR_PROXY_CONNECTION_FAILED", "invalid session id"]):
-                logger.error(f"[Selenium] 🛑 Session/Proxy FAILED (Self-Healing triggered). Rotating...")
-                await self.rotate_proxy()
-                # Retry once after rotation
-                try:
-                    await asyncio.to_thread(self._driver.get, url)
-                    return True
-                except:
-                    return False
-            logger.error(f"[Selenium] goto_url error: {exc}")
-            return False
+        async with self._lock:
+            if not await self._ensure_driver_alive_locked():
+                return False
+            try:
+                await asyncio.to_thread(self._driver.get, url)
+                # Note: _handle_captcha_if_present should be called with lock held
+                await self._handle_captcha_if_present_locked()
+                return True
+            except Exception as exc:
+                msg = str(exc)
+                if any(err in msg for err in ["ERR_TUNNEL_CONNECTION_FAILED", "ERR_PROXY_CONNECTION_FAILED", "invalid session id"]):
+                    logger.error(f"[Selenium] 🛑 Session/Proxy FAILED (Self-Healing triggered). Rotating...")
+                    await self._rotate_proxy_locked()
+                    # Retry once
+                    if self._driver:
+                        try:
+                            await asyncio.to_thread(self._driver.get, url)
+                            return True
+                        except: pass
+                logger.error(f"[Selenium] goto_url error: {exc}")
+                return False
 
     # ── Search methods ─────────────────────────────────────────────────────
 
-    async def search_google_ai_mode(self, prompt: str) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """
         PRIMARY SEARCH — direct navigation to Google AI Mode URL.
         Returns the page text for downstream JSON/regex extraction.
@@ -368,7 +424,7 @@ class SeleniumAgent(BaseBrowserAgent):
             return None
         
         from common.search_engine import generate_google_ai_url
-        url = generate_google_ai_url(prompt)
+        url = ai_mode_url or generate_google_ai_url(prompt)
 
         try:
             logger.info(f"🤖 [Selenium-AI-Mode] Navigating for prompt ({len(prompt)} chars)")
@@ -391,7 +447,7 @@ class SeleniumAgent(BaseBrowserAgent):
                 logger.error(f"[Selenium] 🛑 Session/Proxy FAILED during AI search. Self-healing...")
                 await self.rotate_proxy()
                 # Recurse once with new proxy/session
-                return await self.search_google_ai_mode(prompt)
+                return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url)
             
             logger.error(f"[Selenium] search_google_ai_mode error: {exc}")
             await self._record_interruption("exception", str(exc))
@@ -423,9 +479,16 @@ class SeleniumAgent(BaseBrowserAgent):
             logger.error(f"[Selenium] submit_google_search error: {exc}")
             return False
 
-    async def search_google_ai(self, query: str) -> Optional[str]:
+    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """Alias maintaining full HybridEngine / benchmark compatibility."""
-        return await self.search_google_ai_mode(query)
+        return await self.search_google_ai_mode(query, ai_mode_url=ai_mode_url)
+
+    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+        """
+        Interactive high-stealth search flow.
+        """
+        # For now, we fallback to the mode navigation as Selenium UC is already stealthy
+        return await self.search_google_ai_mode(prompt)
 
     async def search_gemini_ai(self, query: str) -> Optional[str]:
         """Submit a query to Gemini and return response text."""

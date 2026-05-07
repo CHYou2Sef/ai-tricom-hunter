@@ -26,9 +26,10 @@
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
+from __future__ import annotations
 import asyncio
 import re
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 
 from core import config
 from common.anti_bot import action_delay_async, is_captcha_page
@@ -68,18 +69,59 @@ class CamoufoxAgent(BaseBrowserAgent):
         self._browser = None    # AsyncCamoufox context manager instance
         self._page = None       # Active Firefox page / Playwright Page object
         self._playwright = None # Underlying Playwright instance (via Camoufox)
+        self._lock = asyncio.Lock()
+        self._last_health_check = 0.0
+
+    async def is_alive(self) -> bool:
+        """Public health check with lock protection."""
+        async with self._lock:
+            if not self._page: return False
+            try:
+                await self._page.evaluate("1+1")
+                return True
+            except Exception:
+                return False
+
+    async def _ensure_page_locked(self) -> bool:
+        """
+        Defensive check: ensures self._page is not None AND the browser
+        context is still responsive.
+        """
+        now = asyncio.get_event_loop().time()
+        if self._page and (now - self._last_health_check < 5.0):
+            return True
+
+        if not self._page:
+            await self._start_locked()
+            if not self._page: return False
+
+        try:
+            # Heartbeat check
+            await self._page.evaluate("1+1")
+            self._last_health_check = now
+            return True
+        except Exception as e:
+            logger.warning(f"[Camoufox] 💔 Firefox unresponsive: {e}. Resurrecting...")
+            await self._close_locked()
+            await self._start_locked()
+            return self._page is not None
 
     # ─────────────────────────────────────────────────────────────────
     # LIFECYCLE
     # ─────────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
+        """Launch Camoufox (patched Firefox)."""
+        async with self._lock:
+            await self._start_locked()
+
+    async def _start_locked(self) -> None:
         """
         Launch Camoufox (patched Firefox) with automatic fingerprint generation.
-
-        Camoufox injects realistic fingerprints at the C++ level before
-        the browser even starts — not via JS, making it fully undetectable.
         """
+        if self._page:
+            return
+            
         try:
             from camoufox.async_api import AsyncCamoufox  # type: ignore
         except ImportError:
@@ -121,6 +163,11 @@ class CamoufoxAgent(BaseBrowserAgent):
 
     async def close(self) -> None:
         """Stop Camoufox and release all resources."""
+        async with self._lock:
+            await self._close_locked()
+
+    async def _close_locked(self) -> None:
+        """Internal lock-free close."""
         try:
             if self._page:
                 await self._page.close()
@@ -138,92 +185,94 @@ class CamoufoxAgent(BaseBrowserAgent):
 
     async def goto_url(self, url: str) -> bool:
         """Navigate to a URL. Returns True on success."""
-        if not self._page:
-            return False
-        try:
-            logger.info(f"[Camoufox] → {url}")
-            await self._page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            await action_delay_async("navigate")
-            await self._handle_captcha_if_present()
-            return True
-        except Exception as exc:
-            logger.error(f"[Camoufox] Navigation error: {exc}")
-            return False
+        async with self._lock:
+            if not await self._ensure_page_locked():
+                return False
+            try:
+                logger.info(f"[Camoufox] → {url}")
+                await self._page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                await action_delay_async("navigate")
+                await self._handle_captcha_if_present_locked()
+                return True
+            except Exception as exc:
+                logger.error(f"[Camoufox] Navigation error: {exc}")
+                return False
 
     async def get_page_source(self) -> str:
         """Return raw HTML of the current page."""
-        if not self._page:
-            return ""
-        try:
-            return await self._page.content()
-        except Exception:
-            return ""
+        async with self._lock:
+            if not self._page:
+                return ""
+            try:
+                return await self._page.content()
+            except Exception:
+                return ""
 
     # ─────────────────────────────────────────────────────────────────
     # SEARCH METHODS  (mirrors PatchrightAgent interface)
     # ─────────────────────────────────────────────────────────────────
 
-    async def search_google_ai(self, query: str) -> Optional[str]:
-        """
-        Search Google AI Mode via direct URL navigation.
-        Uses Firefox fingerprint — Google sees a real Firefox user.
+    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+        """Search Google AI Mode (Firefox)."""
+        async with self._lock:
+            if not await self._ensure_page_locked():
+                return None
+            try:
+                from common.search_engine import generate_google_ai_url
+                url = ai_mode_url or generate_google_ai_url(query)
 
-        Returns full page text for downstream regex/LLM extraction.
-        """
-        import urllib.parse
-        if not self._page:
-            return None
-        try:
-            from common.search_engine import generate_google_ai_url
-            url = generate_google_ai_url(query)
+                logger.info(f"[Camoufox] 🔍 Google AI Mode (Firefox): {query}")
+                await self._page.goto(url, wait_until="load", timeout=30000)
+                await action_delay_async("read_wait")
 
-            logger.info(f"[Camoufox] 🔍 Google AI Mode (Firefox): {query}")
-            await self._page.goto(url, wait_until="load", timeout=30000)
-            await action_delay_async("read_wait")
+                await self._handle_google_cookies_locked()
+                await self._handle_captcha_if_present_locked()
 
-            await self._handle_google_cookies()
-            await self._handle_captcha_if_present()
+                content = await self._page.content() if self._page else ""
+                if not content or len(content) < 500:
+                    logger.warning("[Camoufox] Empty page after AI Mode search.")
+                    return None
 
-            content = await self.get_page_source()
-            if not content or len(content) < 500:
-                logger.warning("[Camoufox] Empty page after AI Mode search.")
+                logger.info(f"[Camoufox] ✅ AI Mode — {len(content)} chars (Firefox).")
+                return content
+
+            except Exception as exc:
+                logger.error(f"[Camoufox] search_google_ai error: {exc}")
                 return None
 
-            logger.info(f"[Camoufox] ✅ AI Mode — {len(content)} chars (Firefox).")
-            return content
-
-        except Exception as exc:
-            logger.error(f"[Camoufox] search_google_ai error: {exc}")
-            return None
-
-    async def search_google_ai_mode(self, query: str) -> Optional[str]:
+    async def search_google_ai_mode(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """Alias for search_google_ai — HybridEngine compatibility."""
-        return await self.search_google_ai(query)
+        return await self.search_google_ai(query, ai_mode_url=ai_mode_url)
+
+    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+        """
+        Interactive high-stealth search flow for Camoufox.
+        """
+        return await self.search_google_ai(prompt)
 
     async def submit_google_search(self, query: str) -> bool:
-        """
-        Navigate to Google standard search results page.
-        """
-        import urllib.parse
-        if not self._page:
-            return False
-        try:
-            url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
-            logger.info(f"[Camoufox] 🔍 Google Search (Firefox): {query}")
-            await self._page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            await action_delay_async("navigate")
-            await self._handle_google_cookies()
-            await self._handle_captcha_if_present()
+        """Navigate to Google standard search results page."""
+        async with self._lock:
+            if not await self._ensure_page_locked():
+                return False
+            try:
+                import urllib.parse
+                url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
+                logger.info(f"[Camoufox] 🔍 Google Search (Firefox): {query}")
+                await self._page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                await action_delay_async("navigate")
+                await self._handle_google_cookies_locked()
+                await self._handle_captcha_if_present_locked()
 
-            content = await self.get_page_source()
-            if content and len(content) > 500:
-                logger.info(f"[Camoufox] ✅ submit_google_search — {len(content)} chars.")
-                return True
-            logger.warning("[Camoufox] submit_google_search — empty or blocked.")
-            return False
-        except Exception as exc:
-            logger.error(f"[Camoufox] submit_google_search error: {exc}")
-            return False
+                content = await self._page.content() if self._page else ""
+                if content and len(content) > 500:
+                    logger.info(f"[Camoufox] ✅ submit_google_search — {len(content)} chars.")
+                    return True
+                logger.warning("[Camoufox] submit_google_search — empty or blocked.")
+                return False
+            except Exception as exc:
+                logger.error(f"[Camoufox] submit_google_search error: {exc}")
+                return False
 
 
     async def crawl_website(self, url: str) -> str:
@@ -246,66 +295,75 @@ class CamoufoxAgent(BaseBrowserAgent):
         """
         Deep search using Google Gemini (Firefox/Camoufox).
         """
-        if not self._page:
-            return None
-        try:
-            logger.info(f"[Camoufox] 🤖 Gemini (Firefox): {query}")
-            await self._page.goto(config.GEMINI_URL, wait_until="load")
-            await asyncio.sleep(4)
-            
-            # Find input
-            selectors = ["div[role='combobox']", ".ql-editor", "textarea"]
-            chat_input = None
-            for s in selectors:
-                if await self._page.locator(s).count() > 0:
-                    chat_input = self._page.locator(s).first
-                    break
-            
-            if not chat_input:
-                logger.warning("[Camoufox/Gemini] Could not find input.")
+        async with self._lock:
+            if not await self._ensure_page_locked():
                 return None
+            try:
+                logger.info(f"[Camoufox] 🤖 Gemini (Firefox): {query}")
+                await self._page.goto(config.GEMINI_URL, wait_until="load")
+                await asyncio.sleep(4)
                 
-            await chat_input.click()
-            await self._page.keyboard.type(query)
-            await self._page.keyboard.press("Enter")
-            
-            # Stable response extraction
-            last_text = ""
-            stable_count = 0
-            for _ in range(30):
-                await asyncio.sleep(2)
-                res_sel = [".model-response-text", "message-content"]
-                current = None
-                for rs in res_sel:
-                    if await self._page.locator(rs).count() > 0:
-                        current = await self._page.locator(rs).first.text_content()
-                        break
+                if not self._page: return None
                 
-                if current and current == last_text:
-                    stable_count += 1
-                    if stable_count >= 3:
-                        return current.strip()
-                else:
-                    stable_count = 0
-                    last_text = current or ""
-            
-            return last_text.strip() if last_text else None
-        except Exception as exc:
-            logger.error(f"[Camoufox] search_gemini_ai error: {exc}")
-            return None
+                # Find input
+                selectors = ["div[role='combobox']", ".ql-editor", "textarea"]
+                chat_input = None
+                for s in selectors:
+                    if not self._page: return None
+                    try:
+                        if await self._page.locator(s).count() > 0:
+                            chat_input = self._page.locator(s).first
+                            break
+                    except: continue
+                
+                if not chat_input:
+                    logger.warning("[Camoufox/Gemini] Could not find input.")
+                    return None
+                    
+                await chat_input.click()
+                if not self._page: return None
+                await self._page.keyboard.type(query)
+                await self._page.keyboard.press("Enter")
+                
+                # Stable response extraction
+                last_text = ""
+                stable_count = 0
+                for _ in range(30):
+                    await asyncio.sleep(2)
+                    if not self._page: return last_text.strip() if last_text else None
+                    
+                    res_sel = [".model-response-text", "message-content"]
+                    current = None
+                    for rs in res_sel:
+                        try:
+                            if await self._page.locator(rs).count() > 0:
+                                current = await self._page.locator(rs).first.text_content()
+                                break
+                        except: continue
+                    
+                    if current and current == last_text:
+                        stable_count += 1
+                        if stable_count >= 3:
+                            return current.strip()
+                    else:
+                        stable_count = 0
+                        last_text = current or ""
+                
+                return last_text.strip() if last_text else None
+            except Exception as exc:
+                logger.error(f"[Camoufox] search_gemini_ai error: {exc}")
+                return None
 
     # ─────────────────────────────────────────────────────────────────
     # CAPTCHA & COOKIE HELPERS
     # ─────────────────────────────────────────────────────────────────
 
-    async def _handle_captcha_if_present(self) -> bool:
+    async def _handle_captcha_if_present_locked(self) -> bool:
         """
-        Detect and attempt CAPTCHA resolution.
-        Camoufox's Firefox fingerprint prevents ~95% of CAPTCHAs;
-        this covers the remaining edge cases.
-
-        Returns True if page is usable, False if CAPTCHA unresolved.
+        Detect and attempt CAPTCHA resolution. (Locked)
         """
+        if not self._page:
+            return False
         try:
             content = await self._page.content()
         except Exception:
@@ -332,8 +390,10 @@ class CamoufoxAgent(BaseBrowserAgent):
         await asyncio.sleep(10)
         return False
 
-    async def _handle_google_cookies(self) -> None:
-        """Accept Google cookie consent banners if present."""
+    async def _handle_google_cookies_locked(self) -> None:
+        """Accept Google cookie consent banners if present (Locked)."""
+        if not self._page:
+            return
         try:
             selectors = [
                 "button:has-text('Accept all')",
@@ -342,11 +402,14 @@ class CamoufoxAgent(BaseBrowserAgent):
                 "#L2AGLb",
             ]
             for s in selectors:
-                btn = self._page.locator(s)
-                if await btn.count() > 0 and await btn.is_visible():
-                    await btn.click()
-                    logger.info("[Camoufox] Cookie consent accepted.")
-                    await asyncio.sleep(1)
-                    break
+                if not self._page: return
+                try:
+                    btn = self._page.locator(s)
+                    if await btn.count() > 0 and await btn.is_visible():
+                        await btn.click()
+                        logger.info("[Camoufox] Cookie consent accepted.")
+                        await asyncio.sleep(1)
+                        break
+                except: continue
         except Exception:
             pass

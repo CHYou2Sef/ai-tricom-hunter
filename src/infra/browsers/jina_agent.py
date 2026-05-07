@@ -7,6 +7,7 @@
  ╚══════════════════════════════════════════════════════════════════════════╝
  """
 
+from __future__ import annotations
 import httpx
 import asyncio
 from typing import Optional, Dict, Any
@@ -26,6 +27,13 @@ class JinaAgent(BaseBrowserAgent):
         self.base_url = "https://r.jina.ai/"
         self._last_content: str = ""
         self.timeout = 30
+        # Jina can be disabled by config.
+        self.enabled = bool(getattr(config, "JINA_ENABLED", True))
+
+
+    async def is_alive(self) -> bool:
+        """Jina is a stateless API, so it is always 'alive' unless disabled by credits."""
+        return self.enabled
 
     async def start(self) -> None:
         """No-op for Jina as it's a stateless API."""
@@ -44,7 +52,13 @@ class JinaAgent(BaseBrowserAgent):
         """
         Fetch a URL via Jina Reader.
         """
-        target_url = f"{self.base_url}{url}"
+        # r.jina.ai expects a full URL appended.
+        # Avoid double-https/invalid concatenation if callers pass a full URL.
+        if url.startswith("http://") or url.startswith("https://"):
+            target_url = f"{self.base_url}{url}"
+        else:
+            target_url = f"{self.base_url}{url}"
+
         headers = {
             "Accept": "text/event-stream", # Or text/plain for simple markdown
         }
@@ -81,10 +95,17 @@ class JinaAgent(BaseBrowserAgent):
             return self._last_content
         return ""
 
-    async def search_google_ai_mode(self, prompt: str) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """Utilise le endpoint de recherche natif de Jina AI (s.jina.ai)."""
         import urllib.parse
         import re
+
+        # Si un ai_mode_url est fourni, on l'utilise directement
+        if ai_mode_url:
+            logger.info(f"[Jina] Reading direct AI Mode URL: {ai_mode_url}")
+            if await self.goto_url(ai_mode_url):
+                return self._last_content
+            return None
 
         # Si le prompt est un prompt complexe (AI Mode), on extrait les termes essentiels
         # pour éviter l'erreur 422 (URL trop longue) et obtenir de meilleurs résultats.
@@ -126,9 +147,13 @@ class JinaAgent(BaseBrowserAgent):
             logger.error(f"[Jina] Erreur de recherche: {e}")
             return None
 
-    async def search_google_ai(self, query: str) -> Optional[str]:
+    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """Fallback transparent vers la recherche Jina."""
-        return await self.search_google_ai_mode(query)
+        return await self.search_google_ai_mode(query, ai_mode_url=ai_mode_url)
+
+    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+        """Interactive search fallback for Jina."""
+        return await self.search_google_ai_mode(prompt)
 
     async def submit_google_search(self, query: str) -> bool:
         """Jina est une API REST (Stateless), il n'y a pas de formulaire à soumettre."""

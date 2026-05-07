@@ -11,7 +11,7 @@
 ║    No Gemini / DuckDuckGo AI fallback for phone searches.               ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
-
+from __future__ import annotations
 import asyncio
 import random
 import re
@@ -47,7 +47,7 @@ logger = get_logger(__name__)
 # ── Google Knowledge Panel / Instant Answer selectors ──────────────────────
 # These CSS selectors target common locations where Google displays phone numbers
 # directly on the search results page (no AI Overview needed).
-GOOGLE_SEARCH_INPUT = 'textarea[name="q"], input[name="q"]'
+GOOGLE_SEARCH_INPUT = 'textarea[name="q"], input[name="q"], textarea[title="Search"], input[title="Search"], textarea[title="Rechercher"], input[title="Rechercher"], [aria-label="Search"]'
 
 # ── Gemini selectors (kept for SIREN/Name enrichment only, NOT phone) ──────
 GEMINI_INPUT_SELECTORS   = ["div[role='combobox']", ".ql-editor", "textarea"]
@@ -77,21 +77,20 @@ class PatchrightAgent(BaseBrowserAgent):
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        logger.info("[Patchright] Starting Chrome with your profile (Async)...")
-        self._playwright = await async_playwright().start()
+        """Launch Patchright browser context."""
+        async with self._lock:
+            await self._start_locked()
 
-        # ── Generate per-session fingerprint bundle (Task 2) ──────────────
+    async def _start_locked(self) -> None:
+        """Internal lock-free start."""
+        if self.context: return
+        logger.info("[Patchright] Starting Chrome with your profile...")
+        if not self._playwright:
+            self._playwright = await async_playwright().start()
+
         self._fingerprint = get_fingerprint_bundle()
         vp = self._fingerprint["viewport"]
-        launch_args = []
-
-        launch_args.extend([
-            f"--window-size={vp['width']},{vp['height']}",
-            # NOTE: --disable-blink-features=AutomationControlled is intentionally
-            # OMITTED here. Patchright adds it automatically at the binary level.
-            # Adding it manually can paradoxically signal that a stealth patch
-            # was applied (detectable by advanced WAFs).
-        ])
+        launch_args = [f"--window-size={vp['width']},{vp['height']}"]
 
         geolocation = None
         permissions = []
@@ -103,210 +102,226 @@ class PatchrightAgent(BaseBrowserAgent):
         if config.PROXY_ENABLED and self.current_proxy:
             proxy_settings = {"server": self.current_proxy}
 
-        self.context = await self._playwright.chromium.launch_persistent_context(
-            user_data_dir=self.profile_path,
-            headless=False,
-            executable_path=config.CHROMIUM_BINARY_PATH or None,
-            args=launch_args,
-            viewport={"width": vp["width"], "height": vp["height"]},
-            user_agent=self._fingerprint["user_agent"],
-            geolocation=geolocation,
-            permissions=permissions,
-            ignore_https_errors=True,
-            proxy=proxy_settings,
-        )
+        try:
+            self.context = await self._playwright.chromium.launch_persistent_context(
+                user_data_dir=self.profile_path,
+                headless=getattr(config, "HEADLESS", False),
+                executable_path=config.CHROMIUM_BINARY_PATH or None,
+                args=launch_args,
+                viewport={"width": vp["width"], "height": vp["height"]},
+                user_agent=self._fingerprint["user_agent"],
+                geolocation=geolocation,
+                permissions=permissions,
+                ignore_https_errors=True,
+                proxy=proxy_settings,
+            )
 
-        # ── Inject fingerprint script before any page JS runs (CDP) ───────
-        fp_script = build_cdp_injection_script(self._fingerprint)
-        await self.context.add_init_script(script=fp_script)
-
-        self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
-        alert("INFO", "Patchright session started", {
-            "worker": self.worker_id,
-            "viewport": f"{vp['width']}×{vp['height']}",
-        })
-        logger.info(
-            f"[Patchright] ✅ Ready — fingerprint injected "
-            f"({vp['width']}×{vp['height']}, "
-            f"UA=...{self._fingerprint['user_agent'][-25:]})"
-        )
+            fp_script = build_cdp_injection_script(self._fingerprint)
+            await self.context.add_init_script(script=fp_script)
+            self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+            logger.info("[Patchright] ✅ Ready.")
+        except Exception as e:
+            logger.error(f"[Patchright] Startup failed: {e}")
+            self.context = self.page = None
+            raise
 
     async def close(self) -> None:
+        """Gracefully stop the browser."""
+        async with self._lock:
+            await self._close_locked()
+
+    async def _close_locked(self) -> None:
+        """Internal lock-free close."""
         try:
-            if self.context: await self.context.close()
-            if self._playwright: await self._playwright.stop()
+            if self.context:
+                await self.context.close()
+            if self._playwright:
+                await self._playwright.stop()
         except Exception:
             pass
         finally:
             self.context = self.page = self._playwright = None
+            logger.info("[Patchright] Browser closed.")
+
+    async def is_alive(self) -> bool:
+        """Public health check with lock protection. Passive."""
+        async with self._lock:
+            if not self.page: return False
+            try:
+                # Playwright heartbeat
+                await self.page.evaluate("1+1", timeout=2000)
+                return True
+            except Exception:
+                return False
+
+    # ── Resilience ────────────────────────────────────────────────────────
+    
+    async def _ensure_page_locked(self) -> bool:
+        """
+        Check if the page is responsive via a heartbeat.
+        Automatically restarts if the page is dead or None.
+        """
+        import time
+        now = time.time()
+        # 5s health-check cache
+        if self.page and getattr(self, "_last_health_check", 0) > (now - 5):
+            return True
+
+        if not self.page or not self.context:
+            logger.info("[Patchright] 🔄 Session missing/dead. Starting...")
+            await self._start_locked()
+            return self.page is not None
+
+        try:
+            # Heartbeat: simple JS eval
+            await self.page.evaluate("1+1", timeout=5000)
+            self._last_health_check = now
+            return True
+        except Exception as e:
+            logger.warning(f"[Patchright] 💔 Page unresponsive: {e}. Resurrecting...")
+            await self._close_locked()
+            await self._start_locked()
+            return self.page is not None
 
     async def rotate_proxy(self) -> None:
         """Fetch a new proxy and restart the browser context."""
-        logger.info(f"[Patchright-Worker-{self.worker_id}] ♻️ Rotating proxy...")
-        from common.proxy_manager import get_next_proxy
-        new_proxy = get_next_proxy()
-        if new_proxy:
-            self.current_proxy = new_proxy
-            logger.info(f"[Patchright-Worker-{self.worker_id}] New Proxy attached: {new_proxy}")
-            await self.close()
-            await self.start()
-        else:
-            logger.warning(f"[Patchright-Worker-{self.worker_id}] No free proxies left. Continuing direct.")
+        async with self._lock:
+            await self._rotate_proxy_locked()
 
     async def get_page_source(self) -> str:
-        return await self.page.content() if self.page else ""
+        """Return raw HTML content."""
+        async with self._lock:
+            return await self._get_page_source_locked()
+
+    async def _get_page_source_locked(self) -> str:
+        if not self.page:
+            return ""
+        try:
+            return await self.page.content()
+        except Exception:
+            return ""
 
 
     # ── Main Search Method (phone-focused, NO AI/LLM) ─────────────────────
 
     async def search_google_ai(self, query: str) -> Optional[str]:
-        """
-        Perform a Google search, activate AI Mode tab, then extract content.
-        Returns the page's text content, or None.
-        """
-        if not self.page:
-            return None
-        async with self._lock:
-            try:
-                await self._navigate_and_search(query)  # Includes _click_ai_mode_tab()
-
-                # Wait for results page
-                await asyncio.sleep(2)
-                await self.page.wait_for_load_state("domcontentloaded")
-                await self._handle_captcha_if_present()
-
-                # ─ Try targeted phone extraction via UUE (Knowledge Panel) ─
-                metadata = await self.extract_universal_data()
-                if metadata and metadata.get("heuristic_phones"):
-                    logger.info(f"✨ [Google] Found phone via UUE Heuristics.")
-                    return metadata["heuristic_phones"][0]
-
-                # ─ Return FULL page TEXT (not HTML) for regex scanning ─
-                logger.info("[Google] No instant panel — returning page text for regex scan.")
-                try:
-                    return await self.page.inner_text("body")
-                except:
-                    return await self.page.content()
-
-            except Exception as e:
-                logger.error(f"[Google] Error: {e}")
-                return None
+        """Perform a Google search and extract content. Alias for compatibility."""
+        return await self.search_google_ai_mode(query)
 
     async def submit_google_search(self, query: str) -> bool:
-        """
-        Navigate to Google and submit the search query.
-        Returns True if successful, False if blocked (CAPTCHA).
-        """
-        if not self.page:
-            return False
+        """Navigate to Google and submit search query."""
         async with self._lock:
-            try:
-                await self.page.goto(config.GOOGLE_URL, wait_until="load")
-                await asyncio.sleep(1)
-                
-                await self._handle_google_cookies()
-                await self._handle_captcha_if_present()
+            return await self._submit_google_search_locked(query)
 
-                search_box = await self._find_input(GOOGLE_SEARCH_INPUT)
-                if search_box:
-                    await search_box.click()
-                    await self._human_type_playwright(query)
-                    await search_box.press("Enter")
-                    return True
-                return False
-            except Exception as e:
-                logger.error(f"[Google] Search Submission Error: {e}")
-                return False
+    async def _submit_google_search_locked(self, query: str) -> bool:
+        if not await self._ensure_page_locked():
+            return False
+        
+        page = self.page
+        if not page: return False
+        
+        try:
+            logger.info(f"[Patchright] 🔍 Google Search: {query}")
+            await page.goto(config.GOOGLE_URL, wait_until="load", timeout=30000)
+            await self._handle_google_cookies_locked(page)
+            await self._handle_captcha_if_present_locked(page)
+            
+            # Re-check page after potential rotation in captcha handler
+            page = self.page
+            if not page: return False
 
-    async def _navigate_and_search(self, query: str) -> None:
+            # Use a robust helper to find and type
+            search_input = await self._find_input_locked(page, GOOGLE_SEARCH_INPUT)
+            if search_input:
+                await search_input.click()
+                await self._human_type_locked(page, query)
+                await search_input.press("Enter")
+                await asyncio.sleep(2)
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"[Patchright] Google Search Submission Error: {e}")
+            return False
+
+    async def _navigate_and_search_locked(self, page: Page, query: str) -> None:
+        """Internal lock-free navigate and search."""
         logger.info(f"[Google] Search: {query}")
-        from common.search_engine import generate_google_ai_url
-        url = generate_google_ai_url(query)
+        await page.goto(config.GOOGLE_URL, wait_until="load")
+        await self._handle_google_cookies_locked(page)
+        await self._handle_captcha_if_present_locked(page)
         
-        logger.info(f"[Crawl4AI] 🔍 Google AI Mode scrape: {query}")
-        await self.page.goto(config.GOOGLE_URL, wait_until="load")
-        await asyncio.sleep(1)
-        
-        await self._handle_google_cookies()
-        await self._handle_captcha_if_present()
+        page = self.page # Might have rotated
+        if not page: return
 
-        search_box = await self._find_input(GOOGLE_SEARCH_INPUT)
+        search_box = await self._find_input_locked(page, GOOGLE_SEARCH_INPUT)
         if search_box:
             await search_box.click()
-            await self._human_type_playwright(query)
+            await self._human_type_locked(page, query)
             await search_box.press("Enter")
             await asyncio.sleep(2)
-            # ⭐ ALWAYS try to activate AI Mode tab after every search
-            await self._click_ai_mode_tab()
+            await self._click_ai_mode_tab_locked(page)
 
-    async def _click_ai_mode_tab(self) -> bool:
-        """
-        Clicks the 'Mode IA' tab that appears in Google search results.
-        As seen in the user's screenshot, the tab is labelled 'Mode IA' in French.
-        Tries multiple selectors to be robust across regions/languages.
-        """
-        if not self.page:
-            return False
-
-        # Selectors ranked by specificity — French first (user's region)
-        tab_selectors = [
-            "a:has-text('Mode IA')",
-            "a:has-text('IA')",
-            "div[role='tab']:has-text('Mode IA')",
-            "div[role='tab']:has-text('IA')",
-            "a:has-text('AI Mode')",
-            "a:has-text('AI')",
-            "a:has-text('Conversations')",
-        ]
-
+    async def _click_ai_mode_tab_locked(self, page: Page) -> bool:
+        """Internal lock-free click AI tab."""
+        if not page: return False
+        tab_selectors = ["a:has-text('Mode IA')", "a:has-text('IA')", "a:has-text('AI Mode')", "a:has-text('AI')"]
         for selector in tab_selectors:
             try:
+                # Use locator only if page is valid
+                if not self.page: break
                 tab = self.page.locator(selector).first
                 if await tab.count() > 0 and await tab.is_visible(timeout=1500):
                     await tab.click()
                     logger.info(f"🤖 [AI Mode Tab] Clicked: '{selector}'")
-                    await asyncio.sleep(2.5)  # Wait for AI results to load
+                    await asyncio.sleep(2.5)
                     return True
-            except:
-                continue
-
-        logger.debug("[AI Mode Tab] Tab not found — using standard results.")
+            except: continue
         return False
 
 
     async def goto_url(self, url: str) -> bool:
         """Navigate to a specific URL."""
-        if not self.page: return False
         async with self._lock:
-            try:
-                await self.page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                return True
-            except Exception as e:
-                logger.debug(f"[Patchright] Failed to visit {url}: {e}")
-                return False
+            return await self._goto_url_locked(url)
+
+    async def _goto_url_locked(self, url: str) -> bool:
+        if not await self._ensure_page_locked():
+            return False
+        
+        page = self.page
+        if not page: return False
+        try:
+            await self.page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            return True
+        except Exception as e:
+            logger.debug(f"[Patchright] Failed to visit {url}: {e}")
+            return False
 
     async def crawl_website(self, url: str) -> str:
-        """
-        Deep crawl of a website:
-        1. Visit homepage.
-        2. Identify contact/about links.
-        3. Visit them and collect all text.
-        """
-        if not self.page: return ""
-        
+        """Deep crawl of a website."""
         async with self._lock:
-            try:
-                logger.info(f"🕸️ [Playwright] DeepCrawl starting: {url}")
-                await self.page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                await asyncio.sleep(2)
-                
-                all_text = [f"--- PAGE: {url} ---\n" + await self.page.inner_text("body")]
-                
-                # Link discovery for contact pages
-                links = await self.page.locator("a").all()
-                found_sublinks = []
-                
-                for link in links:
+            return await self._crawl_website_locked(url)
+
+    async def _crawl_website_locked(self, url: str) -> str:
+        if not await self._goto_url_locked(url):
+            return ""
+        
+        try:
+            page = self.page
+            if not page: return ""
+            logger.info(f"🕸️ [Patchright] DeepCrawl: {url}")
+            await asyncio.sleep(2)
+            
+            content_text = await page.inner_text("body")
+            all_text = [f"--- PAGE: {url} ---\n" + content_text]
+            
+            # Link discovery for contact pages
+            links = await page.locator("a").all()
+            found_sublinks = []
+            
+            for link in links:
+                try:
+                    if not self.page: break
                     name = (await link.inner_text() or "").lower()
                     href = (await link.get_attribute("href") or "").lower()
                     
@@ -315,159 +330,77 @@ class PatchrightAgent(BaseBrowserAgent):
                         if full_url and full_url.startswith("http") and full_url != url:
                             found_sublinks.append(full_url)
                         elif full_url and full_url.startswith("/"):
-                            # Handle relative paths
                             from urllib.parse import urljoin
                             found_sublinks.append(urljoin(url, full_url))
-                    
-                    if len(found_sublinks) >= 2: break # Max 2 subpages
-
-                # Visit subpages
-                for sub in list(set(found_sublinks)):
-                    try:
-                        logger.info(f"   ∟ Visiting subpage: {sub}")
-                        await self.page.goto(sub, wait_until="domcontentloaded", timeout=10000)
-                        await asyncio.sleep(1)
-                        all_text.append(f"\n--- PAGE: {sub} ---\n" + await self.page.inner_text("body"))
-                    except:
-                        continue
+                except: continue
                 
-                return "\n".join(all_text)
+                if len(found_sublinks) >= 2: break 
 
-            except Exception as e:
-                logger.error(f"[Patchright] Crawl error for {url}: {e}")
-                return ""
+            # Visit subpages
+            for sub in list(set(found_sublinks)):
+                try:
+                    if not self.page: break
+                    logger.info(f"   ∟ Visiting subpage: {sub}")
+                    await page.goto(sub, wait_until="domcontentloaded", timeout=10000)
+                    await asyncio.sleep(1)
+                    if self.page:
+                        all_text.append(f"\n--- PAGE: {sub} ---\n" + await page.inner_text("body"))
+                except:
+                    continue
+            
+            return "\n".join(all_text)
+        except Exception as e:
+            logger.error(f"[Patchright] Crawl error for {url}: {e}")
+            return ""
 
-    # ── OLD: _activate_ia_mode (kept as comment for reference) ──
-    # async def _activate_ia_mode(self) -> bool:
-    #     """Attempts to find and activate the IA Mode tab by clicking."""
-    #     selectors = ["a:has-text('IA')", "a:has-text('Mode IA')", ...]
-    #     for s in selectors:
-    #         btn = self.page.locator(s).first
-    #         if await btn.count() > 0 and await btn.is_visible():
-    #             await btn.click()
-    #             return True
-    #     return False
-
-    # ── OLD: search_google_ia_mode (kept as comment for reference) ──
-    # async def search_google_ia_mode(self, query: str) -> Optional[str]:
-    #     """Navigated normally then clicked the IA tab."""
-    #     await self._navigate_and_search(query)
-    #     activated = await self._activate_ia_mode()
-    #     ...
-
-    async def search_google_ai_mode(self, prompt: str) -> Optional[str]:
-        """
-        ⭐ PRIMARY SEARCH METHOD — TIER 0
-        
-        Navigates directly to Google AI Mode using the aep=42 URL parameter
-        (as demonstrated by the user's screenshot). This is the fastest and
-        most reliable approach — one query returns a full JSON response.
-        
-        Steps:
-        1. Encode the prompt and navigate to the AI Mode URL directly.
-        2. Wait for Google AI to finish streaming its response.
-        3. Extract the JSON code block from the page.
-        4. Return the raw JSON string.
-        """
-        if not self.page:
-            return None
-        
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+        """PRIMARY SEARCH METHOD — TIER 0"""
         async with self._lock:
+            if not await self._ensure_page_locked():
+                return None
+            page = self.page
+            if not page: return None
+            
             try:
-                import re
-                import urllib.parse
                 from common.search_engine import generate_google_ai_url
+                url = ai_mode_url or generate_google_ai_url(prompt)
+                
+                logger.info(f"🤖 [AI Mode] Navigating: {url}")
+                await page.goto(url, wait_until="load", timeout=30000)
+                await self._handle_google_cookies_locked(page)
+                await self._handle_captcha_if_present_locked(page)
+                
+                page = self.page # Re-capture
+                if not page: return None
 
-                # Extraction des termes de recherche essentiels (Nom + Adresse)
-                search_query = prompt
-                if len(prompt) > 200 or "###" in prompt:
-                    name_match = re.search(r"NAME:\s*(.*)", prompt)
-                    addr_match = re.search(r"ADDRESS:\s*(.*)", prompt)
-                    if name_match:
-                        search_query = name_match.group(1).strip()
-                        if addr_match:
-                            search_query += f" {addr_match.group(1).strip()}"
-                    else:
-                        search_query = prompt[:150]
-
-                ai_mode_url = generate_google_ai_url(search_query)
-                
-                logger.info(f"🤖 [AI Mode] Navigating to: {ai_mode_url} (Query: {search_query})")
-                await self.page.goto(ai_mode_url, wait_until="load", timeout=30000)
-                await asyncio.sleep(2)
-                
-                await self._handle_google_cookies()
-                await self._handle_captcha_if_present()
-                
-                # Wait for the AI response to finish streaming
-                # Google AI Mode renders a code block with the JSON
-                logger.info("⏳ [AI Mode] Waiting for AI response to stream...")
-                response_text = await self._wait_for_ai_mode_response(timeout_sec=25)
-                
-                if response_text:
-                    logger.info(f"✨ [AI Mode] Got response ({len(response_text)} chars)")
-                else:
-                    logger.warning("[AI Mode] No AI response detected, falling back.")
-                
-                return response_text
-                
+                logger.info("⏳ [AI Mode] Waiting for response...")
+                return await self._wait_for_ai_mode_response_locked(page, timeout_sec=25)
             except Exception as e:
                 logger.error(f"[AI Mode] Error: {e}")
                 return None
 
-    async def _wait_for_ai_mode_response(self, timeout_sec: int = 25) -> Optional[str]:
-        """
-        Waits for Google AI Mode to finish streaming and extracts all text output.
-        Tries multiple selectors used by Google's AI Mode interface.
-        Uses a "stable output" check — waits until the content stops changing.
-        """
-        if not self.page:
-            return None
-        
-        # Selectors for the AI Mode response container (ranked by specificity)
-        ai_response_selectors = [
-            "code",                          # JSON code blocks
-            ".kp-wholepage-osrp-ent",        # Knowledge panel entity
-            "div.mod",                       # AI response containers
-            ".xpdopen .c2xzTb",              # Featured snippet with code
-            "[data-attrid='wa:/description']",
-            "div[role='main'] div.VwiC3b",  # Result description block
-            "div[jsname='yEVEwb']",          # AI overview container
-            "div[class*='osrp']",            # AI mode outer container
-        ]
-        
+    async def _wait_for_ai_mode_response_locked(self, page: Page, timeout_sec: int = 25) -> Optional[str]:
+        """Internal lock-free wait."""
+        ai_response_selectors = ["code", ".kp-wholepage-osrp-ent", "div.mod", ".xpdopen .c2xzTb", "[data-attrid='wa:/description']", "div[jsname='yEVEwb']"]
         deadline = asyncio.get_event_loop().time() + timeout_sec
         prev_text = ""
         stable_count = 0
-        
         while asyncio.get_event_loop().time() < deadline:
             await asyncio.sleep(1.5)
-            
-            # Try to extract content from each selector
             for selector in ai_response_selectors:
                 try:
-                    elements = await self.page.locator(selector).all()
-                    texts = []
-                    for el in elements[:5]:  # max 5 elements per selector
-                        t = await el.inner_text()
-                        if t and len(t) > 30:
-                            texts.append(t)
-                    
-                    if texts:
-                        combined = "\n".join(texts)
-                        # Check if output has stabilised (stopped streaming)
+                    elements = await page.locator(selector).all()
+                    texts = [await el.inner_text() for el in elements[:5]]
+                    combined = "\n".join([t for t in texts if t and len(t) > 30])
+                    if combined:
                         if combined == prev_text:
                             stable_count += 1
-                            if stable_count >= 2:  # Stable for 2 cycles = done
-                                return combined
+                            if stable_count >= 2: return combined
                         else:
                             prev_text = combined
                             stable_count = 0
-                        break  # Found content, keep checking this selector
-                except:
-                    continue
-        
-        # Return whatever we have even if not fully stable
+                        break
+                except: continue
         return prev_text if prev_text else None
 
     @staticmethod
@@ -480,148 +413,109 @@ class PatchrightAgent(BaseBrowserAgent):
         res = parse_utils(raw_text)
         return res if res is not None else {}
 
-    async def _handle_google_cookies(self) -> None:
-        """Handle 'Accept all' cookie buttons if present."""
+    async def _handle_google_cookies_locked(self, page: Page) -> None:
+        """Internal lock-free cookie handler."""
         try:
-            selectors = [
-                "button:has-text('Accept all')", 
-                "button:has-text('Accepter tout')", 
-                "button:has-text('I agree')",
-                "#L2AGLb" # Specific ID for Google Accept button
-            ]
+            selectors = ["button:has-text('Accept all')", "button:has-text('Accepter tout')", "#L2AGLb"]
             for s in selectors:
-                btn = self.page.locator(s)
+                btn = page.locator(s)
                 if await btn.count() > 0 and await btn.is_visible():
                     await btn.click()
-                    logger.info("[Patchright] Cookie consent accepted.")
                     await asyncio.sleep(1)
                     break
-        except:
-            pass
+        except: pass
 
-    async def _handle_captcha_if_present(self) -> bool:
-        """
-        Detect CAPTCHA and attempt resolution (Bug #4 fix).
-
-        Decision tree:
-          1. Not a CAPTCHA page  →  return True immediately (fast path).
-          2. CAPTCHA_SOLVER configured as '2captcha' / 'capsolver'
-             → call captcha_solver.py's async API solver.
-          3. No API key available
-             → log a warning and wait a SHORT delay (10s, not 180s!)
-             so the waterfall can escalate rather than hanging forever.
-
-        Returns:
-            True  if the page is (or became) usable.
-            False if CAPTCHA is confirmed and could not be resolved.
-        """
+    async def _handle_captcha_if_present_locked(self, page: Page) -> bool:
+        """Internal lock-free CAPTCHA handler."""
         try:
-            content = await self.page.content()
-        except Exception:
-            return False
-
-        if not is_captcha_page(content):
-            return True  # Fast path — no CAPTCHA
-
-        logger.warning("[Google] CAPTCHA detected.")
-
-        # Try API-based solver first (requires CAPTCHA_API_KEY in .env)
-        try:
+            content = await page.content()
+            if not is_captcha_page(content): return False
+            logger.warning("[Google] CAPTCHA detected.")
             from common.captcha_solver import detect_captcha_type, solve_captcha_async
             captcha_type = detect_captcha_type(content)
             if captcha_type and getattr(config, "CAPTCHA_API_KEY", ""):
-                logger.info(
-                    f"[Google] Routing to auto CAPTCHA solver "
-                    f"(type={captcha_type}, solver={config.CAPTCHA_SOLVER})..."
-                )
-                solved = await solve_captcha_async(self.page, captcha_type)
-                if solved:
-                    logger.info("[Google] ✅ CAPTCHA auto-solved.")
-                    return True
-                logger.warning("[Google] Auto-solver failed — escalating tier.")
-                return False
-        except Exception as exc:
-            logger.debug(f"[Google] Captcha solver error: {exc}")
+                solved = await solve_captcha_async(page, captcha_type)
+                if solved: return False # Page is fine now
+            
+            # Rotation if failed
+            logger.warning("[Google] CAPTCHA blocked. Rotating...")
+            await self._rotate_proxy_locked()
+            return True
+        except Exception: return False
 
-        # No API key — short non-blocking pause so waterfall can escalate
-        short_wait = 10  # seconds — enough for a human to intervene manually
-        logger.warning(
-            f"[Google] No CAPTCHA_API_KEY configured. "
-            f"Waiting {short_wait}s then escalating to next tier. "
-            f"Set CAPTCHA_API_KEY in .env for autonomous resolution."
-        )
-        await asyncio.sleep(short_wait)
-        return False
+    async def _rotate_proxy_locked(self) -> None:
+        """Internal lock-free rotation."""
+        from common.proxy_manager import get_next_proxy
+        new_proxy = get_next_proxy()
+        if new_proxy:
+            self.current_proxy = new_proxy
+            await self._close_locked()
+            await self._start_locked()
 
     async def search_gemini_ai(self, query: str) -> Optional[str]:
-        """
-        Deep search using Google Gemini.
-        """
-        if not self.page:
-            return None
+        """Deep search using Google Gemini."""
         async with self._lock:
+            if not self.page: await self._start_locked()
+            page = self.page
+            if not page: return None
             try:
-                logger.info(f"🚀 [Gemini] DeepSearch (enrichment only): {query}")
-                await self.page.goto(config.GEMINI_URL, wait_until="load")
-                await asyncio.sleep(4)
-
+                logger.info(f"🚀 [Gemini] search: {query}")
+                await page.goto(config.GEMINI_URL, wait_until="load")
                 chat_input = None
                 for s in GEMINI_INPUT_SELECTORS:
-                    chat_input = await self._find_input(s, timeout_ms=5000)
-                    if chat_input:
-                        break
-
-                if not chat_input:
-                    logger.warning("[Gemini] Could not find input area.")
-                    return None
-
+                    chat_input = await self._find_input_locked(page, s)
+                    if chat_input: break
+                if not chat_input: return None
                 await chat_input.click()
-                await self._human_type_playwright(query)
-                await self.page.keyboard.press("Enter")
-
-                return await self._wait_for_streaming_response(GEMINI_RESPONSE_SELECTORS, stable_wait_sec=4)
+                await self._human_type_locked(page, query)
+                await page.keyboard.press("Enter")
+                return await self._wait_for_streaming_response_locked(page, GEMINI_RESPONSE_SELECTORS)
             except Exception as e:
                 logger.error(f"[Gemini] Error: {e}")
                 return None
 
-    # ── Private Helpers ────────────────────────────────────────────────────
-
-    async def _find_input(self, selector: str, timeout_ms: int = 10000):
+    async def _find_input_locked(self, page: Page, selector: str, timeout_ms: int = 5000):
+        if not page: return None
         try:
-            await self.page.wait_for_selector(selector, timeout=timeout_ms)
-            return self.page.locator(selector).first
-        except Exception:
-            return None
+            await page.wait_for_selector(selector, timeout=timeout_ms)
+            if not self.page: return None
+            return page.locator(selector).first
+        except: return None
 
-    async def _extract_first_available(self, selectors: list, timeout_ms: int = 3000) -> Optional[str]:
-        """Try each selector; return the first non-empty text found."""
-        for s in selectors:
-            try:
-                await self.page.wait_for_selector(s, timeout=timeout_ms, state="visible")
-                text = await self.page.locator(s).first.text_content()
-                if text and text.strip():
-                    return text.strip()
-            except Exception:
-                continue
-        return None
-
-    async def _human_type_playwright(self, text: str) -> None:
+    async def _human_type_locked(self, page: Page, text: str) -> None:
+        if not page: return
         for char in text:
-            await self.page.keyboard.type(char)
-            await asyncio.sleep(random.uniform(0.04, 0.12))
+            try:
+                if not self.page: break
+                await page.keyboard.type(char)
+                await asyncio.sleep(random.uniform(0.04, 0.12))
+            except: break
 
-    async def _wait_for_streaming_response(self, selectors: list, stable_wait_sec: int = 4) -> Optional[str]:
+    async def _wait_for_streaming_response_locked(self, page: Page, selectors: list) -> Optional[str]:
         start = asyncio.get_event_loop().time()
         last_text = ""
         stable_count = 0
         while asyncio.get_event_loop().time() - start < 60:
-            current = await self._extract_first_available(selectors, timeout_ms=3000) or ""
+            current = await self._extract_first_available_locked(page, selectors) or ""
             if current and current == last_text:
                 stable_count += 1
-                if stable_count >= stable_wait_sec:
-                    return current
+                if stable_count >= 4: return current
             else:
                 stable_count = 0
                 last_text = current
             await asyncio.sleep(1)
         return last_text or None
+
+    async def _extract_first_available_locked(self, page: Page, selectors: list) -> Optional[str]:
+        if not page: return None
+        for s in selectors:
+            try:
+                if not self.page: break
+                text = await page.locator(s).first.text_content(timeout=2000)
+                if text and text.strip(): return text.strip()
+            except: continue
+        return None
+
+    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+        """Interactive high-stealth search flow."""
+        return await self.search_google_ai_mode(prompt)

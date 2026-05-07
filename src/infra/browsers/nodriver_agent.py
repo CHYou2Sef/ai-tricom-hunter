@@ -18,6 +18,8 @@
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
+from __future__ import annotations
+import os
 import asyncio
 import re
 from typing import Optional, List, Dict, Any
@@ -42,50 +44,40 @@ class NodriverAgent(BaseBrowserAgent):
 
     This agent is routed to by the HybridEngine when the target URL
     matches config.HYBRID_TIER2_DOMAINS (Cloudflare-protected sites).
-
-    Lifecycle:
-        agent = NodriverAgent()
-        await agent.start()
-        try:
-            result = await agent.search_google_ai("my query")
-        finally:
-            await agent.close()
     """
 
     def __init__(self, worker_id: int = 0, proxy: Optional[str] = None):
         super().__init__(worker_id)
-        self._browser  = None
-        self._page     = None
-        self._proxy    = proxy
+        self._browser = None
+        self._page = None
+        self._proxy = proxy
         self._reconnect_count: int = 0
+        self._lock = asyncio.Lock()
+        self._bundle = None
 
     # ─────────────────────────────────────────────────────────────────
     # LIFECYCLE
     # ─────────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """
-        Launch Nodriver browser with CDP-only mode.
-        Injects the full fingerprint bundle via addScriptToEvaluateOnNewDocument
-        so every page and iframe gets the spoofed properties.
-        """
+        """Launch Nodriver browser with CDP-only mode."""
+        async with self._lock:
+            await self._start_locked()
+
+    async def _start_locked(self) -> None:
+        """Internal lock-free start. Assumes lock is held."""
+        if self._browser:
+            return
+            
         try:
             import nodriver as nd  # type: ignore
         except ImportError:
-            raise RuntimeError(
-                "nodriver is not installed. Run: pip install nodriver"
-            )
+            raise RuntimeError("nodriver is not installed. Run 'pip install nodriver'")
 
         self._bundle = get_fingerprint_bundle()
-        vp           = self._bundle["viewport"]
+        vp = self._bundle["viewport"]
+        logger.info(f"[Nodriver] 🚀 Starting stealth browser ({vp['width']}×{vp['height']})")
 
-        logger.info(
-            f"[Nodriver] 🚀 Starting stealth browser "
-            f"({vp['width']}×{vp['height']}, "
-            f"UA=...{self._bundle['user_agent'][-30:]})"
-        )
-
-        # Build launch arguments — remove all automation signals
         browser_args = [
             f"--window-size={vp['width']},{vp['height']}",
             "--no-first-run",
@@ -93,53 +85,51 @@ class NodriverAgent(BaseBrowserAgent):
             "--disable-infobars",
             "--disable-notifications",
         ]
+        if os.getuid() == 0:
+            browser_args.extend(["--no-sandbox", "--disable-setuid-sandbox"])
 
         if self._proxy:
             if "@" in self._proxy:
                 from common.anti_bot import create_proxy_auth_extension
                 ext_path = create_proxy_auth_extension(self._proxy, self.worker_id)
                 if ext_path:
-                    logger.info(f"[Nodriver] 🔑 Using AUTH proxy extension: {self._proxy}")
-                    # In Nodriver, we MUST NOT use --proxy-server if we use the extension
-                    # the extension handles the proxy routing via chrome.proxy.settings
+                    logger.info(f"[Nodriver] 🔑 Using AUTH proxy extension")
                     browser_args.append(f"--load-extension={ext_path}")
                 else:
                     browser_args.append(f"--proxy-server={self._proxy}")
             else:
                 browser_args.append(f"--proxy-server={self._proxy}")
 
-        # ── Persistent Profile Handling ──
         profile_path = config.get_worker_profile_path(self.worker_id, "nodriver")
-        logger.info(f"[Nodriver] 📂 Using persistent profile: {profile_path}")
-
-        # Hardened: ensure path is a valid string or exactly None (not "")
         nd_path = config.CHROMIUM_BINARY_PATH if config.CHROMIUM_BINARY_PATH else None
 
-        self._browser = await nd.start(
-            browser_executable_path=nd_path,
-            browser_args=browser_args,
-            user_data_dir=profile_path,
-            headless=False,               # Headed mode is more stealthy
-        )
-        
-        # Safety wait for CDP to stabilize
-        await asyncio.sleep(2)
-
-        # In nodriver, the Browser object does NOT have an evaluate() method.
-        # We must use its primary tab (main_tab) to execute scripts and navigate.
-        self._page = self._browser.main_tab
-
-        # Inject fingerprint into every new document (CDP equivalent)
-        await self._inject_fingerprint()
-
-        alert("INFO", "Nodriver session started", {
-            "viewport": f"{vp['width']}×{vp['height']}",
-            "proxy": self._proxy or "direct",
-        })
-        logger.info("[Nodriver] ✅ Ready — fingerprint injected.")
+        try:
+            self._browser = await nd.start(
+                browser_executable_path=nd_path,
+                browser_args=browser_args,
+                user_data_dir=profile_path,
+                headless=getattr(config, "HEADLESS", False),
+                sandbox=False if os.getuid() == 0 else True,
+            )
+            await asyncio.sleep(2)
+            if not self._browser:
+                return
+                
+            self._page = self._browser.main_tab
+            await self._inject_fingerprint_locked(self._page)
+            logger.info("[Nodriver] ✅ Ready.")
+        except Exception as e:
+            logger.error(f"[Nodriver] Failed to start: {e}")
+            self._browser = self._page = None
+            raise
 
     async def close(self) -> None:
         """Stop the browser and release all resources."""
+        async with self._lock:
+            await self._close_locked()
+
+    async def _close_locked(self) -> None:
+        """Internal lock-free close."""
         try:
             if self._browser:
                 self._browser.stop()
@@ -152,38 +142,68 @@ class NodriverAgent(BaseBrowserAgent):
 
     async def rotate_proxy(self) -> None:
         """Fetch a new proxy and restart the Nodriver browser session."""
+        async with self._lock:
+            await self._rotate_proxy_locked()
+
+    async def _rotate_proxy_locked(self) -> None:
+        """Internal lock-free rotation. Assumes lock is held."""
         from common.proxy_manager import get_next_proxy
         new_proxy = get_next_proxy()
-        
         if new_proxy:
-            logger.info(f"[Nodriver-Worker-{self.worker_id}] ♻️  Rotating proxy to: {new_proxy}")
+            logger.info(f"[Nodriver] ♻️  Rotating proxy to: {new_proxy}")
             self._proxy = new_proxy
-            await self.close()
-            await self.start()
+            await self._close_locked()
+            await self._start_locked()
         else:
             logger.warning("[Nodriver] No fresh proxy available for rotation.")
+
+    async def is_alive(self) -> bool:
+        """Public health check with lock protection. Passive."""
+        async with self._lock:
+            if not self._page or not self._browser:
+                return False
+            try:
+                # Use a shorter timeout for the public health check
+                await asyncio.wait_for(self._page.evaluate("1+1"), timeout=2.0)
+                return True
+            except Exception:
+                return False
 
     # ─────────────────────────────────────────────────────────────────
     # STALE CONNECTION RECOVERY
     # ─────────────────────────────────────────────────────────────────
 
-    async def _ensure_page_alive(self) -> bool:
+    async def _ensure_page_locked(self) -> bool:
         """
-        Check if the page is responsive. On failure, attempt reconnect
-        with exponential backoff up to config.BROWSER_MAX_RECONNECT_ATTEMPTS.
+        Check if the page is responsive. Internal locked version.
+        Includes a 5s health-check cache to prevent redundant evaluation.
+        Attempts recovery if dead.
+        """
+        import time
+        now = time.time()
+        
+        # 1. Immediate NoneType check
+        if not self._page or not self._browser:
+            logger.info("[Nodriver] 🔄 Session missing, starting new one...")
+            await self._start_locked()
+            return self._page is not None
 
-        Returns True if page is alive (or reconnected), False if all attempts failed.
-        """
+        # 2. 5s health-check cache to avoid spamming 1+1
+        if getattr(self, "_last_health_check", 0) > (now - 5):
+            return True
+
         try:
-            # Quick health-check: request current URL
+            # Heartbeat check via simple JS evaluation
             await asyncio.wait_for(
-                self._page.get("javascript:void(0)"),
+                self._page.evaluate("1+1"),
                 timeout=config.BROWSER_STALE_TIMEOUT_SEC,
             )
             self._reconnect_count = 0  # Reset on success
+            self._last_health_check = now
             return True
 
         except (asyncio.TimeoutError, Exception) as exc:
+            logger.warning(f"[Nodriver] 💔 Page unresponsive (heartbeat failed): {exc}. Resurrecting...")
             self._reconnect_count += 1
             stale_connection_alert(
                 attempt=self._reconnect_count,
@@ -192,42 +212,36 @@ class NodriverAgent(BaseBrowserAgent):
             )
 
             if self._reconnect_count >= config.BROWSER_MAX_RECONNECT_ATTEMPTS:
-                logger.error("[Nodriver] All reconnect attempts exhausted.")
+                logger.error("[Nodriver] 💀 All reconnect attempts exhausted.")
+                await self._close_locked()
                 return False
 
-            # Exponential backoff before retry
+            # Exponential backoff before restart
             backoff = config.PROXY_BACKOFF_DELAYS[
                 min(self._reconnect_count - 1, len(config.PROXY_BACKOFF_DELAYS) - 1)
             ]
-            logger.info(f"[Nodriver] Reconnecting in {backoff}s...")
+            logger.info(f"[Nodriver] ♻️ Reconnecting in {backoff}s...")
             await asyncio.sleep(backoff)
 
-            try:
-                await self.close()
-                await self.start()
+            await self._close_locked()
+            await self._start_locked()
+            if self._page:
+                self._last_health_check = time.time()
                 return True
-            except Exception as restart_err:
-                logger.error(f"[Nodriver] Restart failed: {restart_err}")
-                return False
+            return False
 
     # ─────────────────────────────────────────────────────────────────
     # FINGERPRINT INJECTION
     # ─────────────────────────────────────────────────────────────────
 
-    async def _inject_fingerprint(self) -> None:
-        """
-        Inject the CDP fingerprint script so it runs before any page JS.
-        Nodriver exposes the underlying CDP connection directly.
-        """
-        if not self._bundle or not self._page:
-            return
-
+    async def _inject_fingerprint_locked(self, page) -> None:
+        """Inject fingerprint into the given page instance."""
+        if not self._bundle or not page: return
         script = build_cdp_injection_script(self._bundle)
         try:
-            await self._page.evaluate(script)
-            logger.debug("[Nodriver] Fingerprint script injected.")
+            await page.evaluate(script)
         except Exception as exc:
-            logger.warning(f"[Nodriver] Fingerprint injection warning: {exc}")
+            logger.warning(f"[Nodriver] Fingerprint error: {exc}")
 
     # ─────────────────────────────────────────────────────────────────
     # NAVIGATION
@@ -235,13 +249,19 @@ class NodriverAgent(BaseBrowserAgent):
 
     async def goto_url(self, url: str) -> bool:
         """Navigate to a URL and wait for page load."""
-        if not await self._ensure_page_alive():
+        async with self._lock:
+            return await self._goto_url_locked(url)
+
+    async def _goto_url_locked(self, url: str) -> bool:
+        if not await self._ensure_page_locked():
             return False
+            
         try:
             logger.info(f"[Nodriver] → {url}")
+            if not self._page: return False
             await self._page.get(url)
             await action_delay_async("navigate")
-            await self._handle_captcha_if_present()
+            await self._handle_captcha_if_present_locked(self._page)
             return True
         except Exception as exc:
             logger.error(f"[Nodriver] Navigation error: {exc}")
@@ -249,6 +269,10 @@ class NodriverAgent(BaseBrowserAgent):
 
     async def get_page_source(self) -> str:
         """Return the raw HTML of the current page."""
+        async with self._lock:
+            return await self._get_page_source_locked()
+
+    async def _get_page_source_locked(self) -> str:
         if not self._page:
             return ""
         try:
@@ -260,119 +284,137 @@ class NodriverAgent(BaseBrowserAgent):
     # SEARCH METHODS
     # ─────────────────────────────────────────────────────────────────
 
-    async def search_google_ai(self, query: str) -> Optional[str]:
-        """
-        Submit a query to Google via AI Mode URL (direct, no form interaction).
-        Nodriver's stealth means Google accepts this as a normal browser visit.
+    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+        """Submit a query to Google via AI Mode URL."""
+        async with self._lock:
+            return await self._search_google_ai_locked(query, ai_mode_url)
 
-        Returns the full page text for downstream regex / LLM extraction.
-        """
-        import urllib.parse
-        if not await self._ensure_page_alive():
+    async def _search_google_ai_locked(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+        """Internal lock-free search."""
+        if not await self._ensure_page_locked():
             return None
+        
+        if not self._page: return None
 
         try:
             from common.search_engine import generate_google_ai_url
-            url = generate_google_ai_url(query)
+            url = ai_mode_url or generate_google_ai_url(query)
 
             logger.info(f"[Nodriver] 🔍 Google AI Mode: {query}")
             await self._page.get(url)
             await action_delay_async("read_wait")
 
-            interrupted = await self._handle_captcha_if_present()
+            if not self._page: return None
+            interrupted = await self._handle_captcha_if_present_locked(self._page)
             if interrupted:
-                logger.info("[Nodriver] Re-trying AI search after rotation...")
-                return await self.search_google_ai(query)
+                if not await self._ensure_page_locked():
+                    return None
+                await self._page.get(url)
+                await action_delay_async("read_wait")
 
-            content = await self.get_page_source()
-            if not content:
-                logger.warning("[Nodriver] Empty page after search.")
-                return None
-
-            logger.info(f"[Nodriver] ✅ Got {len(content)} chars from Google.")
+            if not self._page: return None
+            content = await self._page.get_content()
+            logger.info(f"[Nodriver] ✅ Got {len(content)} chars.")
             return content
-
         except Exception as exc:
             logger.error(f"[Nodriver] search_google_ai error: {exc}")
             return None
 
-    async def search_google_ai_mode(self, query: str) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """Alias for search_google_ai to maintain HybridEngine compatibility."""
-        return await self.search_google_ai(query)
+        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url)
 
 
+    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+        """Interactive search fallback for Nodriver."""
+        return await self.search_google_ai(prompt)
 
     async def submit_google_search(self, query: str) -> bool:
-        """
-        Navigate to Google and submit a search query via Nodriver (CDP-only stealth).
-        Implements the same contract as PlaywrightAgent.submit_google_search() so
-        HybridEngine Tier 2 can handle this method without escalating.
+        """Navigate to Google and submit a search query."""
+        async with self._lock:
+            return await self._submit_google_search_locked(query)
 
-        Returns True if the page loaded content, False on failure/block.
-        """
-        import urllib.parse
-        if not await self._ensure_page_alive():
+    async def _submit_google_search_locked(self, query: str) -> bool:
+        """Internal lock-free submit."""
+        if not await self._ensure_page_locked():
             return False
+        
+        if not self._page: return False
+        
         try:
+            import urllib.parse
             encoded = urllib.parse.quote_plus(query)
-            url     = f"https://www.google.com/search?q={encoded}"
-            logger.info(f"[Nodriver] 🔍 Google Search (submit): {query}")
+            url = f"https://www.google.com/search?q={encoded}"
+            logger.info(f"[Nodriver] 🔍 Google Search: {query}")
             await self._page.get(url)
             await action_delay_async("navigate")
-            await self._handle_captcha_if_present()
-            content = await self.get_page_source()
-            if not content or len(content) < 500:
-                logger.warning("[Nodriver] Empty page after submit_google_search.")
-                return False
-            logger.info(f"[Nodriver] ✅ submit_google_search — {len(content)} chars loaded.")
-            return True
+            
+            if not self._page: return False
+            await self._handle_captcha_if_present_locked(self._page)
+            
+            if not self._page: return False
+            content = await self._page.get_content()
+            return bool(content and len(content) > 500)
         except Exception as exc:
             logger.error(f"[Nodriver] submit_google_search error: {exc}")
             return False
 
-
     async def search_gemini_ai(self, query: str) -> Optional[str]:
-        """
-        Submit a query to Gemini (gemini.google.com) via direct page interaction.
-        Returns the AI response text, or None on failure.
-        """
-        if not await self._ensure_page_alive():
-            return None
+        """Submit a query to Gemini via direct interaction."""
+        async with self._lock:
+            return await self._search_gemini_ai_locked(query)
 
+    async def _search_gemini_ai_locked(self, query: str) -> Optional[str]:
+        if not await self._ensure_page_locked():
+            return None
         try:
-            logger.info(f"[Nodriver] 🤖 Gemini search: {query}")
+            logger.info(f"[Nodriver] 🤖 Gemini: {query}")
+            if not self._page: return None
             await self._page.get(config.GEMINI_URL)
             await action_delay_async("navigate")
-
-            # Type query and submit
-            await self._type_text(query)
+            
+            if not self._page: return None
+            await self._type_text_locked(self._page, query)
             await action_delay_async("submit")
-
-            # Extract response text
             await action_delay_async("read_wait")
-            return await self.get_page_source()
-
+            
+            if not self._page: return None
+            return await self._page.get_content()
         except Exception as exc:
             logger.error(f"[Nodriver] search_gemini_ai error: {exc}")
             return None
+
+    async def _type_text_locked(self, page, text: str) -> None:
+        """Type text character-by-character into the focused element."""
+        if not page: return
+        for char in text:
+            try:
+                # Defensive check inside loop
+                if not self._page: break
+                await page.keyboard.send(char)
+                await action_delay_async("type_char")
+            except Exception:
+                break
 
     async def crawl_website(self, url: str) -> str:
         """Alias for crawl_url to maintain HybridEngine contract."""
         return await self.crawl_url(url)
 
     async def crawl_url(self, url: str) -> str:
-        """
-        Visit a URL and return all visible text from the body.
-        Used by HybridEngine as a fallback Tier 2 scraper.
-        """
-        if not await self.goto_url(url):
+        """Visit a URL and return all visible text from the body."""
+        async with self._lock:
+            return await self._crawl_url_locked(url)
+
+    async def _crawl_url_locked(self, url: str) -> str:
+        """Internal lock-free crawl."""
+        if not await self._goto_url_locked(url):
             return ""
         try:
-            html   = await self.get_page_source()
+            html = await self._get_page_source_locked()
             # Strip tags for clean text extraction
-            text   = re.sub(r"<[^>]+>", " ", html)
-            text   = re.sub(r"\s+", " ", text).strip()
-            return text[:8000]  # Cap at 8k chars for downstream LLM
+            text = re.sub(r"<[^>]+>", " ", html)
+            text = re.sub(r"\s+", " ", text).strip()
+            return text[:8000]
         except Exception as exc:
             logger.error(f"[Nodriver] crawl_url error: {exc}")
             return ""
@@ -381,44 +423,34 @@ class NodriverAgent(BaseBrowserAgent):
     # CAPTCHA INTEGRATION
     # ─────────────────────────────────────────────────────────────────
 
-    async def _handle_captcha_if_present(self) -> bool:
-        """
-        Detect CAPTCHA and route to the decision-tree solver.
-        Returns True if a rotation was triggered (session restarted).
-        """
-        html          = await self.get_page_source()
-        captcha_type  = detect_captcha_type(html)
-
-        if captcha_type:
-            solved = await solve_captcha_async(self._page, captcha_type)
-            if not solved:
-                logger.warning("[Nodriver] CAPTCHA not solved — TRIGGERING PROXY ROTATION.")
-                await self.rotate_proxy()
-                return True
-        return False
+    async def _handle_captcha_if_present_locked(self, page) -> bool:
+        """Detect and solve CAPTCHA. Returns True if rotation triggered."""
+        if not page: return False
+        try:
+            html = await page.get_content()
+            captcha_type = detect_captcha_type(html)
+            if captcha_type:
+                solved = await solve_captcha_async(page, captcha_type)
+                if not solved:
+                    logger.warning("[Nodriver] CAPTCHA failed. Rotating...")
+                    await self._rotate_proxy_locked()
+                    return True
+            return False
+        except Exception as e:
+            logger.debug(f"[Nodriver] Captcha check error: {e}")
+            return False
 
     # ─────────────────────────────────────────────────────────────────
     # PRIVATE HELPERS
     # ─────────────────────────────────────────────────────────────────
 
-    async def _type_text(self, text: str) -> None:
-        """
-        Type text character-by-character into the focused element.
-        Uses action_delay_async('type_char') between keystrokes.
-        """
-        if not self._page:
-            return
-        for char in text:
-            try:
-                await self._page.keyboard.send(char)
-                await action_delay_async("type_char")
-            except Exception:
-                continue
-
     async def generate_human_noise(self) -> None:
-        """
-        Simulate human browsing in Nodriver (CDP-only).
-        """
+        """Simulate human browsing in Nodriver (CDP-only)."""
+        async with self._lock:
+            await self._generate_human_noise_locked()
+
+    async def _generate_human_noise_locked(self) -> None:
+        """Internal lock-free noise simulation."""
         import random
         if not self._browser:
             return
@@ -427,19 +459,19 @@ class NodriverAgent(BaseBrowserAgent):
         logger.info(f"🎭 [Human Noise] Simulating activity on: {site}")
         
         try:
-            # 1. Open site in a new tab
+            if not self._browser: return
             noise_tab = await self._browser.get(site, new_tab=True)
+            if not noise_tab: return
             
-            # 2. Simulate human reading (Wait + Scroll)
             await asyncio.sleep(random.uniform(5, 12))
             for _ in range(random.randint(2, 5)):
-                # Nodriver scroll is async
+                if not self._browser or not noise_tab: break
                 await noise_tab.scroll_down(random.randint(300, 800))
                 await asyncio.sleep(random.uniform(1, 3))
             
-            # 3. Close the noise tab
-            await noise_tab.close()
-            logger.info("🎭 [Human Noise] Simulation complete. Resuming search.")
-            
+            if noise_tab:
+                await noise_tab.close()
+            logger.info("🎭 [Human Noise] Simulation complete.")
         except Exception as exc:
             logger.debug(f"[Human Noise] Simulation error: {exc}")
+

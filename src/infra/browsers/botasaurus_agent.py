@@ -8,10 +8,11 @@
 ║  Features built-in caching, profile persistence, and stealth.            ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
+from __future__ import annotations
 import os
 import re
 import asyncio
-from typing import Optional
+from typing import Optional, Any, Dict, List
 
 from core import config
 from agents.base_agent import BaseBrowserAgent
@@ -39,9 +40,11 @@ from botasaurus.browser import browser, Driver
     args=["--no-sandbox", "--disable-dev-shm-usage"] # Indispensable sur Linux
 )
 def search_google_ai_task(driver: Driver, data: dict):
-    query = data.get("query")
+    query = data.get("query") or data.get("prompt")
+    ai_mode_url = data.get("ai_mode_url")
+
     from common.search_engine import generate_google_ai_url
-    url = generate_google_ai_url(query)
+    url = ai_mode_url or generate_google_ai_url(query)
     
     driver.get(url)
     driver.sleep(2)
@@ -106,13 +109,21 @@ class BotasaurusAgent(BaseBrowserAgent):
     def __init__(self, worker_id: int = 0, proxy: Optional[str] = None):
         super().__init__(worker_id)
         self._proxy = proxy
+        self._lock = asyncio.Lock()
+        self._last_html: str = ""
+
 
     async def start(self) -> None:
         """Initialize any agent-level state."""
         logger.info(f"[Botasaurus] 🚀 Starting Botasaurus Agent for Worker {self.worker_id}")
         # Botasaurus handles driver lifecycle per task, but we can manage cache here if needed.
         if config.BOTASAURUS_CACHE:
-            self._cleanup_cache()
+            async with self._lock:
+                await asyncio.to_thread(self._cleanup_cache)
+
+    async def is_alive(self) -> bool:
+        """Botasaurus is stateless/task-based, so it's always 'alive' if imports work."""
+        return True
 
     async def close(self) -> None:
         """Cleanup agent."""
@@ -120,7 +131,6 @@ class BotasaurusAgent(BaseBrowserAgent):
 
     def _cleanup_cache(self):
         """Cleans up old cache files to save disk space."""
-        # Botasaurus creates an 'output' folder for caches by default.
         import time
         from pathlib import Path
         output_dir = Path("output")
@@ -128,12 +138,12 @@ class BotasaurusAgent(BaseBrowserAgent):
             max_age = getattr(config, 'BOTASAURUS_CACHE_MAX_AGE_HOURS', 24) * 3600
             now = time.time()
             for f in output_dir.glob("*.json"):
-                if now - f.stat().st_mtime > max_age:
-                    try:
+                try:
+                    if now - f.stat().st_mtime > max_age:
                         f.unlink()
                         logger.debug(f"[Botasaurus] Removed old cache file {f}")
-                    except Exception as e:
-                        pass
+                except Exception:
+                    pass
 
     async def rotate_proxy(self) -> None:
         # Proxies can be passed to the decorator, but since we use predefined decorators
@@ -142,36 +152,51 @@ class BotasaurusAgent(BaseBrowserAgent):
 
     async def goto_url(self, url: str) -> bool:
         # Standalone task
-        html = await asyncio.to_thread(crawl_url_task, {"url": url})
-        return bool(html)
+        async with self._lock:
+            html = await asyncio.to_thread(crawl_url_task, {"url": url})
+            self._last_html = html or ""
+            return bool(self._last_html)
 
     async def get_page_source(self) -> str:
-        # Since Botasaurus spins up/down the browser per task with decorators, 
-        # this pattern doesn't fit get_page_source perfectly. 
-        return ""
+        # Botasaurus is task-based (decorator spins browser), so we store the
+        # latest HTML content locally for BaseBrowserAgent parity.
+        return self._last_html
 
-    async def search_google_ai(self, query: str) -> Optional[str]:
+
+    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         logger.info(f"[Botasaurus] 🔍 Google AI Mode: {query}")
+
         try:
             # On passe le profil dynamiquement via les data si nécessaire, 
             # ou on laisse Botasaurus gérer des profils temporaires isolés.
-            html = await asyncio.to_thread(search_google_ai_task, {
-                "query": query,
-                "profile": f"botasaurus_worker_{self.worker_id}"
-            })
-            return html
+            async with self._lock:
+                html = await asyncio.to_thread(search_google_ai_task, {
+                    "query": query,
+                    "ai_mode_url": ai_mode_url,
+                    "profile": f"botasaurus_worker_{self.worker_id}"
+                })
+                self._last_html = html or ""
+                return self._last_html
+
         except Exception as e:
             logger.error(f"[Botasaurus] Error: {e}")
             return None
 
-    async def search_google_ai_mode(self, query: str) -> Optional[str]:
-        return await self.search_google_ai(query)
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url)
+
+    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+
+        """Interactive search fallback for Botasaurus."""
+        return await self.search_google_ai(prompt)
+
 
     async def submit_google_search(self, query: str) -> bool:
         logger.info(f"[Botasaurus] 🔍 Google Search: {query}")
         try:
-            success = await asyncio.to_thread(submit_google_search_task, {"query": query})
-            return success
+            async with self._lock:
+                success = await asyncio.to_thread(submit_google_search_task, {"query": query})
+                return success
         except Exception as e:
             logger.error(f"[Botasaurus] Error: {e}")
             return False
@@ -179,8 +204,11 @@ class BotasaurusAgent(BaseBrowserAgent):
     async def search_gemini_ai(self, query: str) -> Optional[str]:
         logger.info(f"[Botasaurus] 🤖 Gemini search: {query}")
         try:
-            html = await asyncio.to_thread(search_gemini_ai_task, {"query": query})
-            return html
+            async with self._lock:
+                html = await asyncio.to_thread(search_gemini_ai_task, {"query": query})
+                self._last_html = html or ""
+                return self._last_html
+
         except Exception as e:
             logger.error(f"[Botasaurus] Error: {e}")
             return None
@@ -188,12 +216,17 @@ class BotasaurusAgent(BaseBrowserAgent):
     async def crawl_url(self, url: str) -> str:
         logger.info(f"[Botasaurus] → {url}")
         try:
-            html = await asyncio.to_thread(crawl_url_task, {"url": url})
-            if not html:
-                return ""
-            text = re.sub(r"<[^>]+>", " ", html)
-            text = re.sub(r"\s+", " ", text).strip()
-            return text[:8000]
+            async with self._lock:
+                html = await asyncio.to_thread(crawl_url_task, {"url": url})
+                self._last_html = html or ""
+                if not self._last_html:
+                    return ""
+                # For crawl_url(), HybridEngine callers expect *text*, but keep
+                # raw HTML available for get_page_source()/UUE.
+                text = re.sub(r"<[^>]+>", " ", self._last_html)
+                text = re.sub(r"\s+", " ", text).strip()
+                return text[:8000]
+
         except Exception as e:
             logger.error(f"[Botasaurus] Error: {e}")
             return ""

@@ -20,9 +20,10 @@
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
+from __future__ import annotations
 import asyncio
 import re
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 
 from core import config
 from core.logger import get_logger, alert
@@ -50,6 +51,39 @@ class Crawl4AIAgent(BaseBrowserAgent):
     def __init__(self, worker_id: int = 0):
         super().__init__(worker_id)
         self._crawler = None
+        self._lock = asyncio.Lock()
+        self._last_health_check = 0.0
+        # Contract: get_page_source() must never return None.
+        self._last_content: str = ""
+
+
+    async def _ensure_crawler_alive_locked(self) -> bool:
+        """Health-check Crawl4AI by attempting a minimal scrape.
+
+        Crawl4AI doesn't provide a real "ping" API; the safest approach is to
+        do a tiny request and confirm we can get a result.
+        """
+        now = asyncio.get_event_loop().time()
+        if self._crawler and (now - self._last_health_check < 10.0):
+            return True
+
+        if not self._crawler:
+            await self._start_locked()
+            if not self._crawler:
+                return False
+
+        # Minimal scrape target: a fast, stable endpoint.
+        try:
+            test_url = "https://example.com/"
+            self._last_content = await self._scrape_locked(test_url) or ""
+            self._last_health_check = now
+            return bool(self._last_content)
+        except Exception as e:
+            logger.warning(f"[Crawl4AI] 💔 Crawler unresponsive: {e}. Resurrecting...")
+            await self._close_locked()
+            await self._start_locked()
+            return self._crawler is not None
+
 
     async def get_page_source(self) -> str:
         """Returns the last scraped markdown content for UUE parsing."""
@@ -60,24 +94,21 @@ class Crawl4AIAgent(BaseBrowserAgent):
     # ─────────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """
-        Initialise the Crawl4AI crawler instance.
-        Reuses a single crawler to share the browser process.
-        """
-        try:
-            from crawl4ai import AsyncWebCrawler  # type: ignore
-        except ImportError:
-            raise RuntimeError(
-                "crawl4ai is not installed.\n"
-                "Run: pip install crawl4ai && crawl4ai-setup"
-            )
+        """Initialise the Crawl4AI crawler instance."""
+        async with self._lock:
+            await self._start_locked()
 
-        logger.info("[Crawl4AI] 🕷️  Initialising Tier 3 crawler...")
-        
-        from crawl4ai import BrowserConfig, CrawlerRunConfig  # type: ignore
-        browser_cfg = BrowserConfig(
-            headless=True,
-        )
+    async def _start_locked(self) -> None:
+        """Internal lock-free start."""
+        if self._crawler: return
+        try:
+            from crawl4ai import AsyncWebCrawler, BrowserConfig  # type: ignore
+        except ImportError:
+            raise RuntimeError("crawl4ai is not installed.")
+
+        logger.info("[Crawl4AI] 🕷️ Initialising Tier 3 crawler...")
+        browser_args = ["--no-sandbox", "--disable-setuid-sandbox"] if os.getuid() == 0 else []
+        browser_cfg = BrowserConfig(headless=True, extra_args=browser_args)
         self._crawler = AsyncWebCrawler(config=browser_cfg)
         await self._crawler.__aenter__()
         alert("INFO", "Crawl4AI session started")
@@ -85,6 +116,11 @@ class Crawl4AIAgent(BaseBrowserAgent):
 
     async def close(self) -> None:
         """Release Crawl4AI resources."""
+        async with self._lock:
+            await self._close_locked()
+
+    async def _close_locked(self) -> None:
+        """Internal lock-free close."""
         try:
             if self._crawler:
                 await self._crawler.__aexit__(None, None, None)
@@ -98,24 +134,21 @@ class Crawl4AIAgent(BaseBrowserAgent):
     # SCRAPING METHODS
     # ─────────────────────────────────────────────────────────────────
 
+    async def is_alive(self) -> bool:
+        """Check if the agent is ready."""
+        async with self._lock:
+            return await self._ensure_crawler_alive_locked()
+
     async def scrape(self, url: str) -> Optional[str]:
-        """
-        Scrape a URL and return clean Markdown content.
+        """Scrape a URL and return clean Markdown content."""
+        async with self._lock:
+            content = await self._scrape_locked(url)
+            self._last_content = content or ""
+            return content
 
-        Handles:
-          - JavaScript-heavy pages (waits for full render)
-          - 429 rate-limits (3-attempt backoff: 5s → 15s → 30s)
-          - Empty results → returns None
-
-        Args:
-            url : Target URL to scrape
-
-        Returns:
-            str  : Clean Markdown content
-            None : On unrecoverable failure
-        """
-        if not self._crawler:
-            logger.warning("[Crawl4AI] Not started. Call start() first.")
+    async def _scrape_locked(self, url: str) -> Optional[str]:
+        """Internal lock-free scrape."""
+        if not await self._ensure_crawler_alive_locked():
             return None
 
         backoff_delays = [5, 15, 30]
@@ -123,25 +156,25 @@ class Crawl4AIAgent(BaseBrowserAgent):
         for attempt, delay in enumerate(backoff_delays, start=1):
             try:
                 logger.info(f"[Crawl4AI] Scraping (attempt {attempt}/3): {url}")
+                if not self._crawler:
+                    return None
                 result = await self._crawler.arun(
                     url=url,
-                    word_count_threshold=10,          # Skip near-empty pages
-                    exclude_external_links=True,      # Keep content focused
-                    remove_overlay_elements=True,     # Strip cookie banners etc.
-                    bypass_cache=True,                # Always fresh content
+                    word_count_threshold=10,
+                    exclude_external_links=True,
+                    remove_overlay_elements=True,
+                    bypass_cache=True,
                 )
 
+
                 if result.success and result.markdown:
-                    content = result.markdown.strip()
-                    logger.info(
-                        f"[Crawl4AI] ✅ Got {len(content)} chars from {url}"
-                    )
+                    content = result.markdown.strip() or ""
+
+                    logger.info(f"[Crawl4AI] ✅ Got {len(content)} chars from {url}")
                     return content
 
-                # Empty result — check for rate-limiting signals
                 if result.status_code in (429, 403):
-                    alert("WARN", f"Crawl4AI rate-limited (HTTP {result.status_code})",
-                          {"url": url, "retry_in": f"{delay}s"})
+                    alert("WARN", f"Crawl4AI rate-limited (HTTP {result.status_code})", {"url": url, "retry_in": f"{delay}s"})
                     await asyncio.sleep(delay)
                     continue
 
@@ -156,40 +189,35 @@ class Crawl4AIAgent(BaseBrowserAgent):
                 return None
 
         logger.error(f"[Crawl4AI] All attempts exhausted for {url}")
-        alert("CRITICAL", "Crawl4AI: all retry attempts failed",
-              {"url": url, "attempts": len(backoff_delays)})
         return None
 
     async def crawl_website(self, base_url: str, max_pages: int = 3) -> str:
-        """
-        Deep-crawl a website: homepage + up to max_pages sub-pages.
-        Follows contact/about links just like the PatchrightAgent.
+        """Deep-crawl a website: homepage + up to max_pages sub-pages."""
+        async with self._lock:
+            return await self._crawl_website_locked(base_url, max_pages)
 
-        Args:
-            base_url  : Root URL of the target website
-            max_pages : Maximum number of sub-pages to visit
-
-        Returns:
-            Concatenated Markdown content from all visited pages.
-        """
+    async def _crawl_website_locked(self, base_url: str, max_pages: int = 3) -> str:
+        """Internal lock-free deep crawl."""
         all_content: List[str] = []
 
         # ── Scrape homepage ────────────────────────────────────────
-        homepage = await self.scrape(base_url)
+        homepage = await self._scrape_locked(base_url)
         if homepage:
             all_content.append(f"## {base_url}\n\n{homepage}")
 
         # ── Discover and visit contact/about pages ─────────────────
         sub_urls = self._extract_contact_links(homepage or "", base_url)
         for url in sub_urls[:max_pages - 1]:
-            sub_content = await self.scrape(url)
+            sub_content = await self._scrape_locked(url)
             if sub_content:
                 all_content.append(f"\n## {url}\n\n{sub_content}")
             await asyncio.sleep(1.5)  # Polite crawl delay
 
-        return "\n\n---\n\n".join(all_content)
+        content = "\n\n---\n\n".join(all_content)
+        self._last_content = content
+        return content
 
-    async def search_google_ai(self, query: str) -> Optional[str]:
+    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """
         Use Crawl4AI to scrape Google AI Mode results for a query.
         This is the Tier 3 equivalent of PlaywrightAgent.search_google_ai_mode().
@@ -197,13 +225,19 @@ class Crawl4AIAgent(BaseBrowserAgent):
         Returns extracted page text for downstream enrichment.
         """
         from common.search_engine import generate_google_ai_url
-        url = generate_google_ai_url(query)
+        url = ai_mode_url or generate_google_ai_url(query)
         logger.info(f"[Crawl4AI] 🔍 Google AI Mode scrape: {query}")
         return await self.scrape(url)
 
-    async def search_google_ai_mode(self, query: str) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """Alias for search_google_ai (scrape) to maintain HybridEngine compatibility."""
-        return await self.search_google_ai(query)
+        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url)
+
+
+
+    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+        """Interactive search fallback for Crawl4AI."""
+        return await self.search_google_ai(prompt)
 
     async def submit_google_search(self, query: str) -> bool:
         """
@@ -213,13 +247,17 @@ class Crawl4AIAgent(BaseBrowserAgent):
         url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
         logger.info(f"[Crawl4AI] 🔍 Google Search (submit): {query}")
         content = await self.scrape(url)
-        # Store for extraction
-        self._last_content = content
+        # self._last_content is already updated in self.scrape()
         if content and len(content) > 200:
             logger.info(f"[Crawl4AI] ✅ submit_google_search — {len(content)} chars.")
             return True
         logger.warning("[Crawl4AI] submit_google_search — empty or blocked response.")
         return False
+
+    async def rotate_proxy(self) -> None:
+        """Crawl4AI proxy rotation logic (Stub)."""
+        pass
+
 
     async def goto_url(self, url: str) -> bool:
         """
@@ -227,7 +265,8 @@ class Crawl4AIAgent(BaseBrowserAgent):
         Stores the result internally for use by get_page_source().
         """
         content = await self.scrape(url)
-        self._last_content = content
+        # Note: self._last_content is already updated inside self.scrape()
+        self._last_content = content or ""
         return bool(content)
 
     async def search_gemini_ai(self, query: str) -> Optional[str]:

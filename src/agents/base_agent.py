@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 from typing import Optional, Any, Dict, List, TYPE_CHECKING
+import os
 from common.anti_bot import wait_for_human_captcha_solve
 from common.anti_bot import is_captcha_page
 from common.anti_bot import get_fingerprint_bundle
@@ -84,9 +85,30 @@ class BaseBrowserAgent:
         """
         pass
 
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+        """
+        AI Mode search via browser waterfall.
+        To be implemented by child classes.
+        """
+        raise NotImplementedError
+
+    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+        """
+        Legacy AI search fallback.
+        To be implemented by child classes.
+        """
+        raise NotImplementedError
+
     async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
         """
         Interactive high-stealth search flow (Google.com -> type query -> Enter -> Click AI).
+        To be implemented by child classes.
+        """
+        raise NotImplementedError
+
+    async def is_alive(self) -> bool:
+        """
+        Check if the browser agent and its underlying process are still healthy.
         To be implemented by child classes.
         """
         raise NotImplementedError

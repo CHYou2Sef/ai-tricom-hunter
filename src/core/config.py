@@ -166,7 +166,7 @@ DECOMPOSITION_CHUNK_SIZE = int(os.getenv("DECOMPOSITION_CHUNK_SIZE", "500"))
 REPROCESS_FAILED_ROWS = os.getenv("REPROCESS_FAILED_ROWS", "true").lower() == "true"
 
 # ── Proxy Rotation (Anti-Ban) ──
-PROXY_ENABLED                  = True   # ON by default to solve CAPTCHA problems immediately
+PROXY_ENABLED                  = os.getenv("PROXY_ENABLED", "true").lower() == "true"   # ON by default to solve CAPTCHA problems immediately
 PROXY_ROTATE_EVERY_N           = 5      # Rotate every 5 rows to stay fresh
 PROXY_PREEMPTIVE_ROTATE_ON_WARN  = True   # Rotate BEFORE the ban threshold is reached (at warn_threshold)
 

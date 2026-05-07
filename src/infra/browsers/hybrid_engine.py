@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 ╔════════════════════════════════════════════════════════════════════════╗
 ║  browser/hybrid_engine.py                                              ║
@@ -26,7 +27,7 @@
 ╚════════════════════════════════════════════════════════════════════════╝
 """
 
-from __future__ import annotations
+
 import asyncio
 import time
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
@@ -243,7 +244,7 @@ class HybridAutomationEngine:
             # ── Tier 6: Crawl4AIAgent (Chrome managed) ────────────────────
             elif tier == 6 and not self._tier6:
                 from infra.browsers.crawl4ai_agent import Crawl4AIAgent
-                self._tier6 = Crawl4AIAgent()
+                self._tier6 = Crawl4AIAgent(worker_id=self._worker_id)
                 await self._tier6.start()
                 logger.info(f"[HybridEngine] ✅ Tier 6 (Crawl4AI/Chrome) started for worker {self.worker_id}.")
 
@@ -266,7 +267,7 @@ class HybridAutomationEngine:
                     logger.warning("[HybridEngine] Tier 8 (Firecrawl) is DISABLED in config. Skipping.")
                     return False
                 from infra.browsers.firecrawl_agent import FirecrawlAgent
-                self._tier8 = FirecrawlAgent()
+                self._tier8 = FirecrawlAgent(worker_id=self._worker_id)
                 await self._tier8.start()
                 logger.info(f"[HybridEngine] ✅ Tier 8 (Firecrawl) started for worker {self.worker_id}.")
 
@@ -801,8 +802,13 @@ class HybridAutomationEngine:
     async def extract_universal_data(self, use_browser: bool = False) -> dict:
         return await self._execute_with_waterfall("extract_universal_data", use_browser=use_browser)
 
-    async def search_google_ai(self, query: str) -> Optional[str]:
-        return await self._execute_with_waterfall("search_google_ai", query)
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+        """AI Mode search via browser waterfall."""
+        return await self._execute_with_waterfall("search_google_ai_mode", prompt, ai_mode_url=ai_mode_url)
+
+    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+        """Legacy AI search fallback."""
+        return await self._execute_with_waterfall("search_google_ai", query, ai_mode_url=ai_mode_url)
 
     async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
         """
