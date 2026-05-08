@@ -3,7 +3,14 @@ import shutil
 import csv
 from pathlib import Path
 from openpyxl import Workbook
-from utils.fs import safe_mkdir, safe_touch
+import sys
+from pathlib import Path
+
+# Add src to path
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from common.fs import safe_mkdir, safe_touch
 
 # 1. Clean folders
 work_dir = Path("WORK")

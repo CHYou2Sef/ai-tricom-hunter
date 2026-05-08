@@ -19,6 +19,9 @@ import os
 from common.anti_bot import wait_for_human_captcha_solve
 from common.anti_bot import is_captcha_page
 from common.anti_bot import get_fingerprint_bundle
+from core.logger import get_logger
+
+logger = get_logger(__name__)
 class BaseBrowserAgent:
     """
     Lean base class for all browser-based agents (Playwright, Nodriver).
@@ -29,6 +32,7 @@ class BaseBrowserAgent:
         self._fingerprint = get_fingerprint_bundle()
         self._page = None
         self._browser = None
+        self._last_content: str = ""
 
     async def _handle_captcha_if_present(self) -> bool:
         """Shared CAPTCHA detection logic."""
@@ -39,11 +43,55 @@ class BaseBrowserAgent:
             return wait_for_human_captcha_solve()
         return True
 
+    async def report_proxy_error(self, proxy: Optional[str], status_code: int = 403) -> None:
+        """
+        Standardized proxy error reporting to the central ProxyManager.
+        
+        Args:
+            proxy: The proxy string that failed.
+            status_code: HTTP status code (default 403 for blocks).
+        """
+        if not proxy:
+            return
+            
+        try:
+            from common.proxy_manager import report_proxy_error
+            await report_proxy_error(proxy, status_code)
+            logger.warning(f"[{self.__class__.__name__}] 🚩 Reported proxy error ({status_code}) for: {proxy}")
+        except Exception as e:
+            logger.error(f"Error reporting proxy failure: {e}")
+
+    def is_block_response(self, content: Any) -> bool:
+        """
+        Check content or exception for common blocking/WAF signatures.
+        
+        Args:
+            content: Can be a string (page source), an Exception object, or an int (status code).
+        """
+        if not content:
+            return False
+            
+        # Handle status codes directly
+        if isinstance(content, int):
+            return content in [403, 429, 503, 999]
+            
+        # Convert content/exception to string for robust matching
+        text = str(content).lower()
+        
+        block_terms = [
+            "forbidden", "access denied", "blocked", "captcha", 
+            "security challenge", "too many requests", "403 forbidden",
+            "bot detection", "automated access", "err_tunnel", "err_proxy",
+            "connection refused", "timeout", "ssl", "certificate", "429",
+            "ip_ban", "waf", "rate limit", "cloudflare"
+        ]
+        return any(term in text for term in block_terms)
+
     async def get_page_source(self) -> str:
         """To be implemented by child classes."""
         raise NotImplementedError
 
-    async def extract_universal_data(self) -> dict:
+    async def extract_universal_data(self) -> Optional[dict]:
         """
         New V6 Elite extraction pattern.
         Gets the page source and delegates all parsing to the Universal Unified Extractor (UUE).
@@ -62,7 +110,7 @@ class BaseBrowserAgent:
             metadata.get("heuristic_phones"),
             metadata.get("heuristic_emails"),
             metadata.get("semantic_phones"),
-            any(metadata.get("social_links", {}).values()) # Found social links or website
+            any(metadata.get("social_links", {}).values() if metadata.get("social_links") else []) # Added safety check
         ])
         if not has_data:
             return None

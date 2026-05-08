@@ -99,6 +99,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
     def __init__(self, worker_id: int = 0):
         super().__init__(worker_id)
         self._driver = None                         # seleniumbase.Driver instance
+        self.current_proxy: Optional[str] = None
         self._session_start_ts: float = 0.0
         self._fingerprint = get_fingerprint_bundle()
         self.last_interruption_reason: Optional[str] = None
@@ -153,9 +154,13 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         if self._driver:
             return
 
+        if not self.current_proxy and config.PROXY_ENABLED:
+            from common.proxy_manager import get_next_proxy
+            self.current_proxy = await get_next_proxy()
+
         logger.info(
             f"[SeleniumBase] 🚀 Starting UC Driver "
-            f"(worker={self.worker_id}, uc=True, headless=False)..."
+            f"(worker={self.worker_id}, proxy={self.current_proxy or 'direct'})..."
         )
         try:
             await asyncio.to_thread(self._sync_start)
@@ -179,10 +184,8 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         self._reconnect_time = getattr(config, "SELENIUMBASE_RECONNECT_TIME", 4)
 
         # ── Proxy ─────────────────────────────────────────────────────────
-        proxy_str = None
-        proxy_env = os.getenv("PROXY") or getattr(config, "PROXY_DEFAULT", None)
-        if proxy_env:
-            proxy_str = proxy_env
+        proxy_str = self.current_proxy
+        if proxy_str:
             logger.info(f"[SeleniumBase] 🔌 Using proxy: {proxy_str}")
 
         # ── Suppression of automation alerts & Sandbox handling ──
@@ -252,11 +255,11 @@ class SeleniumBaseAgent(BaseBrowserAgent):
     async def _rotate_proxy_locked(self) -> None:
         """Internal lock-free proxy rotation."""
         from common.proxy_manager import get_next_proxy
-        new_proxy = get_next_proxy()
+        new_proxy = await get_next_proxy()
         if new_proxy:
             logger.info(f"[SeleniumBase-Worker-{self.worker_id}] ♻️ Rotating proxy to: {new_proxy}")
             await self._close_locked()
-            os.environ["PROXY"] = new_proxy
+            self.current_proxy = new_proxy
             await self._start_locked()
         else:
             logger.warning(f"[SeleniumBase-Worker-{self.worker_id}] No proxies left for rotation.")
@@ -270,11 +273,13 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
     async def _get_page_source_locked(self) -> str:
         if not self._driver:
-            return ""
+            return self._last_content
         try:
-            return await asyncio.to_thread(lambda: self._driver.page_source)
+            content = await asyncio.to_thread(lambda: self._driver.page_source)
+            self._last_content = content or ""
+            return self._last_content
         except Exception:
-            return ""
+            return self._last_content
 
     async def goto_url(self, url: str) -> bool:
         """
@@ -290,20 +295,24 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             return False
 
         try:
+            logger.info(f"[SeleniumBase] Navigating to: {url}")
             await asyncio.to_thread(self._sync_goto_with_driver, self._driver, url)
-            await self._handle_captcha_if_present_locked()
+            
+            # Check for blocks immediately after navigation
+            if await self._handle_captcha_if_present_locked():
+                # If it detected a block and rotated or failed, we consider this navigation failed
+                # to trigger HybridEngine escalation.
+                return False
+                
             return True
         except Exception as exc:
-            msg = str(exc)
-            if any(err in msg for err in ["ERR_TUNNEL_CONNECTION_FAILED", "ERR_PROXY_CONNECTION_FAILED", "invalid session id"]):
-                logger.error("[SeleniumBase] 🛑 Session/Proxy FAILED. Self-healing...")
+            if self.is_block_response(exc):
+                logger.error("[SeleniumBase] 🛑 Session/Proxy FAILED (Block detected). Reporting...")
+                if self.current_proxy:
+                    await self.report_proxy_error(self.current_proxy, 403)
+                
                 await self._rotate_proxy_locked()
-                if not self._driver: return False
-                try:
-                    await asyncio.to_thread(self._sync_goto_with_driver, self._driver, url)
-                    return True
-                except Exception:
-                    return False
+                return False
             
             logger.error(f"[SeleniumBase] _goto_url_locked error: {exc}")
             return False
@@ -341,10 +350,12 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         try:
             logger.info(f"🤖 [SeleniumBase-{provider_label}] Navigating for prompt ({len(prompt)} chars)...")
             await asyncio.to_thread(self._sync_goto_with_driver, self._driver, url)
-            await asyncio.sleep(2.5)
+            
+            # ── 1. Handle Turnstile / CAPTCHA / Blocks ────────────────────
+            if await self._handle_captcha_if_present_locked():
+                logger.warning(f"[SeleniumBase] 🛡️ Search blocked or interrupted on {provider_label}")
+                return None
 
-            # ── 1. Handle Turnstile / CAPTCHA ────────────────────────────
-            await self._handle_captcha_if_present_locked()
             if not self._driver: return None
 
             # ── 2. Handle Cookies ────────────────────────────────────────
@@ -352,7 +363,13 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
             # ── 3. Extract data ──────────────────────────────────────────
             source = await self._get_page_source_locked()
-            if not source: return None
+            if not source or self.is_block_response(source):
+                if source and self.is_block_response(source):
+                    logger.warning(f"[SeleniumBase] 🛡️ Block detected in page source after navigation.")
+                    if self.current_proxy:
+                        await self.report_proxy_error(self.current_proxy, 403)
+                    await self._rotate_proxy_locked()
+                return None
             
             from common.universal_extractor import UniversalExtractor
             self.last_metadata = UniversalExtractor.extract_all(source)
@@ -361,16 +378,18 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             text = await self._wait_for_stable_response_locked(timeout_sec=25)
             if text:
                 logger.info(f"✨ [SeleniumBase-{provider_label}] Got response ({len(text)} chars)")
+                # Final block check on text
+                if self.is_block_response(text):
+                    logger.warning(f"[SeleniumBase] 🛡️ Block text detected in AI response.")
+                    return None
             return text
 
         except Exception as exc:
-            msg = str(exc).lower()
-            if any(err in msg for err in ["err_tunnel_connection_failed", "err_proxy_connection_failed", "invalid session id"]):
-                logger.error(f"[SeleniumBase] 🛑 Session/Proxy FAILED during {provider_label} search. Self-healing...")
+            if self.is_block_response(exc):
+                logger.error(f"[SeleniumBase] 🛑 Block/WAF detected during {provider_label} search.")
+                if self.current_proxy:
+                    await self.report_proxy_error(self.current_proxy, 403)
                 await self._rotate_proxy_locked()
-                if self._driver:
-                    await asyncio.to_thread(self._sync_goto_with_driver, self._driver, url)
-                    return await self._wait_for_stable_response_locked(timeout_sec=25)
                 return None
 
             logger.error(f"[SeleniumBase] search_google_ai_mode error: {exc}")
@@ -491,6 +510,9 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             return False
         except Exception as exc:
             logger.error(f"[SeleniumBase] _submit_google_search_locked error: {exc}")
+            if self.is_block_response(exc):
+                if self.current_proxy:
+                    await self.report_proxy_error(self.current_proxy, 403)
             return False
 
     async def search_gemini_ai(self, query: str) -> Optional[str]:
@@ -528,6 +550,9 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             return await self._wait_for_stable_element_text_locked(GEMINI_RESPONSE_SELECTORS, timeout_sec=60)
         except Exception as exc:
             logger.error(f"[SeleniumBase] _search_gemini_ai_locked error: {exc}")
+            if self.is_block_response(exc):
+                if self.current_proxy:
+                    await self.report_proxy_error(self.current_proxy, 403)
             return None
 
     async def crawl_website(self, url: str) -> str:
@@ -591,12 +616,13 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         source = await self._get_page_source_locked()
         if not source: return False
 
-        lower = source.lower()
-        hard_ban_kw = ["access denied", "forbidden", "too many requests", "403 forbidden", "429 too many"]
-        if any(kw in lower for kw in hard_ban_kw):
-            logger.error("[SeleniumBase] 🚨 HARD IP BAN DETECTED.")
-            await self._record_interruption("ip_ban", "Hard block (403/Access Denied)")
-            if config.PROXY_ENABLED: await self._rotate_proxy_locked()
+        if self.is_block_response(source):
+            logger.error("[SeleniumBase] 🚨 HARD IP BAN DETECTED (via is_block_response).")
+            await self._record_interruption("ip_ban", "Hard block detected")
+            if config.PROXY_ENABLED:
+                if self.current_proxy:
+                    await self.report_proxy_error(self.current_proxy, 403)
+                await self._rotate_proxy_locked()
             return True
 
         try:

@@ -15,6 +15,7 @@ from crawlee.crawlers import PlaywrightCrawler, PlaywrightCrawlingContext
 
 from agents.base_agent import BaseBrowserAgent
 from core.logger import get_logger
+from core import config
  
 logger = get_logger(__name__)
  
@@ -25,8 +26,9 @@ class CrawleeAgent(BaseBrowserAgent):
     """
     def __init__(self, worker_id: int = 0):
         super().__init__(worker_id)
-        self._last_html: str = ""
+        self._last_content: str = ""
         self._crawler: Optional[PlaywrightCrawler] = None
+        self._proxy: Optional[str] = None
         self._lock = asyncio.Lock()
 
     async def start(self) -> None:
@@ -35,12 +37,22 @@ class CrawleeAgent(BaseBrowserAgent):
             if self._crawler:
                 return
              
+            if not self._proxy and config.PROXY_ENABLED:
+                from common.proxy_manager import get_next_proxy
+                self._proxy = await get_next_proxy()
+
             logger.info(f"[Crawlee] 🚀 Initializing PlaywrightCrawler (worker={self.worker_id})...")
+            
+            proxy_config = None
+            if self._proxy:
+                proxy_config = {"server": self._proxy}
+
             self._crawler = PlaywrightCrawler(
                 max_requests_per_crawl=1,
                 request_handler=self._handle_request,
                 headless=True,
                 browser_type='chromium',
+                proxy_configuration=proxy_config,
             )
 
     async def is_alive(self) -> bool:
@@ -50,15 +62,32 @@ class CrawleeAgent(BaseBrowserAgent):
     async def _handle_request(self, context: PlaywrightCrawlingContext) -> None:
         """
         Request handler for Crawlee.
-        Captures the page source for our agent.
+        Captures the page source for our agent and detects blocks.
         """
         try:
             url = context.request.url
             logger.debug(f"[Crawlee] Processing: {url}")
-            self._last_html = await context.page.content()
+            
+            # Check status code
+            if context.response:
+                status = context.response.status
+                if self.is_block_response(status):
+                    logger.warning(f"[Crawlee] ⛔ Block status {status} detected for {url}")
+                    await self.report_proxy_error(self._proxy, status)
+                elif status >= 400:
+                    logger.warning(f"[Crawlee] HTTP Error {status} for {url}")
+
+            self._last_content = await context.page.content()
+            
+            # Proactive Block Detection via Base Class logic
+            if self.is_block_response(self._last_content):
+                logger.warning(f"[Crawlee] 🛡️ Block detected in page content for {url}")
+                await self.report_proxy_error(self._proxy, 403)
+                # Note: rotation is handled in goto_url if this returns False/empty
+                    
         except Exception as e:
             logger.error(f"[Crawlee] Error in request handler: {e}")
-            self._last_html = ""
+            self._last_content = ""
 
     async def close(self) -> None:
         """Teardown Crawlee resources."""
@@ -68,7 +97,7 @@ class CrawleeAgent(BaseBrowserAgent):
 
     async def get_page_source(self) -> str:
         """Return the HTML captured during the last crawl."""
-        return self._last_html
+        return self._last_content
 
     async def goto_url(self, url: str) -> bool:
         """Navigate to a URL using Crawlee's crawler logic."""
@@ -82,19 +111,29 @@ class CrawleeAgent(BaseBrowserAgent):
                 return False
                 
             logger.info(f"[Crawlee] Navigating to: {url}")
-            self._last_html = ""
+            self._last_content = ""
                 
             try:
                 await self._crawler.run([url])
-                return bool(self._last_html)
+                
+                # Check for block after run
+                if self.is_block_response(self._last_content):
+                    await self.report_proxy_error(self._proxy, 403)
+                    await self.rotate_proxy()
+                    return False
+
+                return bool(self._last_content)
             except Exception as e:
                 logger.error(f"[Crawlee] Error navigating to {url}: {e}")
+                if self.is_block_response(e):
+                    await self.report_proxy_error(self._proxy, 403)
+                    await self.rotate_proxy()
                 return False
 
     async def crawl_website(self, url: str) -> str:
         """Leverage Crawlee for a single-page 'crawl'."""
         if await self.goto_url(url):
-            return self._last_html
+            return self._last_content
         return ""
 
     # ── Stub methods for BaseBrowserAgent contract ─────────────────────────
@@ -110,7 +149,7 @@ class CrawleeAgent(BaseBrowserAgent):
         if ai_mode_url:
             logger.info(f"[Crawlee] Navigating direct AI Mode URL: {ai_mode_url}")
             if await self.goto_url(ai_mode_url):
-                return self._last_html
+                return self._last_content
             return None
 
         search_query = prompt
@@ -128,7 +167,7 @@ class CrawleeAgent(BaseBrowserAgent):
         logger.info(f"[Crawlee] 🔍 Recherche Google pour: {search_query}")
         
         if await self.goto_url(url):
-            return self._last_html
+            return self._last_content
         return None
 
     async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
@@ -141,4 +180,14 @@ class CrawleeAgent(BaseBrowserAgent):
         return False
 
     async def rotate_proxy(self) -> None:
-        pass
+        """Fetch a new proxy and re-init crawler."""
+        async with self._lock:
+            from common.proxy_manager import get_next_proxy
+            new_proxy = await get_next_proxy()
+            if new_proxy:
+                logger.info(f"[Crawlee] ♻️ Rotating proxy to: {new_proxy}")
+                self._proxy = new_proxy
+                self._crawler = None
+                await self.start()
+            else:
+                logger.warning("[Crawlee] No proxies available for rotation.")

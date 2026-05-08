@@ -34,13 +34,14 @@ from botasaurus.browser import browser, Driver
 # ── STANDALONE BOTASAURUS TASKS ──
 
 @browser(
-    headless=True,  # Plus stable sur serveur Linux
+    headless=True,
     block_images=True,
     cache=False,
-    args=["--no-sandbox", "--disable-dev-shm-usage"] # Indispensable sur Linux
+    add_arguments=["--no-sandbox", "--disable-dev-shm-usage"],
+    proxy=lambda data: data.get("proxy")
 )
 def search_google_ai_task(driver: Driver, data: dict):
-    query = data.get("query") or data.get("prompt")
+    query = str(data.get("query") or data.get("prompt") or "")
     ai_mode_url = data.get("ai_mode_url")
 
     from common.search_engine import generate_google_ai_url
@@ -56,10 +57,11 @@ def search_google_ai_task(driver: Driver, data: dict):
     headless=True,
     block_images=True,
     cache=False,
-    args=["--no-sandbox", "--disable-dev-shm-usage"]
+    add_arguments=["--no-sandbox", "--disable-dev-shm-usage"],
+    proxy=lambda data: data.get("proxy")
 )
 def crawl_url_task(driver: Driver, data: dict):
-    url = data.get("url")
+    url = str(data.get("url") or "")
     driver.get(url)
     driver.sleep(2)
     return driver.page_html
@@ -68,10 +70,11 @@ def crawl_url_task(driver: Driver, data: dict):
     headless=True,
     block_images=True,
     cache=False,
-    args=["--no-sandbox", "--disable-dev-shm-usage"]
+    add_arguments=["--no-sandbox", "--disable-dev-shm-usage"],
+    proxy=lambda data: data.get("proxy")
 )
 def submit_google_search_task(driver: Driver, data: dict):
-    query = data.get("query")
+    query = str(data.get("query") or "")
     import urllib.parse
     encoded = urllib.parse.quote_plus(query)
     url = f"https://www.google.com/search?q={encoded}"
@@ -84,10 +87,11 @@ def submit_google_search_task(driver: Driver, data: dict):
     headless=True,
     block_images=True,
     cache=False,
-    args=["--no-sandbox", "--disable-dev-shm-usage"]
+    add_arguments=["--no-sandbox", "--disable-dev-shm-usage"],
+    proxy=lambda data: data.get("proxy")
 )
 def search_gemini_ai_task(driver: Driver, data: dict):
-    query = data.get("query")
+    query = str(data.get("query") or "")
     driver.get(config.GEMINI_URL)
     driver.sleep(2)
     
@@ -108,14 +112,19 @@ class BotasaurusAgent(BaseBrowserAgent):
 
     def __init__(self, worker_id: int = 0, proxy: Optional[str] = None):
         super().__init__(worker_id)
-        self._proxy = proxy
+        self.current_proxy = proxy
         self._lock = asyncio.Lock()
-        self._last_html: str = ""
+        self._last_content: str = ""
 
 
     async def start(self) -> None:
         """Initialize any agent-level state."""
         logger.info(f"[Botasaurus] 🚀 Starting Botasaurus Agent for Worker {self.worker_id}")
+        
+        if not self.current_proxy and config.PROXY_ENABLED:
+            from common.proxy_manager import get_next_proxy
+            self.current_proxy = await get_next_proxy()
+            
         # Botasaurus handles driver lifecycle per task, but we can manage cache here if needed.
         if config.BOTASAURUS_CACHE:
             async with self._lock:
@@ -146,21 +155,41 @@ class BotasaurusAgent(BaseBrowserAgent):
                     pass
 
     async def rotate_proxy(self) -> None:
-        # Proxies can be passed to the decorator, but since we use predefined decorators
-        # we would need to dynamically construct them or pass proxy in data.
-        logger.info(f"[Botasaurus-Worker-{self.worker_id}] Proxy rotation not natively dynamic via decorator yet.")
+        """Fetch a new proxy from the pool."""
+        async with self._lock:
+            from common.proxy_manager import get_next_proxy
+            new_proxy = await get_next_proxy()
+            if new_proxy:
+                logger.info(f"[Botasaurus-Worker-{self.worker_id}] ♻️ Rotating proxy to: {new_proxy}")
+                self.current_proxy = new_proxy
+            else:
+                logger.warning(f"[Botasaurus-Worker-{self.worker_id}] No proxies left for rotation.")
 
     async def goto_url(self, url: str) -> bool:
         # Standalone task
         async with self._lock:
-            html = await asyncio.to_thread(crawl_url_task, {"url": url})
-            self._last_html = html or ""
-            return bool(self._last_html)
+            try:
+                html = await asyncio.to_thread(crawl_url_task, {"url": url, "proxy": self.current_proxy})
+                self._last_content = html or ""
+                
+                if self.is_block_response(self._last_content):
+                    logger.warning(f"[Botasaurus] 🛡️ Block detected on {url}")
+                    await self.report_proxy_error(url, 403)
+                    await self.rotate_proxy()
+                    return False
+                    
+                return bool(self._last_content)
+            except Exception as e:
+                if self.is_block_response(str(e)):
+                    await self.report_proxy_error(url, 403)
+                    await self.rotate_proxy()
+                logger.error(f"[Botasaurus] goto_url error: {e}")
+                return False
 
     async def get_page_source(self) -> str:
         # Botasaurus is task-based (decorator spins browser), so we store the
         # latest HTML content locally for BaseBrowserAgent parity.
-        return self._last_html
+        return self._last_content
 
 
     async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
@@ -173,12 +202,24 @@ class BotasaurusAgent(BaseBrowserAgent):
                 html = await asyncio.to_thread(search_google_ai_task, {
                     "query": query,
                     "ai_mode_url": ai_mode_url,
-                    "profile": f"botasaurus_worker_{self.worker_id}"
+                    "profile": f"botasaurus_worker_{self.worker_id}",
+                    "proxy": self.current_proxy
                 })
-                self._last_html = html or ""
-                return self._last_html
+                self._last_content = html or ""
+                
+                # Proactive Block Detection
+                if self.is_block_response(self._last_content):
+                    logger.warning(f"[Botasaurus] 🛡️ Block detected in page content.")
+                    await self.report_proxy_error(ai_mode_url or "google_ai", 403)
+                    await self.rotate_proxy()
+                    return None
+                    
+                return self._last_content
 
         except Exception as e:
+            if self.is_block_response(str(e)):
+                await self.report_proxy_error(ai_mode_url or "google_ai", 403)
+                await self.rotate_proxy()
             logger.error(f"[Botasaurus] Error: {e}")
             return None
 
@@ -186,7 +227,6 @@ class BotasaurusAgent(BaseBrowserAgent):
         return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url)
 
     async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
-
         """Interactive search fallback for Botasaurus."""
         return await self.search_google_ai(prompt)
 
@@ -195,9 +235,16 @@ class BotasaurusAgent(BaseBrowserAgent):
         logger.info(f"[Botasaurus] 🔍 Google Search: {query}")
         try:
             async with self._lock:
-                success = await asyncio.to_thread(submit_google_search_task, {"query": query})
+                success = await asyncio.to_thread(submit_google_search_task, {"query": query, "proxy": self.current_proxy})
+                # Re-check content if possible (Botasaurus task returns bool here, but let's be safe)
+                if not success:
+                    await self.report_proxy_error("google_search", 403)
+                    await self.rotate_proxy()
                 return success
         except Exception as e:
+            if self.is_block_response(str(e)):
+                await self.report_proxy_error("google_search", 403)
+                await self.rotate_proxy()
             logger.error(f"[Botasaurus] Error: {e}")
             return False
 
@@ -205,11 +252,21 @@ class BotasaurusAgent(BaseBrowserAgent):
         logger.info(f"[Botasaurus] 🤖 Gemini search: {query}")
         try:
             async with self._lock:
-                html = await asyncio.to_thread(search_gemini_ai_task, {"query": query})
-                self._last_html = html or ""
-                return self._last_html
+                html = await asyncio.to_thread(search_gemini_ai_task, {"query": query, "proxy": self.current_proxy})
+                self._last_content = html or ""
+                
+                if self.is_block_response(self._last_content):
+                    logger.warning(f"[Botasaurus] 🛡️ Block detected on Gemini")
+                    await self.report_proxy_error("gemini", 403)
+                    await self.rotate_proxy()
+                    return None
+                    
+                return self._last_content
 
         except Exception as e:
+            if self.is_block_response(str(e)):
+                await self.report_proxy_error("gemini", 403)
+                await self.rotate_proxy()
             logger.error(f"[Botasaurus] Error: {e}")
             return None
 
@@ -217,17 +274,27 @@ class BotasaurusAgent(BaseBrowserAgent):
         logger.info(f"[Botasaurus] → {url}")
         try:
             async with self._lock:
-                html = await asyncio.to_thread(crawl_url_task, {"url": url})
-                self._last_html = html or ""
-                if not self._last_html:
+                html = await asyncio.to_thread(crawl_url_task, {"url": url, "proxy": self.current_proxy})
+                self._last_content = html or ""
+                if not self._last_content:
                     return ""
+                    
+                if self.is_block_response(self._last_content):
+                    logger.warning(f"[Botasaurus] 🛡️ Block detected on {url}")
+                    await self.report_proxy_error(url, 403)
+                    await self.rotate_proxy()
+                    return ""
+                    
                 # For crawl_url(), HybridEngine callers expect *text*, but keep
                 # raw HTML available for get_page_source()/UUE.
-                text = re.sub(r"<[^>]+>", " ", self._last_html)
+                text = re.sub(r"<[^>]+>", " ", self._last_content)
                 text = re.sub(r"\s+", " ", text).strip()
                 return text[:8000]
 
         except Exception as e:
+            if self.is_block_response(str(e)):
+                await self.report_proxy_error(url, 403)
+                await self.rotate_proxy()
             logger.error(f"[Botasaurus] Error: {e}")
             return ""
 

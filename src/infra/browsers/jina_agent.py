@@ -52,8 +52,6 @@ class JinaAgent(BaseBrowserAgent):
         """
         Fetch a URL via Jina Reader.
         """
-        # r.jina.ai expects a full URL appended.
-        # Avoid double-https/invalid concatenation if callers pass a full URL.
         if url.startswith("http://") or url.startswith("https://"):
             target_url = f"{self.base_url}{url}"
         else:
@@ -72,15 +70,32 @@ class JinaAgent(BaseBrowserAgent):
         try:
             async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
                 response = await client.get(target_url, headers=headers)
-                if response.status_code == 200:
-                    self._last_content = response.text
-                    return True
-                elif response.status_code == 402:
-                    logger.error("[Jina] 🛑 CRÉDITS ÉPUISÉS (Statut 402). Désactivation de l'agent.")
+                
+                # Validation standard des erreurs
+                if response.status_code == 402:
+                    logger.error("[Jina] 🛑 CRÉDITS ÉPUISÉS (Statut 402).")
+                    self.report_proxy_error(url, 402)
                     self.enabled = False
                     return False
+                
+                if response.status_code == 403:
+                    logger.warning(f"[Jina] 🛑 BLOCAGE DÉTECTÉ (403) pour {url}")
+                    self.report_proxy_error(url, 403)
+                    return False
+
+                if response.status_code == 200:
+                    self._last_content = response.text
+                    
+                    # Check for WAF content blocks in the markdown
+                    if self.is_block_response(self._last_content):
+                        logger.warning(f"[Jina] 🛑 BLOCAGE DÉTECTÉ (Contenu) pour {url}")
+                        self.report_proxy_error(url, 403)
+                        return False
+                        
+                    return True
                 else:
                     logger.error(f"[Jina] Failed with status {response.status_code}")
+                    self.report_proxy_error(url, response.status_code)
                     return False
         except Exception as e:
             logger.error(f"[Jina] Error fetching {url}: {e}")
@@ -107,8 +122,6 @@ class JinaAgent(BaseBrowserAgent):
                 return self._last_content
             return None
 
-        # Si le prompt est un prompt complexe (AI Mode), on extrait les termes essentiels
-        # pour éviter l'erreur 422 (URL trop longue) et obtenir de meilleurs résultats.
         search_query = prompt
         if len(prompt) > 200 or "###" in prompt:
             name_match = re.search(r"NAME:\s*(.*)", prompt)
@@ -116,11 +129,9 @@ class JinaAgent(BaseBrowserAgent):
             if name_match:
                 search_query = name_match.group(1).strip()
                 if addr_match:
-                    # On ne garde que la ville/code postal si possible pour la recherche
                     addr = addr_match.group(1).strip()
                     search_query += f" {addr}"
             else:
-                # Fallback: on prend juste les 150 premiers caractères
                 search_query = prompt[:150]
 
         search_url = f"https://s.jina.ai/{urllib.parse.quote(search_query)}"
@@ -134,15 +145,32 @@ class JinaAgent(BaseBrowserAgent):
         try:
             async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
                 response = await client.get(search_url, headers=headers)
-                if response.status_code == 200:
-                    return response.text
-                elif response.status_code == 402:
-                    logger.error("[Jina] 🛑 CRÉDITS ÉPUISÉS (Statut 402). Désactivation de la recherche.")
+                
+                if response.status_code == 402:
+                    logger.error("[Jina] 🛑 CRÉDITS ÉPUISÉS (Statut 402).")
+                    self.report_proxy_error(search_url, 402)
                     self.enabled = False
                     return None
+                    
+                if response.status_code == 403:
+                    logger.warning(f"[Jina] 🛑 BLOCAGE DÉTECTÉ (403) via s.jina.ai")
+                    self.report_proxy_error(search_url, 403)
+                    return None
+
+                if response.status_code == 200:
+                    content = response.text
+                    if self.is_block_response(content):
+                        logger.warning(f"[Jina] 🛑 BLOCAGE DÉTECTÉ (Contenu) via s.jina.ai")
+                        self.report_proxy_error(search_url, 403)
+                        return None
+                    return content
                 else:
                     logger.error(f"[Jina] Echec de la recherche (statut {response.status_code})")
+                    self.report_proxy_error(search_url, response.status_code)
                     return None
+        except Exception as e:
+            logger.error(f"[Jina] Erreur de recherche: {e}")
+            return None
         except Exception as e:
             logger.error(f"[Jina] Erreur de recherche: {e}")
             return None

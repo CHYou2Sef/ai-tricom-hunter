@@ -61,11 +61,9 @@ GEMINI_RESPONSE_SELECTORS = [
 
 class PatchrightAgent(BaseBrowserAgent):
     def __init__(self, worker_id: int = 0):
-        self.worker_id = worker_id
+        super().__init__(worker_id)
         self._playwright = None
-        self.browser: Optional[Browser] = None
-        self.context: Optional[BrowserContext] = None
-        self.page: Optional[Page] = None
+        self._context: Optional[BrowserContext] = None
         self.current_proxy: Optional[str] = None
         self._lock = asyncio.Lock()
         # Fingerprint bundle — regenerated on each start()
@@ -83,7 +81,7 @@ class PatchrightAgent(BaseBrowserAgent):
 
     async def _start_locked(self) -> None:
         """Internal lock-free start."""
-        if self.context: return
+        if self._page: return
         logger.info("[Patchright] Starting Chrome with your profile...")
         if not self._playwright:
             self._playwright = await async_playwright().start()
@@ -99,11 +97,16 @@ class PatchrightAgent(BaseBrowserAgent):
             permissions = ["geolocation"]
 
         proxy_settings = None
-        if config.PROXY_ENABLED and self.current_proxy:
-            proxy_settings = {"server": self.current_proxy}
+        if config.PROXY_ENABLED:
+            if not self.current_proxy:
+                from common.proxy_manager import get_next_proxy
+                self.current_proxy = await get_next_proxy()
+            
+            if self.current_proxy:
+                proxy_settings = {"server": self.current_proxy}
 
         try:
-            self.context = await self._playwright.chromium.launch_persistent_context(
+            self._context = await self._playwright.chromium.launch_persistent_context(
                 user_data_dir=self.profile_path,
                 headless=getattr(config, "HEADLESS", False),
                 executable_path=config.CHROMIUM_BINARY_PATH or None,
@@ -117,12 +120,12 @@ class PatchrightAgent(BaseBrowserAgent):
             )
 
             fp_script = build_cdp_injection_script(self._fingerprint)
-            await self.context.add_init_script(script=fp_script)
-            self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+            await self._context.add_init_script(script=fp_script)
+            self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
             logger.info("[Patchright] ✅ Ready.")
         except Exception as e:
             logger.error(f"[Patchright] Startup failed: {e}")
-            self.context = self.page = None
+            self._context = self._page = None
             raise
 
     async def close(self) -> None:
@@ -133,23 +136,23 @@ class PatchrightAgent(BaseBrowserAgent):
     async def _close_locked(self) -> None:
         """Internal lock-free close."""
         try:
-            if self.context:
-                await self.context.close()
+            if self._context:
+                await self._context.close()
             if self._playwright:
                 await self._playwright.stop()
         except Exception:
             pass
         finally:
-            self.context = self.page = self._playwright = None
+            self._context = self._page = self._playwright = None
             logger.info("[Patchright] Browser closed.")
 
     async def is_alive(self) -> bool:
         """Public health check with lock protection. Passive."""
         async with self._lock:
-            if not self.page: return False
+            if not self._page: return False
             try:
                 # Playwright heartbeat
-                await self.page.evaluate("1+1", timeout=2000)
+                await self._page.evaluate("1+1", timeout=2000)
                 return True
             except Exception:
                 return False
@@ -164,24 +167,24 @@ class PatchrightAgent(BaseBrowserAgent):
         import time
         now = time.time()
         # 5s health-check cache
-        if self.page and getattr(self, "_last_health_check", 0) > (now - 5):
+        if self._page and getattr(self, "_last_health_check", 0) > (now - 5):
             return True
 
-        if not self.page or not self.context:
+        if not self._page or not self._context:
             logger.info("[Patchright] 🔄 Session missing/dead. Starting...")
             await self._start_locked()
-            return self.page is not None
+            return self._page is not None
 
         try:
             # Heartbeat: simple JS eval
-            await self.page.evaluate("1+1", timeout=5000)
+            await self._page.evaluate("1+1", timeout=5000)
             self._last_health_check = now
             return True
         except Exception as e:
             logger.warning(f"[Patchright] 💔 Page unresponsive: {e}. Resurrecting...")
             await self._close_locked()
             await self._start_locked()
-            return self.page is not None
+            return self._page is not None
 
     async def rotate_proxy(self) -> None:
         """Fetch a new proxy and restart the browser context."""
@@ -194,19 +197,21 @@ class PatchrightAgent(BaseBrowserAgent):
             return await self._get_page_source_locked()
 
     async def _get_page_source_locked(self) -> str:
-        if not self.page:
-            return ""
+        if not self._page:
+            return self._last_content
         try:
-            return await self.page.content()
+            content = await self._page.content()
+            self._last_content = content or ""
+            return self._last_content
         except Exception:
-            return ""
+            return self._last_content
 
 
     # ── Main Search Method (phone-focused, NO AI/LLM) ─────────────────────
 
-    async def search_google_ai(self, query: str) -> Optional[str]:
+    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """Perform a Google search and extract content. Alias for compatibility."""
-        return await self.search_google_ai_mode(query)
+        return await self.search_google_ai_mode(query, ai_mode_url=ai_mode_url)
 
     async def submit_google_search(self, query: str) -> bool:
         """Navigate to Google and submit search query."""
@@ -217,7 +222,7 @@ class PatchrightAgent(BaseBrowserAgent):
         if not await self._ensure_page_locked():
             return False
         
-        page = self.page
+        page = self._page
         if not page: return False
         
         try:
@@ -227,8 +232,15 @@ class PatchrightAgent(BaseBrowserAgent):
             await self._handle_captcha_if_present_locked(page)
             
             # Re-check page after potential rotation in captcha handler
-            page = self.page
+            page = self._page
             if not page: return False
+
+            # Post-navigation health check (detect immediate blocks)
+            content = await page.content()
+            if self.is_block_response(content):
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
+                return False
 
             # Use a robust helper to find and type
             search_input = await self._find_input_locked(page, GOOGLE_SEARCH_INPUT)
@@ -241,6 +253,8 @@ class PatchrightAgent(BaseBrowserAgent):
             return False
         except Exception as e:
             logger.error(f"[Patchright] Google Search Submission Error: {e}")
+            if self.is_block_response(e):
+                await self.report_proxy_error(self.current_proxy, 403)
             return False
 
     async def _navigate_and_search_locked(self, page: Page, query: str) -> None:
@@ -250,7 +264,7 @@ class PatchrightAgent(BaseBrowserAgent):
         await self._handle_google_cookies_locked(page)
         await self._handle_captcha_if_present_locked(page)
         
-        page = self.page # Might have rotated
+        page = self._page # Might have rotated
         if not page: return
 
         search_box = await self._find_input_locked(page, GOOGLE_SEARCH_INPUT)
@@ -268,8 +282,8 @@ class PatchrightAgent(BaseBrowserAgent):
         for selector in tab_selectors:
             try:
                 # Use locator only if page is valid
-                if not self.page: break
-                tab = self.page.locator(selector).first
+                if not self._page: break
+                tab = self._page.locator(selector).first
                 if await tab.count() > 0 and await tab.is_visible(timeout=1500):
                     await tab.click()
                     logger.info(f"🤖 [AI Mode Tab] Clicked: '{selector}'")
@@ -288,13 +302,23 @@ class PatchrightAgent(BaseBrowserAgent):
         if not await self._ensure_page_locked():
             return False
         
-        page = self.page
+        page = self._page
         if not page: return False
         try:
-            await self.page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            await self._page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            
+            # Post-navigation health check (detect immediate blocks)
+            content = await self._page.content()
+            if self.is_block_response(content):
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
+                return False
+                
             return True
         except Exception as e:
             logger.debug(f"[Patchright] Failed to visit {url}: {e}")
+            if self.is_block_response(e):
+                await self.report_proxy_error(self.current_proxy, 403)
             return False
 
     async def crawl_website(self, url: str) -> str:
@@ -307,7 +331,7 @@ class PatchrightAgent(BaseBrowserAgent):
             return ""
         
         try:
-            page = self.page
+            page = self._page
             if not page: return ""
             logger.info(f"🕸️ [Patchright] DeepCrawl: {url}")
             await asyncio.sleep(2)
@@ -321,7 +345,7 @@ class PatchrightAgent(BaseBrowserAgent):
             
             for link in links:
                 try:
-                    if not self.page: break
+                    if not self._page: break
                     name = (await link.inner_text() or "").lower()
                     href = (await link.get_attribute("href") or "").lower()
                     
@@ -339,11 +363,11 @@ class PatchrightAgent(BaseBrowserAgent):
             # Visit subpages
             for sub in list(set(found_sublinks)):
                 try:
-                    if not self.page: break
+                    if not self._page: break
                     logger.info(f"   ∟ Visiting subpage: {sub}")
                     await page.goto(sub, wait_until="domcontentloaded", timeout=10000)
                     await asyncio.sleep(1)
-                    if self.page:
+                    if self._page:
                         all_text.append(f"\n--- PAGE: {sub} ---\n" + await page.inner_text("body"))
                 except:
                     continue
@@ -358,7 +382,7 @@ class PatchrightAgent(BaseBrowserAgent):
         async with self._lock:
             if not await self._ensure_page_locked():
                 return None
-            page = self.page
+            page = self._page
             if not page: return None
             
             try:
@@ -367,16 +391,27 @@ class PatchrightAgent(BaseBrowserAgent):
                 
                 logger.info(f"🤖 [AI Mode] Navigating: {url}")
                 await page.goto(url, wait_until="load", timeout=30000)
+                
+                # Detect immediate block
+                page_content = await page.content()
+                if self.is_block_response(page_content):
+                    if self.current_proxy:
+                        await self.report_proxy_error(self.current_proxy, 403)
+                    await self.rotate_proxy()
+                    return None
+
                 await self._handle_google_cookies_locked(page)
                 await self._handle_captcha_if_present_locked(page)
                 
-                page = self.page # Re-capture
+                page = self._page # Re-capture
                 if not page: return None
 
                 logger.info("⏳ [AI Mode] Waiting for response...")
                 return await self._wait_for_ai_mode_response_locked(page, timeout_sec=25)
             except Exception as e:
                 logger.error(f"[AI Mode] Error: {e}")
+                if self.is_block_response(e):
+                    await self.report_proxy_error(self.current_proxy, 403)
                 return None
 
     async def _wait_for_ai_mode_response_locked(self, page: Page, timeout_sec: int = 25) -> Optional[str]:
@@ -431,6 +466,12 @@ class PatchrightAgent(BaseBrowserAgent):
             content = await page.content()
             if not is_captcha_page(content): return False
             logger.warning("[Google] CAPTCHA detected.")
+            
+            # Report proxy error for IP ban if it looks like a hard block
+            if self.is_block_response(content):
+                if self.current_proxy:
+                    await self.report_proxy_error(self.current_proxy, 403)
+
             from common.captcha_solver import detect_captcha_type, solve_captcha_async
             captcha_type = detect_captcha_type(content)
             if captcha_type and getattr(config, "CAPTCHA_API_KEY", ""):
@@ -446,7 +487,7 @@ class PatchrightAgent(BaseBrowserAgent):
     async def _rotate_proxy_locked(self) -> None:
         """Internal lock-free rotation."""
         from common.proxy_manager import get_next_proxy
-        new_proxy = get_next_proxy()
+        new_proxy = await get_next_proxy()
         if new_proxy:
             self.current_proxy = new_proxy
             await self._close_locked()
@@ -455,8 +496,8 @@ class PatchrightAgent(BaseBrowserAgent):
     async def search_gemini_ai(self, query: str) -> Optional[str]:
         """Deep search using Google Gemini."""
         async with self._lock:
-            if not self.page: await self._start_locked()
-            page = self.page
+            if not await self._ensure_page_locked(): return None
+            page = self._page
             if not page: return None
             try:
                 logger.info(f"🚀 [Gemini] search: {query}")
@@ -472,13 +513,15 @@ class PatchrightAgent(BaseBrowserAgent):
                 return await self._wait_for_streaming_response_locked(page, GEMINI_RESPONSE_SELECTORS)
             except Exception as e:
                 logger.error(f"[Gemini] Error: {e}")
+                if self.is_block_response(e):
+                    await self.report_proxy_error(self.current_proxy, 403)
                 return None
 
     async def _find_input_locked(self, page: Page, selector: str, timeout_ms: int = 5000):
         if not page: return None
         try:
             await page.wait_for_selector(selector, timeout=timeout_ms)
-            if not self.page: return None
+            if not self._page: return None
             return page.locator(selector).first
         except: return None
 
@@ -486,7 +529,7 @@ class PatchrightAgent(BaseBrowserAgent):
         if not page: return
         for char in text:
             try:
-                if not self.page: break
+                if not self._page: break
                 await page.keyboard.type(char)
                 await asyncio.sleep(random.uniform(0.04, 0.12))
             except: break
@@ -510,7 +553,7 @@ class PatchrightAgent(BaseBrowserAgent):
         if not page: return None
         for s in selectors:
             try:
-                if not self.page: break
+                if not self._page: break
                 text = await page.locator(s).first.text_content(timeout=2000)
                 if text and text.strip(): return text.strip()
             except: continue

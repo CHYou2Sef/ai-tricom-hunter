@@ -50,7 +50,7 @@ class NodriverAgent(BaseBrowserAgent):
         super().__init__(worker_id)
         self._browser = None
         self._page = None
-        self._proxy = proxy
+        self.current_proxy = proxy
         self._reconnect_count: int = 0
         self._lock = asyncio.Lock()
         self._bundle = None
@@ -88,17 +88,17 @@ class NodriverAgent(BaseBrowserAgent):
         if os.getuid() == 0:
             browser_args.extend(["--no-sandbox", "--disable-setuid-sandbox"])
 
-        if self._proxy:
-            if "@" in self._proxy:
+        if self.current_proxy:
+            if "@" in self.current_proxy:
                 from common.anti_bot import create_proxy_auth_extension
-                ext_path = create_proxy_auth_extension(self._proxy, self.worker_id)
+                ext_path = create_proxy_auth_extension(self.current_proxy, self.worker_id)
                 if ext_path:
                     logger.info(f"[Nodriver] 🔑 Using AUTH proxy extension")
                     browser_args.append(f"--load-extension={ext_path}")
                 else:
-                    browser_args.append(f"--proxy-server={self._proxy}")
+                    browser_args.append(f"--proxy-server={self.current_proxy}")
             else:
-                browser_args.append(f"--proxy-server={self._proxy}")
+                browser_args.append(f"--proxy-server={self.current_proxy}")
 
         profile_path = config.get_worker_profile_path(self.worker_id, "nodriver")
         nd_path = config.CHROMIUM_BINARY_PATH if config.CHROMIUM_BINARY_PATH else None
@@ -141,17 +141,17 @@ class NodriverAgent(BaseBrowserAgent):
             logger.info("[Nodriver] Browser closed.")
 
     async def rotate_proxy(self) -> None:
-        """Fetch a new proxy and restart the Nodriver browser session."""
+        """Standardized rotation: drop current browser, get new proxy, restart."""
         async with self._lock:
             await self._rotate_proxy_locked()
 
     async def _rotate_proxy_locked(self) -> None:
-        """Internal lock-free rotation. Assumes lock is held."""
+        """Internal lock-free rotation."""
         from common.proxy_manager import get_next_proxy
-        new_proxy = get_next_proxy()
+        new_proxy = await get_next_proxy()
         if new_proxy:
             logger.info(f"[Nodriver] ♻️  Rotating proxy to: {new_proxy}")
-            self._proxy = new_proxy
+            self.current_proxy = new_proxy
             await self._close_locked()
             await self._start_locked()
         else:
@@ -262,8 +262,19 @@ class NodriverAgent(BaseBrowserAgent):
             await self._page.get(url)
             await action_delay_async("navigate")
             await self._handle_captcha_if_present_locked(self._page)
+            
+            # Post-navigation health check (detect immediate blocks)
+            content = await self._page.get_content()
+            if self.is_block_response(content):
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
+                return False
+                
             return True
         except Exception as exc:
+            if self.is_block_response(exc):
+                await self.report_proxy_error(self.current_proxy, 403)
+            
             logger.error(f"[Nodriver] Navigation error: {exc}")
             return False
 
@@ -274,11 +285,13 @@ class NodriverAgent(BaseBrowserAgent):
 
     async def _get_page_source_locked(self) -> str:
         if not self._page:
-            return ""
+            return self._last_content
         try:
-            return await self._page.get_content()
+            content = await self._page.get_content()
+            self._last_content = content or ""
+            return self._last_content
         except Exception:
-            return ""
+            return self._last_content
 
     # ─────────────────────────────────────────────────────────────────
     # SEARCH METHODS
@@ -314,10 +327,19 @@ class NodriverAgent(BaseBrowserAgent):
 
             if not self._page: return None
             content = await self._page.get_content()
+            
+            # Post-navigation health check (detect immediate blocks)
+            if self.is_block_response(content):
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
+                return None
+
             logger.info(f"[Nodriver] ✅ Got {len(content)} chars.")
             return content
         except Exception as exc:
             logger.error(f"[Nodriver] search_google_ai error: {exc}")
+            if self.is_block_response(exc):
+                await self.report_proxy_error(self.current_proxy, 403)
             return None
 
     async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
@@ -354,9 +376,18 @@ class NodriverAgent(BaseBrowserAgent):
             
             if not self._page: return False
             content = await self._page.get_content()
+
+            # Detect immediate block
+            if self.is_block_response(content):
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
+                return False
+
             return bool(content and len(content) > 500)
         except Exception as exc:
             logger.error(f"[Nodriver] submit_google_search error: {exc}")
+            if self.is_block_response(exc):
+                await self.report_proxy_error(self.current_proxy, 403)
             return False
 
     async def search_gemini_ai(self, query: str) -> Optional[str]:
@@ -379,9 +410,17 @@ class NodriverAgent(BaseBrowserAgent):
             await action_delay_async("read_wait")
             
             if not self._page: return None
-            return await self._page.get_content()
+            content = await self._page.get_content()
+            
+            if self.is_block_response(content):
+                await self.report_proxy_error(self.current_proxy)
+                return None
+                
+            return content
         except Exception as exc:
             logger.error(f"[Nodriver] search_gemini_ai error: {exc}")
+            if self.is_block_response(exc):
+                await self.report_proxy_error(self.current_proxy)
             return None
 
     async def _type_text_locked(self, page, text: str) -> None:
@@ -411,6 +450,11 @@ class NodriverAgent(BaseBrowserAgent):
             return ""
         try:
             html = await self._get_page_source_locked()
+            
+            if self.is_block_response(html):
+                await self.report_proxy_error(self.current_proxy)
+                return ""
+                
             # Strip tags for clean text extraction
             text = re.sub(r"<[^>]+>", " ", html)
             text = re.sub(r"\s+", " ", text).strip()
@@ -433,6 +477,7 @@ class NodriverAgent(BaseBrowserAgent):
                 solved = await solve_captcha_async(page, captcha_type)
                 if not solved:
                     logger.warning("[Nodriver] CAPTCHA failed. Rotating...")
+                    await self.report_proxy_error(self.current_proxy, 403)
                     await self._rotate_proxy_locked()
                     return True
             return False

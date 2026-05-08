@@ -69,7 +69,7 @@ class SeleniumAgent(BaseBrowserAgent):
         self._fingerprint = get_fingerprint_bundle()
         self._lock = asyncio.Lock()
         self._last_health_check = 0.0
-        # Interruption metadata — read by BenchmarkTelemetry
+        self.current_proxy: Optional[str] = None
         self.last_interruption_reason: Optional[str] = None
         self.last_interruption_ts: Optional[float] = None
 
@@ -81,6 +81,12 @@ class SeleniumAgent(BaseBrowserAgent):
             return
 
         logger.info(f"[Selenium] 🚀 Starting browser (worker={self.worker_id})...")
+        
+        # ── Proxy Configuration ──
+        if not self.current_proxy and config.PROXY_ENABLED:
+            from common.proxy_manager import get_next_proxy
+            self.current_proxy = await get_next_proxy()
+
         try:
             await asyncio.to_thread(self._sync_start)
         except Exception as exc:
@@ -103,6 +109,8 @@ class SeleniumAgent(BaseBrowserAgent):
             f"--window-size={vp['width']},{vp['height']}",
             "--lang=fr-FR",
             "--disable-notifications",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
         ]
 
         # Per-worker isolated profile
@@ -112,12 +120,11 @@ class SeleniumAgent(BaseBrowserAgent):
         common_args.append(f"--user-data-dir={profile_dir}")
 
         # ── Proxy Configuration ──
-        import os
-        from common.anti_bot import create_proxy_auth_extension
-        proxy = os.getenv("PROXY") or getattr(config, "PROXY_DEFAULT", None)
+        proxy = self.current_proxy
         if proxy:
             if "@" in proxy:
                 # Proxy requires authentication (user:pass@host:port)
+                from common.anti_bot import create_proxy_auth_extension
                 ext_path = create_proxy_auth_extension(proxy, self.worker_id)
                 if ext_path:
                     logger.info(f"[Selenium] 🔑 Using AUTH proxy with extension: {proxy}")
@@ -133,19 +140,33 @@ class SeleniumAgent(BaseBrowserAgent):
         # ── Level 1: undetected-chromedriver (maximum stealth) ─────────────
         try:
             import undetected_chromedriver as uc  # type: ignore
+            
+            # Monkeypatch Patcher.data_path to avoid Read-Only file system errors
+            import os
+            uc_data_dir = os.environ.get("XDG_DATA_HOME", "/tmp/undetected_chromedriver")
+            uc.patcher.Patcher.data_path = uc_data_dir
+            if not os.path.exists(uc_data_dir):
+                os.makedirs(uc_data_dir, exist_ok=True)
+
             options = uc.ChromeOptions()
             for arg in common_args:
                 options.add_argument(arg)
             
             # Hardened: ensure path is a valid string or exactly None (not "")
             uc_path = config.CHROMIUM_BINARY_PATH if config.CHROMIUM_BINARY_PATH else None
+            driver_path = None
+            if uc_path:
+                potential_driver = os.path.join(os.path.dirname(uc_path), "chromedriver")
+                if os.path.exists(potential_driver):
+                    driver_path = potential_driver
 
             self._driver = uc.Chrome(
                 options=options,
                 headless=is_headless,
                 use_subprocess=True,
                 version_main=None,
-                browser_executable_path=uc_path
+                browser_executable_path=uc_path,
+                driver_executable_path=driver_path
             )
             self._stealth_mode = "undetected-chromedriver"
             logger.info(
@@ -269,15 +290,13 @@ class SeleniumAgent(BaseBrowserAgent):
     async def rotate_proxy(self) -> None:
         """Fetch a new proxy and restart the browser session."""
         from common.proxy_manager import get_next_proxy
-        new_proxy = get_next_proxy()
+        new_proxy = await get_next_proxy()
         
         if new_proxy:
             logger.info(f"[Selenium-Worker-{self.worker_id}] ♻️  Rotating proxy to: {new_proxy}")
-            # To fix 'corruption', we also clear the profile directory
             await self.close()
             self._clear_profile()
-            import os
-            os.environ["PROXY"] = new_proxy # Update for sync-started driver
+            self.current_proxy = new_proxy
             await self.start()
         else:
             logger.warning(f"[Selenium-Worker-{self.worker_id}] No proxies left for rotation.")
@@ -395,21 +414,21 @@ class SeleniumAgent(BaseBrowserAgent):
             if not await self._ensure_driver_alive_locked():
                 return False
             try:
+                logger.info(f"[Selenium] Navigating to: {url}")
                 await asyncio.to_thread(self._driver.get, url)
-                # Note: _handle_captcha_if_present should be called with lock held
-                await self._handle_captcha_if_present_locked()
+                
+                # Check for blocks immediately after navigation
+                if await self._handle_captcha_if_present_locked():
+                    return False
+                    
                 return True
             except Exception as exc:
-                msg = str(exc)
-                if any(err in msg for err in ["ERR_TUNNEL_CONNECTION_FAILED", "ERR_PROXY_CONNECTION_FAILED", "invalid session id"]):
-                    logger.error(f"[Selenium] 🛑 Session/Proxy FAILED (Self-Healing triggered). Rotating...")
-                    await self._rotate_proxy_locked()
-                    # Retry once
-                    if self._driver:
-                        try:
-                            await asyncio.to_thread(self._driver.get, url)
-                            return True
-                        except: pass
+                if self.is_block_response(exc):
+                    logger.error(f"[Selenium] 🛑 Session/Proxy FAILED (Block detected). Reporting...")
+                    if self.current_proxy:
+                        await self.report_proxy_error(self.current_proxy, 403)
+                    await self.rotate_proxy()
+                    return False
                 logger.error(f"[Selenium] goto_url error: {exc}")
                 return False
 
@@ -418,40 +437,42 @@ class SeleniumAgent(BaseBrowserAgent):
     async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """
         PRIMARY SEARCH — direct navigation to Google AI Mode URL.
-        Returns the page text for downstream JSON/regex extraction.
         """
-        if not self._driver:
-            return None
-        
-        from common.search_engine import generate_google_ai_url
-        url = ai_mode_url or generate_google_ai_url(prompt)
-
-        try:
-            logger.info(f"🤖 [Selenium-AI-Mode] Navigating for prompt ({len(prompt)} chars)")
-            await asyncio.to_thread(self._driver.get, url)
-            await asyncio.sleep(2.5)
-
-            interrupted = await self._handle_captcha_if_present()
-            if interrupted:
+        async with self._lock:
+            if not await self._ensure_driver_alive_locked():
                 return None
-
-            # Wait for AI response to stabilise
-            text = await self._wait_for_stable_response(timeout_sec=20)
-            if text:
-                logger.info(f"✨ [Selenium-AI-Mode] Got response ({len(text)} chars)")
-            return text
-
-        except Exception as exc:
-            msg = str(exc).lower()
-            if any(err in msg for err in ["err_tunnel_connection_failed", "err_proxy_connection_failed", "invalid session id"]):
-                logger.error(f"[Selenium] 🛑 Session/Proxy FAILED during AI search. Self-healing...")
-                await self.rotate_proxy()
-                # Recurse once with new proxy/session
-                return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url)
             
-            logger.error(f"[Selenium] search_google_ai_mode error: {exc}")
-            await self._record_interruption("exception", str(exc))
-            return None
+            from common.search_engine import generate_google_ai_url
+            url = ai_mode_url or generate_google_ai_url(prompt)
+
+            try:
+                logger.info(f"🤖 [Selenium-AI-Mode] Navigating for prompt ({len(prompt)} chars)")
+                await asyncio.to_thread(self._driver.get, url)
+                
+                # Check for blocks
+                if await self._handle_captcha_if_present_locked():
+                    return None
+
+                # Wait for AI response to stabilise
+                text = await self._wait_for_stable_response(timeout_sec=20)
+                if text:
+                    logger.info(f"✨ [Selenium-AI-Mode] Got response ({len(text)} chars)")
+                    if self.is_block_response(text):
+                        logger.warning("[Selenium] 🛡️ Block detected in AI response text.")
+                        return None
+                return text
+
+            except Exception as exc:
+                if self.is_block_response(exc):
+                    logger.error(f"[Selenium] 🛑 Block/WAF detected during AI search. Reporting...")
+                    if self.current_proxy:
+                        await self.report_proxy_error(self.current_proxy, 403)
+                    await self.rotate_proxy()
+                    return None
+                
+                logger.error(f"[Selenium] search_google_ai_mode error: {exc}")
+                await self._record_interruption("exception", str(exc))
+                return None
 
     async def submit_google_search(self, query: str) -> bool:
         """Navigate to Google, submit a search query, return True on success."""
@@ -527,7 +548,7 @@ class SeleniumAgent(BaseBrowserAgent):
 
     # ── CAPTCHA & interruption handling ────────────────────────────────────
 
-    async def _handle_captcha_if_present(self) -> bool:
+    async def _handle_captcha_if_present_locked(self) -> bool:
         """
         Refined detection for CAPTCHA vs IP Ban / Hard Block.
         Returns True if the session is blocked and needs rotation/escalation.
@@ -536,29 +557,23 @@ class SeleniumAgent(BaseBrowserAgent):
         if not source:
             return False
 
-        lower_source = source.lower()
-        
-        # 1. Detect Hard IP Ban (403/429/Access Denied)
-        hard_ban_keywords = ["access denied", "forbidden", "too many requests", "403 forbidden", "429 too many"]
-        if any(kw in lower_source for kw in hard_ban_keywords):
+        if self.is_block_response(source):
             logger.error("[Selenium] 🚨 HARD IP BAN DETECTED.")
             await self._record_interruption("ip_ban", "Hard block (Access Denied / 403)")
             if config.PROXY_ENABLED:
+                if self.current_proxy:
+                    await self.report_proxy_error(self.current_proxy, 403)
                 await self.rotate_proxy()
             return True
 
-        # 2. Detect Soft CAPTCHA / Unusual Traffic
         if is_captcha_page(source):
             logger.warning("[Selenium] ⚠️  SOFT CAPTCHA / WAF Detected (Unusual Traffic).")
             await self._record_interruption("captcha_waf", "CAPTCHA challenge detected")
             
-            # Fast solution: If we hit unusual traffic, rotation is usually the only way out
-            # without manual intervention.
             if config.PROXY_ENABLED:
                 logger.info("[Selenium] ♻️  Attempting automated proxy rotation for CAPTCHA...")
                 await self.rotate_proxy()
             else:
-                # Fallback to manual solve if no proxies
                 await asyncio.to_thread(wait_for_human_captcha_solve)
             return True
 

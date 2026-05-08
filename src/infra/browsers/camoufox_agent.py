@@ -63,9 +63,9 @@ class CamoufoxAgent(BaseBrowserAgent):
             await agent.close()
     """
 
-    def __init__(self, worker_id: int = 0, proxy: Optional[str] = None):
-        self._worker_id = worker_id
-        self._proxy = proxy
+    def __init__(self, worker_id: int = 0):
+        super().__init__(worker_id)
+        self.current_proxy: Optional[str] = None
         self._browser = None    # AsyncCamoufox context manager instance
         self._page = None       # Active Firefox page / Playwright Page object
         self._playwright = None # Underlying Playwright instance (via Camoufox)
@@ -134,16 +134,20 @@ class CamoufoxAgent(BaseBrowserAgent):
 
         # Build proxy config if provided
         proxy_cfg = None
-        if self._proxy:
-            proxy_cfg = {"server": self._proxy}
+        if not self.current_proxy and config.PROXY_ENABLED:
+            from common.proxy_manager import get_next_proxy
+            self.current_proxy = await get_next_proxy()
+
+        if self.current_proxy:
+            proxy_cfg = {"server": self.current_proxy}
 
         # AsyncCamoufox auto-generates a statistically realistic fingerprint
         # using BrowserForge (OS, UA, screen, GPU, language based on real traffic).
         # headless=False: Firefox appears as a normal visible browser (most stealthy).
         # geoip=True: auto-calculate locale/timezone from proxy IP to avoid mismatch.
         self._camoufox_ctx = AsyncCamoufox(
-            headless=False,
-            geoip=bool(self._proxy),      # Only geoip-match if using a proxy
+            headless=getattr(config, "HEADLESS", False),
+            geoip=bool(self.current_proxy),      # Only geoip-match if using a proxy
             proxy=proxy_cfg,
             os="windows",                  # Spoof Windows (largest market share = less suspicious)
             block_webrtc=True,             # Prevent WebRTC IP leaks
@@ -156,10 +160,23 @@ class CamoufoxAgent(BaseBrowserAgent):
 
         alert("INFO", "Camoufox session started", {
             "worker": self._worker_id,
-            "proxy": self._proxy or "direct",
+            "proxy": self.current_proxy or "direct",
             "engine": "Firefox/Gecko",
         })
         logger.info("[Camoufox] ✅ Firefox ready — C++-level fingerprint active.")
+
+    async def rotate_proxy(self) -> None:
+        """Fetch a new proxy and restart the browser session."""
+        async with self._lock:
+            from common.proxy_manager import get_next_proxy
+            new_proxy = await get_next_proxy()
+            if new_proxy:
+                logger.info(f"[Camoufox] ♻️  Rotating proxy to: {new_proxy}")
+                self.current_proxy = new_proxy
+                await self._close_locked()
+                await self._start_locked()
+            else:
+                logger.warning("[Camoufox] No proxies available for rotation.")
 
     async def close(self) -> None:
         """Stop Camoufox and release all resources."""
@@ -193,20 +210,33 @@ class CamoufoxAgent(BaseBrowserAgent):
                 await self._page.goto(url, wait_until="domcontentloaded", timeout=20000)
                 await action_delay_async("navigate")
                 await self._handle_captcha_if_present_locked()
+                
+                # Post-navigation health check (detect immediate blocks)
+                content = await self._page.content()
+                if self.is_block_response(content):
+                    await self.report_proxy_error(self.current_proxy, 403)
+                    await self.rotate_proxy()
+                    return False
+
                 return True
             except Exception as exc:
                 logger.error(f"[Camoufox] Navigation error: {exc}")
+                if self.is_block_response(exc):
+                    await self.report_proxy_error(self.current_proxy, 403)
                 return False
 
     async def get_page_source(self) -> str:
-        """Return raw HTML of the current page."""
+        """Return raw HTML of the current page with caching."""
         async with self._lock:
             if not self._page:
-                return ""
+                return self._last_content
             try:
-                return await self._page.content()
+                content = await self._page.content()
+                if content:
+                    self._last_content = content
+                return self._last_content
             except Exception:
-                return ""
+                return self._last_content
 
     # ─────────────────────────────────────────────────────────────────
     # SEARCH METHODS  (mirrors PatchrightAgent interface)
@@ -225,6 +255,13 @@ class CamoufoxAgent(BaseBrowserAgent):
                 await self._page.goto(url, wait_until="load", timeout=30000)
                 await action_delay_async("read_wait")
 
+                # Detect immediate block
+                page_content = await self._page.content()
+                if self.is_block_response(page_content):
+                    if self.current_proxy:
+                        await self.report_proxy_error(self.current_proxy, 403)
+                    return None
+
                 await self._handle_google_cookies_locked()
                 await self._handle_captcha_if_present_locked()
 
@@ -238,6 +275,9 @@ class CamoufoxAgent(BaseBrowserAgent):
 
             except Exception as exc:
                 logger.error(f"[Camoufox] search_google_ai error: {exc}")
+                if self.is_block_response(exc):
+                    if self.current_proxy:
+                        await self.report_proxy_error(self.current_proxy, 403)
                 return None
 
     async def search_google_ai_mode(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
@@ -265,6 +305,13 @@ class CamoufoxAgent(BaseBrowserAgent):
                 await self._handle_captcha_if_present_locked()
 
                 content = await self._page.content() if self._page else ""
+                
+                # Detect immediate block
+                if content and self.is_block_response(content):
+                    await self.report_proxy_error(self.current_proxy, 403)
+                    await self.rotate_proxy()
+                    return False
+
                 if content and len(content) > 500:
                     logger.info(f"[Camoufox] ✅ submit_google_search — {len(content)} chars.")
                     return True
@@ -272,6 +319,8 @@ class CamoufoxAgent(BaseBrowserAgent):
                 return False
             except Exception as exc:
                 logger.error(f"[Camoufox] submit_google_search error: {exc}")
+                if self.is_block_response(exc):
+                    await self.report_proxy_error(self.current_proxy, 403)
                 return False
 
 
@@ -352,6 +401,9 @@ class CamoufoxAgent(BaseBrowserAgent):
                 return last_text.strip() if last_text else None
             except Exception as exc:
                 logger.error(f"[Camoufox] search_gemini_ai error: {exc}")
+                if self.is_block_response(exc):
+                    if self.current_proxy:
+                        await self.report_proxy_error(self.current_proxy, 403)
                 return None
 
     # ─────────────────────────────────────────────────────────────────
@@ -372,7 +424,10 @@ class CamoufoxAgent(BaseBrowserAgent):
         if not is_captcha_page(content):
             return True
 
-        logger.warning("[Camoufox] CAPTCHA detected (rate-limit, not fingerprint).")
+        # Report proxy error for IP ban if it looks like a hard block
+        if self.is_block_response(content):
+            if self.current_proxy:
+                await self.report_proxy_error(self.current_proxy, 403)
 
         # Try API solver if configured
         try:
@@ -386,8 +441,8 @@ class CamoufoxAgent(BaseBrowserAgent):
             logger.debug(f"[Camoufox] Captcha solver error: {exc}")
 
         # Short wait then let circuit breaker handle it
-        logger.warning("[Camoufox] CAPTCHA unresolved — waiting 10s, then escalating.")
-        await asyncio.sleep(10)
+        logger.warning("[Camoufox] CAPTCHA unresolved — waiting 10s, then rotating.")
+        await self.rotate_proxy()
         return False
 
     async def _handle_google_cookies_locked(self) -> None:

@@ -102,7 +102,11 @@ class CloakAgent(BaseBrowserAgent):
         if not CLOAK_AVAILABLE:
             raise ImportError("cloakbrowser package is not installed. Run 'pip install cloakbrowser'")
 
-        logger.info("[CloakBrowser] Starting Supreme Stealth Browser...")
+        if not self.current_proxy and config.PROXY_ENABLED:
+            from common.proxy_manager import get_next_proxy
+            self.current_proxy = await get_next_proxy()
+
+        logger.info(f"[CloakBrowser] Starting Supreme Stealth Browser (proxy={self.current_proxy or 'direct'})...")
         
         proxy_settings = None
         if config.PROXY_ENABLED and self.current_proxy:
@@ -185,8 +189,20 @@ class CloakAgent(BaseBrowserAgent):
         
         try:
             await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            
+            # Post-navigation health check (detect immediate blocks)
+            page_content = await self.page.content()
+            if self.is_block_response(page_content):
+                logger.warning(f"[Cloak] 🛡️ Block detected on {url}")
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
+                return False
+                
             return True
         except Exception as e:
+            if self.is_block_response(str(e)):
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
             logger.debug(f"[Cloak] Failed to visit {url}: {e}")
             return False
 
@@ -221,6 +237,14 @@ class CloakAgent(BaseBrowserAgent):
             await self.page.goto(url, wait_until="load", timeout=45000)
             await asyncio.sleep(2)
             
+            # Post-navigation health check (detect immediate blocks)
+            page_content = await self.page.content()
+            if self.is_block_response(page_content):
+                logger.warning(f"[Cloak] 🛡️ Block detected in AI Mode content.")
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
+                return None
+            
             if not self.page:
                 return None
             await self._handle_google_cookies_locked()
@@ -231,6 +255,9 @@ class CloakAgent(BaseBrowserAgent):
             return await self._wait_for_ai_response_locked(timeout_sec=25)
             
         except Exception as e:
+            if self.is_block_response(str(e)):
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
             logger.error(f"[Cloak] Search error: {e}")
             return None
 
@@ -272,6 +299,14 @@ class CloakAgent(BaseBrowserAgent):
                     if combined == prev_text and len(combined) > 50:
                         return combined
                     prev_text = combined
+                    
+                    # Final check for block in streamed content
+                    if self.is_block_response(combined):
+                        logger.warning(f"[Cloak] 🛡️ Block detected in streaming content.")
+                        await self.report_proxy_error(self.current_proxy, 403)
+                        await self.rotate_proxy()
+                        return None
+
             except Exception as e:
                 logger.debug(f"[Cloak] AI Stream wait iteration failed: {e}")
                 continue
@@ -291,6 +326,15 @@ class CloakAgent(BaseBrowserAgent):
             if not self.page:
                 return False
             await self.page.goto(config.GOOGLE_URL, wait_until="load")
+            
+            # Detect immediate block
+            page_content = await self.page.content()
+            if self.is_block_response(page_content):
+                logger.warning(f"[Cloak] 🛡️ Block detected on Google Search page.")
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
+                return False
+
             await self._handle_google_cookies_locked()
 
             
@@ -305,10 +349,22 @@ class CloakAgent(BaseBrowserAgent):
                         await search_box.click()
                         await self.page.keyboard.type(query, delay=random.randint(50, 150))
                         await search_box.press("Enter")
+                        
+                        # Post-submission check
+                        await asyncio.sleep(2)
+                        new_content = await self.page.content()
+                        if self.is_block_response(new_content):
+                            await self.report_proxy_error(self.current_proxy, 403)
+                            await self.rotate_proxy()
+                            return False
+                            
                         return True
             except: pass
             return False
         except Exception as e:
+            if self.is_block_response(str(e)):
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
             logger.error(f"[Cloak] Google Search Submission Error: {e}")
             return False
 
@@ -349,9 +405,19 @@ class CloakAgent(BaseBrowserAgent):
             if not self.page:
                 return ""
 
+            page_content = await self.page.content()
+            if self.is_block_response(page_content):
+                logger.warning(f"[Cloak] 🛡️ Block detected on {url}")
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
+                return ""
+
             body_text = await self.page.inner_text("body")
             return f"--- PAGE: {url} ---\n{body_text}"
         except Exception as e:
+            if self.is_block_response(str(e)):
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
             logger.error(f"[Cloak] Crawl error for {url}: {e}")
             return ""
 
@@ -382,6 +448,13 @@ class CloakAgent(BaseBrowserAgent):
             if not self.page:
                 return None
 
+            # Block detection on Gemini start page
+            page_content = await self.page.content()
+            if self.is_block_response(page_content):
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
+                return None
+
             chat_input = None
             for s in GEMINI_INPUT_SELECTORS:
                 chat_input = await self._find_input_locked(s, timeout_ms=5000)
@@ -399,6 +472,9 @@ class CloakAgent(BaseBrowserAgent):
 
             return await self._wait_for_streaming_response_locked(GEMINI_RESPONSE_SELECTORS, stable_wait_sec=4)
         except Exception as e:
+            if self.is_block_response(str(e)):
+                await self.report_proxy_error(self.current_proxy, 403)
+                await self.rotate_proxy()
             logger.error(f"[Cloak-Gemini] Error: {e}")
             return None
 
@@ -460,7 +536,7 @@ class CloakAgent(BaseBrowserAgent):
         """Rotate proxy and restart session."""
         async with self._lock:
             from common.proxy_manager import get_next_proxy
-            new_proxy = get_next_proxy()
+            new_proxy = await get_next_proxy()
             if new_proxy:
                 logger.info(f"[Cloak] ♻️ Rotating proxy to: {new_proxy}")
                 await self._close_locked()

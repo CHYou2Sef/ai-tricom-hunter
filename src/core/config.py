@@ -48,6 +48,14 @@ WORK_DIR = Path(os.getenv("WORK_DIR", str(BASE_DIR / "WORK")))
 CRAWL4AI_HOME = Path(os.getenv("CRAWL4AI_HOME", str(BASE_DIR / ".crawl4ai_cache")))
 os.environ["CRAWL4AI_HOME"] = str(CRAWL4AI_HOME)
 
+# ── Force Chromium crashpad to use a writable directory ──
+XDG_CONFIG_HOME = Path(os.getenv("XDG_CONFIG_HOME", str(WORK_DIR / ".config")))
+os.environ["XDG_CONFIG_HOME"] = str(XDG_CONFIG_HOME)
+
+# ── Force undetected-chromedriver and others to use a writable data directory ──
+XDG_DATA_HOME = Path(os.getenv("XDG_DATA_HOME", str(WORK_DIR / ".local/share")))
+os.environ["XDG_DATA_HOME"] = str(XDG_DATA_HOME)
+
 # The entry point for ALL raw files. Place your dirty/new Excel files here.
 INCOMING_DIR = Path(os.getenv("INCOMING_DIR", str(WORK_DIR / "INCOMING")))
 
@@ -473,6 +481,7 @@ def find_cloak_binary() -> str:
         except: pass
 
     # 3. Direct cache lookup (standard installation paths)
+    import glob
     home = Path.home()
     candidates = [
         home / ".cloakbrowser" / "chrome-linux" / "chrome",
@@ -481,6 +490,12 @@ def find_cloak_binary() -> str:
         WORK_DIR / "cloakbrowser" / "chrome-linux" / "chrome", # Project-local writable cache
     ]
     
+    # Add glob candidates for versioned directories
+    for base_dir in [home / ".cloakbrowser", home / ".cache" / "cloakbrowser", WORK_DIR / "cloakbrowser"]:
+        if base_dir.exists():
+            for match in glob.glob(str(base_dir / "chromium-*" / "chrome")):
+                candidates.append(Path(match))
+
     # 3b. Check custom cache dir from env
     custom_cache = os.environ.get("CLOAKBROWSER_CACHE_DIR")
     if custom_cache:

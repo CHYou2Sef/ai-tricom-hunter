@@ -115,17 +115,18 @@ class HybridAutomationEngine:
     
     def __init__(self, worker_id: int = 0):
         self._worker_id = worker_id
-        self._tier0: Optional[object] = None   # SeleniumAgent      (Legacy/Benchmark)
+        from agents.base_agent import BaseBrowserAgent # Local import to avoid circular dependency
+        self._tier0: Optional[BaseBrowserAgent] = None   # SeleniumAgent      (Legacy/Benchmark)
         # Tier 1 slot removed — Scrapy is now a post-discovery bonus, not a waterfall tier.
-        self._tier2: Optional[object] = None   # SeleniumBaseAgent  (UC Driver) ⭐ PRIMARY
-        self._tier3: Optional[object] = None   # BotasaurusAgent    (Anti-detect)
-        self._tier4: Optional[object] = None   # CloakAgent         (Supreme Stealth)
-        self._tier5: Optional[object] = None   # NodriverAgent      (Chrome CDP)
-        self._tier6: Optional[object] = None   # Crawl4AIAgent      (Chrome managed)
-        self._tier7: Optional[object] = None   # CamoufoxAgent      (Firefox anti-detect)
-        self._tier8: Optional[object] = None   # FirecrawlAgent     (Premium managed)
-        self._tier9: Optional[object] = None   # JinaAgent          (High-speed Markdown)
-        self._tier10: Optional[object] = None  # CrawleeAgent       (Industrial crawler)
+        self._tier2: Optional[BaseBrowserAgent] = None   # SeleniumBaseAgent  (UC Driver) ⭐ PRIMARY
+        self._tier3: Optional[BaseBrowserAgent] = None   # BotasaurusAgent    (Anti-detect)
+        self._tier4: Optional[BaseBrowserAgent] = None   # CloakAgent         (Supreme Stealth)
+        self._tier5: Optional[BaseBrowserAgent] = None   # NodriverAgent      (Chrome CDP)
+        self._tier6: Optional[BaseBrowserAgent] = None   # Crawl4AIAgent      (Chrome managed)
+        self._tier7: Optional[BaseBrowserAgent] = None   # CamoufoxAgent      (Firefox anti-detect)
+        self._tier8: Optional[BaseBrowserAgent] = None   # FirecrawlAgent     (Premium managed)
+        self._tier9: Optional[BaseBrowserAgent] = None   # JinaAgent          (High-speed Markdown)
+        self._tier10: Optional[BaseBrowserAgent] = None  # CrawleeAgent       (Industrial crawler)
         self._current_tier = 2
 
         # ── Circuit Breaker state ─────────────────────────────────────────────
@@ -139,7 +140,7 @@ class HybridAutomationEngine:
         self.current_row_index: int = 0             # Track current row for telemetry
         self.last_successful_tier_used: Optional[int] = None # For per-row export
 
-        self._stats: Dict[int, Dict[str, Any]] = {
+        self._stats: Dict[Any, Dict[str, Any]] = {
             0:  {"attempts": 0, "successes": 0, "total_ms": 0},
             # Scrapy bonus step tracked separately
             "scrapy_bonus": {"attempts": 0, "successes": 0, "total_ms": 0},
@@ -565,13 +566,7 @@ class HybridAutomationEngine:
 
                 exc_str = str(exc).lower()
                 # Network/WAF signals: treat as genuine failures worthy of CB
-                _NETWORK_SIGNALS = (
-                    "captcha", "waf", "ip_ban", "forbidden", "429",
-                    "too many requests", "rate limit", "access denied",
-                    "err_tunnel", "err_proxy", "connection refused",
-                    "timeout", "ssl", "certificate",
-                )
-                _is_network_error = any(sig in exc_str for sig in _NETWORK_SIGNALS)
+                _is_network_error = agent.is_block_response(exc)
 
                 # Determine interruption reason for telemetry
                 if _is_code_error:

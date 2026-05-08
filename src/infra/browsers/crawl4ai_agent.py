@@ -51,6 +51,7 @@ class Crawl4AIAgent(BaseBrowserAgent):
     def __init__(self, worker_id: int = 0):
         super().__init__(worker_id)
         self._crawler = None
+        self.current_proxy: Optional[str] = None
         self._lock = asyncio.Lock()
         self._last_health_check = 0.0
         # Contract: get_page_source() must never return None.
@@ -107,11 +108,23 @@ class Crawl4AIAgent(BaseBrowserAgent):
             raise RuntimeError("crawl4ai is not installed.")
 
         logger.info("[Crawl4AI] 🕷️ Initialising Tier 3 crawler...")
+        
+        if config.PROXY_ENABLED:
+            if not self.current_proxy:
+                from common.proxy_manager import get_next_proxy
+                self.current_proxy = await get_next_proxy()
+            else:
+                logger.debug(f"[Crawl4AI] Re-using existing proxy: {self.current_proxy}")
+
         browser_args = ["--no-sandbox", "--disable-setuid-sandbox"] if os.getuid() == 0 else []
-        browser_cfg = BrowserConfig(headless=True, extra_args=browser_args)
+        browser_cfg = BrowserConfig(
+            headless=getattr(config, "HEADLESS", True), 
+            extra_args=browser_args,
+            proxy=self.current_proxy
+        )
         self._crawler = AsyncWebCrawler(config=browser_cfg)
         await self._crawler.__aenter__()
-        alert("INFO", "Crawl4AI session started")
+        alert("INFO", "Crawl4AI session started", {"proxy": self.current_proxy or "direct"})
         logger.info("[Crawl4AI] ✅ Ready.")
 
     async def close(self) -> None:
@@ -166,23 +179,40 @@ class Crawl4AIAgent(BaseBrowserAgent):
                     bypass_cache=True,
                 )
 
-
                 if result.success and result.markdown:
                     content = result.markdown.strip() or ""
+                    
+                    # Post-navigation health check (detect immediate blocks)
+                    if self.is_block_response(content):
+                        await self.report_proxy_error(self.current_proxy, 403)
+                        await self.rotate_proxy()
+                        if attempt < len(backoff_delays):
+                            await asyncio.sleep(delay)
+                            continue
+                        return None
 
                     logger.info(f"[Crawl4AI] ✅ Got {len(content)} chars from {url}")
                     return content
 
-                if result.status_code in (429, 403):
-                    alert("WARN", f"Crawl4AI rate-limited (HTTP {result.status_code})", {"url": url, "retry_in": f"{delay}s"})
+                if result.status_code in (429, 403, 402, 401) or self.is_block_response(result.markdown or ""):
+                    alert("WARN", f"Crawl4AI rate-limited or blocked (HTTP {result.status_code})", {"url": url, "retry_in": f"{delay}s"})
+                    
+                    status_to_report = result.status_code if result.status_code in (429, 403, 402, 401) else 403
+                    await self.report_proxy_error(self.current_proxy, status_to_report)
+                    
+                    await self.rotate_proxy()
                     await asyncio.sleep(delay)
                     continue
 
-                logger.warning(f"[Crawl4AI] Empty result for {url} (status={result.status_code})")
+                logger.warning(f"[Crawl4AI] Empty or failed result for {url} (status={result.status_code})")
                 return None
 
             except Exception as exc:
                 logger.error(f"[Crawl4AI] Attempt {attempt} failed: {exc}")
+                if self.is_block_response(exc):
+                    await self.report_proxy_error(self.current_proxy, 403)
+                    await self.rotate_proxy()
+                
                 if attempt < len(backoff_delays):
                     await asyncio.sleep(delay)
                     continue
@@ -255,8 +285,17 @@ class Crawl4AIAgent(BaseBrowserAgent):
         return False
 
     async def rotate_proxy(self) -> None:
-        """Crawl4AI proxy rotation logic (Stub)."""
-        pass
+        """Fetch a new proxy and restart the browser session."""
+        async with self._lock:
+            from common.proxy_manager import get_next_proxy
+            new_proxy = await get_next_proxy()
+            if new_proxy:
+                logger.info(f"[Crawl4AI] ♻️  Rotating proxy to: {new_proxy}")
+                self.current_proxy = new_proxy
+                await self._close_locked()
+                await self._start_locked()
+            else:
+                logger.warning("[Crawl4AI] No proxies available for rotation.")
 
 
     async def goto_url(self, url: str) -> bool:

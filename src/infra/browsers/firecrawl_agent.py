@@ -63,8 +63,14 @@ class FirecrawlAgent(BaseBrowserAgent):
         logger.info(f"[Firecrawl] Navigating to: {url}")
         result = await self.scrape(url, params=params)
         if result and isinstance(result, dict):
+            content = result.get('markdown') or result.get('content') or ""
+            if self.is_block_response(content):
+                logger.warning(f"[Firecrawl] 🛡️ Block detected on {url}")
+                await self.report_proxy_error("firecrawl_api", 403)
+                return False
+                
             async with self._lock:
-                self._last_content = result.get('markdown') or result.get('content') or ""
+                self._last_content = content
                 return bool(self._last_content)
         return False
 
@@ -79,9 +85,12 @@ class FirecrawlAgent(BaseBrowserAgent):
             return result
         except Exception as e:
             err_msg = str(e)
-            if "Insufficient credits" in err_msg or "Payment Required" in err_msg:
+            if "Insufficient credits" in err_msg or "Payment Required" in err_msg or "402" in err_msg:
                 logger.error("[Firecrawl] 🛑 CRÉDITS ÉPUISÉS. Impossible de scraper.")
+                await self.report_proxy_error("firecrawl_api", 402)
                 self.enabled = False
+            elif "403" in err_msg or "blocked" in err_msg.lower():
+                await self.report_proxy_error("firecrawl_api", 403)
             else:
                 logger.error(f"[Firecrawl] Scrape failed for {url}: {e}")
             return None
@@ -179,7 +188,12 @@ class FirecrawlAgent(BaseBrowserAgent):
                 
                 async with self._lock:
                     self._last_content = "\n\n".join(markdown_results)
-                    return self._last_content
+                    
+                if self.is_block_response(self._last_content):
+                    logger.warning("[Firecrawl] 🛡️ Block detected in search results.")
+                    return None
+                    
+                return self._last_content
             return None
         except Exception as e:
             err_msg = str(e)
