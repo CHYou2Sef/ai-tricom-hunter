@@ -54,7 +54,11 @@ RUN rm -rf /opt/ms-playwright/firefox-* \
     find /usr/local/lib/python3.10/site-packages -name "examples" -type d -exec rm -rf {} + && \
     find /usr/local/lib/python3.10/site-packages -name "__pycache__" -type d -exec rm -rf {} + && \
     find /usr/local/lib/python3.10/site-packages -name "*.pyi" -delete && \
-    find /usr/local/lib/python3.10/site-packages -name "*.so" -exec strip --strip-unneeded {} + || true
+    find /usr/local/lib/python3.10/site-packages -name "*.so" \
+        ! -path "*/numpy/*" \
+        ! -path "*/pandas/*" \
+        ! -path "*/scipy/*" \
+        -exec strip --strip-unneeded {} + || true
 
 # Guarantee existence of copied directories to prevent COPY failures
 RUN mkdir -p /root/.cache/cloakbrowser /root/.cloakbrowser /root/.seleniumbase /root/.cache/seleniumbase

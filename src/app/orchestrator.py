@@ -14,7 +14,6 @@ import random
 import asyncio
 from typing import List, Optional
 from pathlib import Path
-import pandas as pd
 
 from core import config
 from domain.excel.reader import ExcelRow, read_excel
@@ -67,8 +66,15 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: Fi
     fusion_path = out_dir / f"{input_folder}_{date_str}.xlsx"
     
     # 1. Load Fusion Data for real-value synchronization
+    # pandas/numpy are heavy optional deps; make this resilient in minimal Docker images.
     existing_data = {}
-    if fusion_path.exists():
+    pd = None
+    try:
+        import pandas as pd  # noqa: F401
+    except Exception as e:
+        logger.warning(f"[Agent] pandas import failed; skipping fusion sync. Details: {e}")
+
+    if fusion_path.exists() and pd is not None:
         try:
             df_sync = pd.read_excel(fusion_path, dtype=str)
             if "__fingerprint" in df_sync.columns:
@@ -110,8 +116,9 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: Fi
         # Priority 2: Check if already in Daily Fusion (Global Sync)
         if fp in existing_data:
             res = existing_data[fp]
-            valid_p = normalize_phone(res.get("phone")) if pd.notna(res.get("phone")) else None
-            valid_a = normalize_phone(res.get("agent_phone")) if pd.notna(res.get("agent_phone")) else None
+            # pandas may be unavailable; existing_data entries are only created when pd is available
+            valid_p = normalize_phone(res.get("phone")) if res.get("phone") is not None else None
+            valid_a = normalize_phone(res.get("agent_phone")) if res.get("agent_phone") is not None else None
             
             if valid_p or valid_a:
                 r.phone = valid_p
@@ -266,7 +273,10 @@ async def process_file_async(filepath: str) -> None:
     get_telemetry().finalize()
 
 async def finalize_file_processing(
-    rows: List[ExcelRow], original_filepath: str, tracker: Optional[PerformanceTracker] = None, progress: FileProgressTracker = None
+    rows: List[ExcelRow],
+    original_filepath: str,
+    tracker: Optional[PerformanceTracker] = None,
+    progress: Optional[FileProgressTracker] = None,
 ) -> None:
     orig_path = Path(original_filepath)
     success_rows  = [r for r in rows if r.status == "DONE"]

@@ -5,7 +5,7 @@ services:
   # Manages Layer 0 (Ingest), Layer 1 (Phone Hunter), and Layer 2 (Social Fallback)
   supervisor:
     build: .
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-youssef}/ai_tricom_hunter:latest
+    image: ${GITHUB_REPOSITORY_OWNER:-youssef}/ai_tricom_hunter:v1.0.1
     container_name: tricom_supervisor
     restart: unless-stopped
     # 🏎️ Industrial Optimisations

@@ -566,7 +566,12 @@ class HybridAutomationEngine:
 
                 exc_str = str(exc).lower()
                 # Network/WAF signals: treat as genuine failures worthy of CB
-                _is_network_error = agent.is_block_response(exc)
+                # `agent` can be None in some exception paths; guard to avoid
+                # "NoneType has no attribute is_block_response".
+                if agent is None or not hasattr(agent, "is_block_response"):
+                    _is_network_error = False
+                else:
+                    _is_network_error = bool(agent.is_block_response(exc))
 
                 # Determine interruption reason for telemetry
                 if _is_code_error:
@@ -797,9 +802,10 @@ class HybridAutomationEngine:
     async def extract_universal_data(self, use_browser: bool = False) -> dict:
         return await self._execute_with_waterfall("extract_universal_data", use_browser=use_browser)
 
+
     async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
-        """AI Mode search via browser waterfall."""
-        return await self._execute_with_waterfall("search_google_ai_mode", prompt, ai_mode_url=ai_mode_url)
+            """AI Mode search via browser waterfall."""
+            return await self._execute_with_waterfall("search_google_ai_mode", prompt, ai_mode_url=ai_mode_url)
 
     async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """Legacy AI search fallback."""

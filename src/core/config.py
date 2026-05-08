@@ -37,7 +37,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # ── SINGLETON FLAGS ──
-DOCKER_ENV = os.getenv("DOCKER_ENV", "false").lower() == "true"
+DOCKER_ENV = os.getenv("DOCKER_ENV", "true").lower() == "true"
 
 # ── CENTRALIZED WORK DIRECTORY ──
 # Everything operational (watching, outputs, archives) happens here.
@@ -68,14 +68,11 @@ INPUT_OTHER_DIR = WORK_DIR / "OTHERS"
 
 # ── LIVE OUTPUTS ───────────────────────────────────────────────
 OUTPUT_ROOT    = WORK_DIR / "ARCHIVE"
-OUTPUT_RS_ADR  = OUTPUT_ROOT / "RS_Adr"
-OUTPUT_SIR_ADR = OUTPUT_ROOT / "Sir_Adr"
-OUTPUT_DEFAULT = OUTPUT_ROOT / "Results"
 
 # ── FINAL ARCHIVES ─────────────────────────────────────────────
-ARCHIVE_BACKUP_DIR = WORK_DIR / "ARCHIVE" / "BACKUP"
-OUTPUT_SUCCEED_DIR = WORK_DIR / "ARCHIVE" / "SUCCEED"
-OUTPUT_FAILED_DIR  = WORK_DIR / "ARCHIVE" / "FAILED"
+ARCHIVE_BACKUP_DIR = OUTPUT_ROOT / "BACKUP"
+OUTPUT_SUCCEED_DIR = OUTPUT_ROOT / "SUCCEED"
+OUTPUT_FAILED_DIR  = OUTPUT_ROOT / "FAILED"
 CHECKPOINTS_DIR    = WORK_DIR / "CHECKPOINTS"
 ARCHIVED_CHECKPOINTS_DIR = CHECKPOINTS_DIR / "archived_json"
 
@@ -103,9 +100,9 @@ _safe_mkdir_cfg(LOG_DIR)
 STATUS_COLUMN_NAME = os.getenv("STATUS_COLUMN_NAME", "Etat_IA")
 
 def get_output_dir(input_folder_name: str) -> Path:
-    """Returns {WORK_DIR}/ARCHIVE/{input_folder_name}"""
+    """Returns {WORK_DIR}/{input_folder_name}"""
     from common.fs import safe_mkdir
-    path = OUTPUT_ROOT / input_folder_name
+    path = WORK_DIR / input_folder_name
     safe_mkdir(path)
     return path
 
@@ -227,9 +224,9 @@ NAVIGATOR_PLATFORM_POOL = ["Win32", "MacIntel", "Linux x86_64"]
 # All values in SECONDS.
 ACTION_DELAY_PROFILES = {
     "click":      {"mean": 0.40,  "std": 0.15, "min": 0.20, "max": 1.00},
-    "type_char":  {"mean": 0.08,  "std": 0.03, "min": 0.04, "max": 0.20},
+    "type_char":  {"mean": 0.08,  "std": 0.03, "min": 0.04, "max": 0.30},
     "submit":     {"mean": 1.50,  "std": 0.50, "min": 0.80, "max": 3.00},
-    "navigate":   {"mean": 2.50,  "std": 0.80, "min": 1.00, "max": 5.00},
+    "navigate":   {"mean": 2.50,  "std": 0.80, "min": 1.00, "max": 6.00},
     "scroll":     {"mean": 0.30,  "std": 0.10, "min": 0.10, "max": 0.80},
     "read_wait":  {"mean": 4.00,  "std": 1.50, "min": 2.00, "max": 9.00},
 }
@@ -772,6 +769,13 @@ FAKE_PHONE_BLOCKLIST: set = {
     # Numéros techniques ou récurrents signalés
     "0917189833",   # Numéro technique/répertoire récurrent
     "0742136299",   # Numéro parasitaire répertoire (Direct Service)
+    "0714285714",   # Numéro parasitaire répertoire (Direct Service)
+    "0612136299",   # Numéro parasitaire répertoire (Direct Service)
+    "0801150323",   # Numéro parasitaire répertoire (Direct Service)
+    "0569312693",   # Numéro parasitaire répertoire (Direct Service)
+    "0399332293",   # Numéro parasitaire répertoire (Direct Service)
+    "0157425531",   # Numéro parasitaire répertoire (Direct Service)
+    "0756338884",   # Numéro parasitaire répertoire (Direct Service)
 
     # Préfixes exclusivement réservés au démarchage téléphonique (à bloquer)
     # Source: Arcep, depuis le 1er janvier 2023
