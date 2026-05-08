@@ -1,56 +1,84 @@
-# Industrial AI Hunter Stack
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  docker-compose.yml — AI Tricom Hunter Industrial Stack              ║
+# ║  Optimized for: Windows Host 8 GB RAM + HDD                         ║
+# ║  Golden Path: SeleniumBase ► Nodriver ► CloakBrowser ► Crawl4AI     ║
+# ╚══════════════════════════════════════════════════════════════════════╝
 
 services:
-  # 🤖 3-Layer Autonomous Supervisor
-  # Manages Layer 0 (Ingest), Layer 1 (Phone Hunter), and Layer 2 (Social Fallback)
+  # ── 🤖 3-Layer Autonomous Supervisor ────────────────────────────────
+  # Manages Layer 0 (Ingest), Layer 1 (Phone Hunter), Layer 2 (Social)
   supervisor:
-    build: .
-    image: ${GITHUB_REPOSITORY_OWNER:-youssef}/ai_tricom_hunter:v1.0.1
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${GITHUB_REPOSITORY_OWNER:-youssef}/ai_tricom_hunter:v1.1.0-golden
     container_name: tricom_supervisor
     restart: unless-stopped
-    # 🏎️ Industrial Optimisations
-    shm_size: '2gb'           # Prevents Chrome "Aw, Snap!" crashes due to low shared memory
-    init: true               # Correctly cleans up zombie browser processes
-    ipc: host                # Allow zero-copy memory access for faster rendering
-    
+
+    # ── Industrial Chrome/Playwright settings ──
+    shm_size: '2gb'   # Prevents Chrome "Aw, Snap!" crashes (shared memory)
+    init: true        # Properly cleans up zombie browser processes
+    ipc: host         # Zero-copy memory access for faster rendering
+
+    # ── Resource caps (Windows 8 GB host, 2 workers max) ───────────────
+    # Supervisor + 2 Chrome instances ≈ 3.5–4 GB peak
+    # Leaving ~4 GB for the Windows host OS + Ollama
+    mem_limit: 4g
+    mem_reservation: 1g
+    # Limit to 4 CPU cores (leave headroom for Windows OS)
+    cpus: "4.0"
+
     environment:
       - CHROMIUM_BINARY_PATH=/usr/bin/google-chrome-stable
       - DOCKER_ENV=true
       - PYTHONPATH=/app/src
       - LAYER0_ENABLED=true
       - LAYER2_ENABLED=true
+      # Golden path explicit overrides (belt-and-suspenders with .env.prod)
+      - PERFORMANCE_MODE=full
+      - SELENIUM_ENABLED=false
+      - CAMOUFOX_ENABLED=false
+      - FIRECRAWL_ENABLED=false
+      - JINA_ENABLED=false
+      - CRAWLEE_ENABLED=false
+      - BOTASAURUS_ENABLED=false
 
     env_file:
       - .env.prod
+
     volumes:
       - ${HOST_WORK_DIR:-./WORK}:/app/WORK:Z
       - browser_profiles:/app/WORK/browser_profiles
       - ${HOST_LOG_DIR:-./logs}:/app/logs:Z
       - ./src:/app/src:ro,Z
+      - ./run:/app/run:ro,Z
       - ./agent.yaml:/app/agent.yaml:ro,Z
       - ./SOUL.md:/app/SOUL.md:ro,Z
       - ./RULES.md:/app/RULES.md:ro,Z
-    
+
     command: python run/supervisor.py
-    
+
     ports:
-      - "8000:8000"           # Expose API for Monitoring/Prometheus (Metrics served via supervisor)
-    
+      - "8000:8000"  # FastAPI metrics + health endpoint
+
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('8.8.8.8', 53)); s.close()"]
+      test: ["CMD", "python", "-c",
+             "import socket; s=socket.socket(); s.connect(('8.8.8.8',53)); s.close()"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
-    
+      start_period: 60s   # Increased: allow time for Chromium first-launch
+
     logging:
       driver: "json-file"
       options:
         max-size: "20m"
         max-file: "3"
 
-  # ── Metrics Storage ───────────────────────────────────────────────
+  # ── Metrics Storage (monitoring profile — dev only) ───────────────
+  # Start with: docker compose --profile monitoring up
   prometheus:
+    profiles: ["monitoring"]
     image: prom/prometheus:latest
     container_name: tricom_prometheus
     user: root
@@ -60,16 +88,24 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'   # Limit disk usage on HDD
     ports:
       - "9091:9090"
     restart: unless-stopped
+    # Prometheus is lightweight
+    mem_limit: 512m
+    mem_reservation: 128m
 
-  # ── Visualisation Dashboard ───────────────────────────────────────
+  # ── Visualisation Dashboard (monitoring profile — dev only) ────────
   grafana:
+    profiles: ["monitoring"]
     image: grafana/grafana:latest
     container_name: tricom_grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin  # Change this in production!
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # Reduce Grafana memory footprint
+      - GF_SERVER_ENABLE_GZIP=true
     ports:
       - "3000:3000"
     volumes:
@@ -77,6 +113,8 @@ services:
     depends_on:
       - prometheus
     restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 128m
 
 volumes:
   prometheus_data:

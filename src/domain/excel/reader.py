@@ -17,14 +17,42 @@
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
-import pandas as pd
 import os
 import json
 import re
 import asyncio
+import sys
 from typing import List, Optional, Tuple
 
+# Pandas import can fail in containerized setups if Python is accidentally
+# running from/inside a NumPy source tree (numpy error: "do not import from its source directory").
+# Mitigation: sanitize sys.path so the current working directory/repo root
+# are not used for module resolution during the pandas/numpy import.
+def _safe_import_pandas():
+    # Remove '' and cwd-like entries that can shadow site-packages
+    cwd = os.getcwd()
+    to_remove = set()
+    for p in sys.path:
+        if p in ("", cwd, os.path.abspath(cwd)):
+            to_remove.add(p)
+    if cwd:
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        to_remove.add(repo_root)
+    if to_remove:
+        sys.path = [p for p in sys.path if p not in to_remove]
+
+    try:
+        import pandas as _pd  # type: ignore
+        return _pd
+    except Exception as e:
+        raise ImportError(
+            "Failed to import pandas (and underlying numpy). "
+            "This container runtime may be misconfigured (numpy import path shadowing). "
+            f"Original error: {e}"
+        ) from e
+
 from core import config
+
 from common.column_detector import detect_columns, validate_mapping
 from common.llm_parser import detect_columns_with_llm
 from core.logger import get_logger
@@ -165,6 +193,8 @@ class ExcelRow:
 
 def read_excel(filepath: str) -> Tuple[List[ExcelRow], dict]:
     """Pandas-based universal file reader."""
+    pd = _safe_import_pandas()
+
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"File not found: {filepath}")
 
@@ -177,7 +207,8 @@ def read_excel(filepath: str) -> Tuple[List[ExcelRow], dict]:
         elif ext in [".xlsx", ".xls"]:
             df = pd.read_excel(filepath, dtype=str)
         elif ext == ".json":
-            df = pd.read_json(filepath, dtype=str)
+            # Avoid dtype=str (pandas typing overload mismatch across versions)
+            df = pd.read_json(filepath)
         else:
             raise ValueError(f"Unsupported format: {ext}")
     except Exception as e:
@@ -205,13 +236,22 @@ def read_excel(filepath: str) -> Tuple[List[ExcelRow], dict]:
             validation = validate_mapping(mapping)
 
     rows: List[ExcelRow] = []
-    for idx, row_series in df.iterrows():
+    for raw_idx, row_series in df.iterrows():
+        # Ensure deterministic int row index even if pandas index type isn't int.
+        # Avoid calling int() directly on unknown pandas index types (static typing warnings).
+        row_num: int
+        try:
+            raw_idx_str = str(raw_idx).strip()
+            # If it's numeric, parse; otherwise fallback.
+            row_num = int(raw_idx_str) if raw_idx_str.isdigit() else len(rows)
+        except Exception:
+            row_num = len(rows)
         raw_dict = row_series.to_dict()
         statut_cols = [c for c in headers if any(k in c.lower() for k in ["statut", "état", "etat"])]
         if any("radi" in str(raw_dict.get(sc, "")).lower() for sc in statut_cols):
             continue
 
-        excel_row = ExcelRow(raw=raw_dict, row_index=int(idx) + 2, mapping=mapping)
+        excel_row = ExcelRow(raw=raw_dict, row_index=row_num + 2, mapping=mapping)
         if excel_row.siren:
             excel_row.siren = re.sub(r'\D', '', str(excel_row.siren)).zfill(9)
             if len(excel_row.siren) > 9: excel_row.siren = excel_row.siren[:9]

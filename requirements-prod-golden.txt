@@ -1,0 +1,94 @@
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  requirements-prod-golden.txt                                            ║
+# ║  GOLDEN PATH — PERFORMANCE_MODE=full → [Tier2, Tier5, Tier4, Tier6]     ║
+# ║                                                                          ║
+# ║  Active Engines:                                                         ║
+# ║    Tier 2  (SeleniumBase UC)   ⭐ PRIMARY stealth browser               ║
+# ║    Tier 4  (CloakBrowser)      🕵️  Supreme Stealth, C++ patched         ║
+# ║    Tier 5  (Nodriver)          🟢 CDP-only, no WebDriver fingerprint     ║
+# ║    Tier 6  (Crawl4AI)          🟡 Managed JS render (via patchright)    ║
+# ║    Scrapy  (Sniper bonus)      ⚡ Fast HTTP post-discovery extraction   ║
+# ║                                                                          ║
+# ║  Intentionally EXCLUDED (disabled via .env.prod):                        ║
+# ║    Tier 0  (Legacy Selenium / undetected-chromedriver) SELENIUM_ENABLED=false   ║
+# ║    Tier 3  (Botasaurus)        NOT in full-mode waterfall [2,5,4,6]     ║
+# ║    Tier 7  (Camoufox)         CAMOUFOX_ENABLED=false                    ║
+# ║    Tier 8  (Firecrawl)        FIRECRAWL_ENABLED=false                   ║
+# ║    Tier 9  (Jina Reader)      JINA_ENABLED=false                        ║
+# ║    Tier 10 (Crawlee)          CRAWLEE_ENABLED=false                     ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+# ── Core Data Processing & Excel ──────────────────────────────────────────
+pandas>=2.2.0
+openpyxl>=3.1.2
+xlsxwriter>=3.1.9
+
+# ── Tier 2: SeleniumBase UC Driver (PRIMARY ⭐) ────────────────────────────
+# selenium is a transitive dependency — pinned here for stability
+selenium>=4.18.0
+seleniumbase>=4.24.0
+
+# ── Tier 4: CloakBrowser (Supreme Stealth, C++ patched Chromium) ──────────
+cloakbrowser>=0.1.0
+
+# ── Tier 5: Nodriver (Chrome CDP-only, zero WebDriver fingerprint) ─────────
+nodriver>=0.34
+# FIX: websockets 14+ removed legacy protocol module required by uvicorn[standard].
+# nodriver requires >=10; uvicorn[standard] requires <14. This range satisfies both.
+websockets>=12.0,<14.0
+
+# ── Tier 6: Crawl4AI (managed JS rendering, uses patchright internally) ────
+patchright>=1.51.0
+crawl4ai>=0.4.0
+
+# ── Scrapy Sniper (post-discovery bonus — fast HTTP phone extraction) ───────
+scrapy>=2.11.0
+crochet>=2.1.1
+
+# ── Text Extraction & Parsing ─────────────────────────────────────────────
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+selectolax>=0.3.21
+phonenumbers>=8.13.0
+
+# ── Async HTTP (used by Nodriver, Jina fallback, Layer 2) ─────────────────
+httpx[http2]>=0.27.0
+
+# ── 24/7 Surveillance & Async I/O ─────────────────────────────────────────
+watchdog>=4.0.0
+aiofiles>=23.2.1
+
+# ── AI & LLM (Google Gemini extraction engine) ────────────────────────────
+google-generativeai>=0.4.0
+
+# ── Utility & Config ──────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+colorama>=0.4.6
+
+# ── REST API & Observability Stack ────────────────────────────────────────
+# NOTE: prometheus-fastapi-instrumentator stays even though Prometheus is
+# now opt-in (--profile monitoring). The supervisor exposes /metrics at :8000
+# at all times; in prod it is simply not scraped. Removing it would break
+# the supervisor import. structlog + opentelemetry-api/sdk provide in-process
+# tracing and structured logs which are valuable regardless of whether an
+# external collector is running.
+#
+# REMOVED: opentelemetry-exporter-otlp — requires a live OTLP collector
+# (Jaeger / Grafana Tempo). No such collector runs in prod-only mode.
+fastapi>=0.110.0
+uvicorn[standard]>=0.35.0
+prometheus-fastapi-instrumentator>=7.0.0
+structlog>=24.1.0
+opentelemetry-api>=1.24.0
+opentelemetry-sdk>=1.24.0
+opentelemetry-instrumentation-fastapi>=0.45b0
+
+# ── LangGraph / LangChain — 3-Layer Autonomous Pipeline ──────────────────
+# Layer 0 (Ingest LangGraph) + Layer 2 (Social URL Fallback LangGraph)
+langgraph>=0.2.0
+langchain>=0.2.0
+langchain-core>=0.2.0
+
+# ── Layer 2 Social Tools ──────────────────────────────────────────────────
+# Public Facebook page scraping (no login, no API key required)
+facebook-scraper>=0.2.59

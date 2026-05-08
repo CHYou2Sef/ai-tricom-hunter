@@ -1,15 +1,20 @@
-# Virtual Environments
+# ── Virtual Environments ─────────────────────────────────────────────
 venv/
 .venv/
 env/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# IDEs
+# ── IDEs & Editor configs ─────────────────────────────────────────────
 .vscode/
 .idea/
+*.swp
+*.swo
+.DS_Store
 
-# Local Data and Logs
+# ── Local Data, Logs, and Runtime Artifacts ──────────────────────────
 WORK/
 docs/
 logs/
@@ -20,28 +25,51 @@ output/
 downloaded_files/
 error_logs/
 scratch/
+
+# ── Secrets: NEVER bake into image ───────────────────────────────────
 .env
 .env.prod
+.env.local
 *.log
 
-# Git
+# ── Git ───────────────────────────────────────────────────────────────
 .git/
 .gitignore
+.gitattributes
 
-# Documentation testing
+# ── Documentation & Reports ───────────────────────────────────────────
 *.pdf
 *.tex
-*.log
+*.md
+!README.md
+!SOUL.md
+!RULES.md
+!AGENTS.md
 
-# CI/CD & Orchestration (Not needed at runtime)
+# ── CI/CD & Dev Tooling (not needed at runtime) ───────────────────────
 tests/
 .pytest_cache/
 k8s/
 .github/
-.vscode/
-.idea/
 .claude/
 .agents/
+.code-review-graph/
+.code-review-graphignore
 
-# Specific Exclusions
+# ── Dev-only scripts ──────────────────────────────────────────────────
+scripts/benchmark_engines.py
+scripts/setup_dev.sh
+scripts/security_dast.py
+scripts/security_sast.py
+scripts/resilient_agent_demo.py
+scripts/test_architecture.sh
+
+# ── Python cache & build artefacts ───────────────────────────────────
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+
+# ── Debugger agent (not needed in production) ─────────────────────────
 src/agents/debugger/

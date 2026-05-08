@@ -18,10 +18,65 @@
 
 import os
 import datetime
-import pandas as pd
-import numpy as np
+from typing import Any
+
+pd: Any = None  # lazy pandas import
+np: Any = None  # lazy numpy import (optional)
+
+def _safe_import_pandas():
+    import os as _os, sys as _sys
+
+    def _sanitize_sys_path():
+        cwd = _os.getcwd()
+        to_remove = set()
+        for p in list(_sys.path):
+            if p in ("", cwd, _os.path.abspath(cwd)):
+                to_remove.add(p)
+        if cwd:
+            repo_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", ".."))
+            to_remove.add(repo_root)
+        if to_remove:
+            _sys.path = [p for p in _sys.path if p not in to_remove]
+
+    _sanitize_sys_path()
+
+    try:
+        import pandas as _pd  # type: ignore
+        return _pd
+    except Exception as e:
+        raise ImportError(
+            "Failed to import pandas in container (pandas/numpy import path shadowing). "
+            f"Original error: {e}"
+        ) from e
+
+
+def _safe_import_numpy():
+    import os as _os, sys as _sys
+
+    def _sanitize_sys_path():
+        cwd = _os.getcwd()
+        to_remove = set()
+        for p in list(_sys.path):
+            if p in ("", cwd, _os.path.abspath(cwd)):
+                to_remove.add(p)
+        if cwd:
+            repo_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", ".."))
+            to_remove.add(repo_root)
+        if to_remove:
+            _sys.path = [p for p in _sys.path if p not in to_remove]
+
+    _sanitize_sys_path()
+
+    try:
+        import numpy as _np  # type: ignore
+        return _np
+    except Exception:
+        # numpy is only used for optional operations; allow writer to run if pandas works.
+        return None
+
+
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 from core import config
 from core.logger import get_logger
 from common.fs import safe_mkdir, safe_touch
@@ -30,6 +85,11 @@ from domain.json.jsonl_handler import JSONLWriter, JSONLReader
 logger = get_logger(__name__)
 
 def _apply_pro_formatting(writer, df, rows: List, sheet_name="Results"):
+    # Lazy pandas import for container safety
+    global pd
+    if pd is None:
+        pd = _safe_import_pandas()
+
     """Apply professional XlsxWriter formatting to the output."""
     workbook  = writer.book
     worksheet = writer.sheets[sheet_name]
@@ -133,7 +193,8 @@ def _apply_pro_formatting(writer, df, rows: List, sheet_name="Results"):
                 if pd.isna(val): val = ""
                 worksheet.write(row_num, col_idx, val, target_fmt)
 
-def _deduplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+def _deduplicate_columns(df):
+
     """Ensure all column names are unique, keeping the last occurrence (the newest data)."""
     if df.columns.duplicated().any():
         # Logic: ~df.columns.duplicated(keep='last') returns True for the last occurrence
@@ -141,7 +202,8 @@ def _deduplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
         df = df.loc[:, ~df.columns.duplicated(keep='last')]
     return df
 
-def _drop_unwanted_ai_columns(df: pd.DataFrame) -> pd.DataFrame:
+def _drop_unwanted_ai_columns(df):
+
     """Keep only essential AI columns in the final Excel for a clean look."""
     allowed_ai_cols = {"AI_Phone", "AI_Phone_Responsable", config.STATUS_COLUMN_NAME}
     extra_ai_cols = [c for c in df.columns if str(c).startswith("AI_") and c not in allowed_ai_cols]
@@ -151,6 +213,10 @@ def _drop_unwanted_ai_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def save_subset_to_excel(rows: list, target_path: Path) -> None:
     """Save a list of ExcelRow objects using Pandas with Pro formatting."""
+    global pd
+    if pd is None:
+        pd = _safe_import_pandas()
+        
     if not rows: return
     
     # 1. Prepare Data
@@ -201,6 +267,10 @@ def save_jsonl_to_excel(jsonl_path: Path, excel_path: Path) -> None:
 
 def save_results(rows: list, original_filepath: str, force: bool = False) -> None:
     """Daily Fusion Handler + Local File Synchronizer."""
+    global pd
+    if pd is None:
+        pd = _safe_import_pandas()
+        
     if not rows: return
     
     orig_path = Path(original_filepath)

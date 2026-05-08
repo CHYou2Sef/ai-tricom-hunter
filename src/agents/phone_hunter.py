@@ -296,6 +296,11 @@ def _calculate_row_confidence(row: ExcelRow) -> int:
     elif sources:
         score += 5
         
+    # 7. Cross-Validation (100 pts)
+    is_cross_validated = any(h.get("cross_validated") for h in phone_list if h.get("num") == row.phone)
+    if is_cross_validated:
+        return 100
+        
     return min(100, max(0, score))
 
 async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Optional[int] = None) -> List[dict]:
@@ -362,6 +367,26 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
             candidates = extract_phones(ai_raw, source_label=tag)
             for p in candidates: add_unique(p, 97, tag)
             _fill_row_from_ai_mode(ai_raw, row)
+
+    # 1.1 Parallel Layer 2 Launch (LangGraph)
+    # We launch this now so it runs simultaneously with the rest of Layer 1
+    l2_task = None
+    if getattr(config, "LAYER2_ENABLED", True):
+        l2_social: dict = {}
+        if last_meta:
+            sl = last_meta.get("social_links", {})
+            if sl.get("facebook"): l2_social["facebook"] = sl["facebook"]
+            if sl.get("linkedin"): l2_social["linkedin"] = sl["linkedin"]
+            if sl.get("website"):  l2_social["website"]  = sl["website"]
+        if getattr(row, "facebook", None) and "facebook" not in l2_social:
+            l2_social["facebook"] = [row.facebook]
+        if getattr(row, "linkedin", None) and "linkedin" not in l2_social:
+            l2_social["linkedin"] = [row.linkedin]
+
+        if l2_social:
+            from agents.layer2 import run_layer2_graph
+            logger.info(f"🔗 [Layer2] Activating in parallel for row #{row.row_index} — sources: {list(l2_social.keys())}")
+            l2_task = asyncio.create_task(run_layer2_graph(row, l2_social, agent))
 
     # 1.5 DEEP DISCOVERY (Official Site & Social Media "About")
     if not any(h['score'] >= 90 for h in harvested) and last_meta:
@@ -433,28 +458,27 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
                     add_unique(data["phone"], 96, "firecrawl_premium")
                     logger.info(f"✨ [Firecrawl] Found phone: {data['phone']}")
 
-    # 3.6 Layer 2 — Social URL Fallback (LangGraph)
-    # Activates when Layer 1 is fully depleted but social/web URLs were discovered.
-    # Scrapes Facebook /about, LinkedIn /about, and company website contact pages.
-    if not any(h['score'] >= 90 for h in harvested) and getattr(config, "LAYER2_ENABLED", True):
-        l2_social: dict = {}
-        if last_meta:
-            sl = last_meta.get("social_links", {})
-            if sl.get("facebook"): l2_social["facebook"] = sl["facebook"]
-            if sl.get("linkedin"): l2_social["linkedin"] = sl["linkedin"]
-            if sl.get("website"):  l2_social["website"]  = sl["website"]
-        # Also check fields already enriched on the row (from AI Mode pass)
-        if getattr(row, "facebook", None) and "facebook" not in l2_social:
-            l2_social["facebook"] = [row.facebook]
-        if getattr(row, "linkedin", None) and "linkedin" not in l2_social:
-            l2_social["linkedin"] = [row.linkedin]
-
-        if l2_social:
-            from agents.layer2 import run_layer2_graph
-            logger.info(f"🔗 [Layer2] Activating for row #{row.row_index} — sources: {list(l2_social.keys())}")
-            l2_result = await run_layer2_graph(row, l2_social, agent)
+    # 3.6 Await Parallel Layer 2 & Cross-Validate
+    if l2_task:
+        try:
+            l2_result = await l2_task
             if l2_result and l2_result.get("num"):
-                add_unique(l2_result["num"], l2_result["score"], l2_result["source"])
+                l2_num = l2_result["num"]
+                # Cross-validation: did Layer 1 already find this number?
+                match_found = False
+                for h in harvested:
+                    if h['num'] == l2_num:
+                        logger.info(f"✨ [Cross-Validation] 100% Match! Layer 1 and Layer 2 both found {l2_num}")
+                        h['score'] = 100  # Boost to 100%
+                        h['cross_validated'] = True
+                        match_found = True
+                        break
+                
+                if not match_found:
+                    logger.info(f"🔗 [Layer2] Added unique phone {l2_num} to candidates.")
+                    add_unique(l2_num, l2_result["score"], l2_result.get("source", "layer2"))
+        except Exception as e:
+            logger.error(f"[Layer2] Parallel task error: {e}", exc_info=True)
 
     # 4. Final results mapping
     row.processing_end_ts = time.perf_counter()

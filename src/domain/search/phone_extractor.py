@@ -102,6 +102,21 @@ def extract_phones_from_html(html: str, source_label: Optional[str] = None) -> L
     return _dedupe_and_log(found, source_label)
 
 
+def format_french(phone: str) -> str:
+    """
+    Pure formatting helper used by legacy tests.
+
+    - If phone is 10 digits (French national), format to: XX XX XX XX XX
+    - Otherwise return the raw string (does not validate).
+    """
+    if not phone:
+        return phone
+    digits = re.sub(r"[^\d]", "", str(phone))
+    if len(digits) == 10:
+        return " ".join(digits[i:i+2] for i in range(0, 10, 2))
+    return str(phone)
+
+
 def get_best_phone(phones: List[str]) -> Optional[str]:
     """
     Return the single best phone from a list:
