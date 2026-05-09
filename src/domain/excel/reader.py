@@ -22,33 +22,72 @@ import json
 import re
 import asyncio
 import sys
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
+
+pd: Any = None
 
 # Pandas import can fail in containerized setups if Python is accidentally
-# running from/inside a NumPy source tree (numpy error: "do not import from its source directory").
-# Mitigation: sanitize sys.path so the current working directory/repo root
-# are not used for module resolution during the pandas/numpy import.
+# running from/inside a NumPy source tree.
+# Root cause: Docker PYTHONPATH=/app/src injected at position 0 causes Python
+# to find /app/src/numpy (non-existent but shadowing) before site-packages.
+#
+# Two-layer fix:
+#   1. Sanitize sys.path  — move site-packages before project dirs
+#   2. Evict module cache — clear broken numpy/pandas from sys.modules BEFORE
+#      retrying, otherwise Python returns the cached broken module on all retries.
 def _safe_import_pandas():
-    # Remove '' and cwd-like entries that can shadow site-packages
-    cwd = os.getcwd()
-    to_remove = set()
-    for p in sys.path:
-        if p in ("", cwd, os.path.abspath(cwd)):
-            to_remove.add(p)
-    if cwd:
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-        to_remove.add(repo_root)
-    if to_remove:
-        sys.path = [p for p in sys.path if p not in to_remove]
+    """
+    Hardened pandas importer for containerized environments.
 
+    Strategy:
+      • Always move site-packages to the front of sys.path.
+      • Evict any cached-but-broken numpy/pandas from sys.modules before
+        each attempt (broken ImportError state is sticky in the module cache).
+      • Never restore the original poisoned path on failure.
+    """
+    import sys
+    import os
+
+    # ── Step 1: Build a safe sys.path ────────────────────────────────────
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    src_dir   = os.path.join(repo_root, "src")
+    cwd       = os.getcwd()
+
+    # Remove all known shadowing directories
+    dangerous = {cwd, os.path.abspath(cwd), repo_root, src_dir, ""}
+    clean_path = [p for p in sys.path if p not in dangerous]
+
+    # Site-packages first — this is the critical ordering requirement
+    site_pkgs = [p for p in clean_path if "site-packages" in p]
+    others    = [p for p in clean_path if "site-packages" not in p]
+    safe_path  = site_pkgs + others
+
+    # Append project dirs at the END so they resolve last
+    for d in [repo_root, src_dir]:
+        if d not in safe_path:
+            safe_path.append(d)
+
+    sys.path[:] = safe_path
+
+    # ── Step 2: Evict broken/partial module cache entries ─────────────────
+    # If a previous import attempt partially populated sys.modules with a
+    # broken numpy/pandas, every subsequent `import pandas` returns the
+    # same broken object from cache — path fixes have NO effect.
+    _numpy_mods  = [k for k in list(sys.modules) if k == "numpy" or k.startswith("numpy.")]
+    _pandas_mods = [k for k in list(sys.modules) if k == "pandas" or k.startswith("pandas.")]
+    for _mod in _numpy_mods + _pandas_mods:
+        sys.modules.pop(_mod, None)
+
+    # ── Step 3: Import ─────────────────────────────────────────────────
     try:
         import pandas as _pd  # type: ignore
         return _pd
     except Exception as e:
         raise ImportError(
-            "Failed to import pandas (and underlying numpy). "
-            "This container runtime may be misconfigured (numpy import path shadowing). "
-            f"Original error: {e}"
+            f"Pandas/Numpy import failed even after path sanitization and "
+            f"module-cache eviction.\n"
+            f"Error: {e}\n"
+            f"sys.path used: {sys.path[:8]} ..."
         ) from e
 
 from core import config
@@ -70,12 +109,15 @@ class ExcelRow:
             col = mapping.get(concept)
             if col and col in raw:
                 val = raw[col]
+                global pd
+                if pd is None:
+                    pd = _safe_import_pandas()
                 if pd.isna(val) or val is None: return None
                 s = str(val).strip()
                 return s if s and s.upper() not in _null_values else None
             return None
 
-        self.nom     = get("raison_sociale") or get("enseigne") or get("nom_commercial")
+        self.nom     = get("raison_sociale") or get("enseigne") or get("nom_commercial") or get("denominationUsuelleEtablissement")
         
         if mapping.get("adresse") == "__COMPOSITE__":
             parts = [get(c) for c in ["adresse_numero", "adresse_typevoie", "adresse_libellevoie"]]
@@ -103,31 +145,66 @@ class ExcelRow:
         else:
             self.search_type = "SKIP"
 
-        self.status = ""
-        etat_val = get("Etat") or get("stat")
-        if etat_val and str(etat_val).upper() == "DONE":
-            self.status = "DONE"
-        elif etat_val and "NO" in str(etat_val).upper() and ("TEL" in str(etat_val).upper()):
-            self.status = "NO TEL"
+        from domain.search.phone_extractor import normalize_phone, is_valid_french_phone
         
-        from domain.search.phone_extractor import normalize_phone
+        restored_alt_phones = []
+        for ks, val in raw.items():
+            val_str = str(val).strip()
+            if not val_str or val_str.lower() in config.NULL_VALUE_STRINGS:
+                continue
+
+            # Reconstruct phone_list from Alt_Phone columns
+            if ks.startswith("AI_Alt_Phone_") and not ks.endswith("_Conf"):
+                # VALIDATION: Only restore if it's not a blocked number
+                digits = re.sub(r"\D", "", val_str)
+                if is_valid_french_phone(digits):
+                    restored_alt_phones.append({"num": val_str, "score": 80, "source": "previous_run"})
+                else:
+                    logger.debug(f"🚫 [Restoration] Dropping blocked number {val_str} from {ks}")
+        
         raw_phone = get("telephone") or get("phone") or get("téléphone") or get("__phone")
         self.phone = normalize_phone(raw_phone) if raw_phone else None
 
         raw_agent = get("agent_phone") or get("__agent_phone")
         self.agent_phone = normalize_phone(raw_agent) if raw_agent else None
 
+        self.status = ""
+        etat_val = get("Etat") or get("stat")
+        raw_status = str(etat_val).upper() if etat_val else ""
+        
+        if raw_status == "DONE":
+            # Hardened check: If DONE, we MUST have a valid phone
+            if self.phone or self.agent_phone:
+                self.status = "DONE"
+            else:
+                logger.warning(f"⚠️ [Row {self.row_index}] Downgrading 'DONE' to 'NO TEL' because no valid phone was found.")
+                self.status = "NO TEL"
+        elif "NO" in raw_status and "TEL" in raw_status:
+            self.status = "NO TEL"
+        elif raw_status in ["SKIP", "ERROR", "LOW_CONF"]:
+            self.status = raw_status
+
         # Safeguard: if marked DONE but phone is invalid/trash (e.g. "A"), reset status to re-process
         if self.status == "DONE" and not self.phone and not self.agent_phone:
             self.status = ""
 
         self.enriched_fields: dict = {}
+        if restored_alt_phones:
+            self.enriched_fields["phone_list"] = restored_alt_phones
         self.raw_ai_responses: list = []
         self.search_queries_used: list = []
         self.processing_start_ts: float = 0.0
         self.processing_end_ts: float = 0.0
         self.captcha_hits: int = 0
         self.is_clone: bool = False
+
+        # ── 6. Restore enriched fields from previous AI runs (if checkpoint is missing) ──
+        for k, v in raw.items():
+            ks = str(k)
+            if ks.startswith("AI_") and ks not in ["AI_Phone", "AI_Phone_Responsable", "AI_Status", "AI_Final_Status", "AI_Result_Phone"] and not ks.startswith("AI_Alt_Phone"):
+                field_key = ks.replace("AI_", "").lower()
+                if v and not pd.isna(v) and str(v).strip().upper() not in _null_values:
+                    self.enriched_fields[field_key] = {"value": str(v), "source": "previous_run", "was_empty": False}
 
     def get_fingerprint(self) -> str:
         if self.siren and len(self.siren) >= 9:
@@ -140,7 +217,13 @@ class ExcelRow:
         return self.nom if self.nom else (self.siren or "")
 
     def to_dict(self) -> dict:
+        """
+        Produce a flat dictionary for Pandas export.
+        Ensures AI-enriched columns are prefixed and formatted consistently.
+        """
         result = dict(self.raw)
+        
+        # 1. Internal metadata (hidden in final Excel by writer)
         result.update({
             "__row_index":    self.row_index,
             "__search_type":  self.search_type,
@@ -149,35 +232,59 @@ class ExcelRow:
             "__status":       self.status,
         })
         
-        # Expand multi-phone list into columns
-        phone_list = self.enriched_fields.get("phone_list", [])
-        for i, item in enumerate(phone_list, 1):
-            result[f"AI_Phone_{i}"] = item.get("num")
-            result[f"AI_Phone_{i}_Conf"] = f"{item.get('score')}%"
-            # Optional: result[f"AI_Phone_{i}_Source"] = item.get("source")
+        # 2. Main AI Outputs (consistent naming for user visibility)
+        # Use config.STATUS_COLUMN_NAME as the primary key for the status column
+        status_col = config.STATUS_COLUMN_NAME or "AI_Status"
+        
+        # FINAL SAFETY: If marked DONE but no phone was found/kept, downgrade to NO TEL.
+        # This prevents the "Empty Done lines" reported by the user.
+        display_status = self.status
+        has_phone = bool(self.phone or self.agent_phone)
+        if display_status == "DONE" and not has_phone:
+            display_status = "NO TEL"
 
-        # 3. Add other enriched fields (Email, Siren, etc.)
+        result["AI_Phone"] = self.phone or ""
+        result["AI_Phone_Responsable"] = self.agent_phone or ""
+        result[status_col] = display_status
+
+        # 3. Expand multi-phone list into columns
+        phone_list = self.enriched_fields.get("phone_list", [])
+        if isinstance(phone_list, list):
+            for i, item in enumerate(phone_list, 1):
+                if i > 5: break # Cap at 5 alternative phones
+                result[f"AI_Alt_Phone_{i}"] = item.get("num")
+                result[f"AI_Alt_Phone_{i}_Conf"] = f"{item.get('score')}%"
+
+        # 4. Add other enriched fields (Email, Siren, etc.)
         for field, data in self.enriched_fields.items():
-            if field != "phone_list":
-                if isinstance(data, dict) and "value" in data:
-                    result[f"AI_{field.capitalize()}"] = data["value"]
-                else:
-                    result[f"AI_{field.capitalize()}"] = str(data)
+            if field in ("phone_list", "final_confidence", "tier", "validation_error"):
+                continue
+            
+            # Standardize column name: AI_Email, AI_Website, etc.
+            col_name = f"AI_{field.replace('_', ' ').title().replace(' ', '_')}"
+            
+            if isinstance(data, dict) and "value" in data:
+                result[col_name] = data["value"]
+            else:
+                result[col_name] = str(data)
 
-        # 4. Add AI Provenance & Quality Validation
+        # 5. Provenance & Performance Meta
         best_source = "N/A"
-        phone_list = self.enriched_fields.get("phone_list", [])
-        if self.phone and phone_list:
+        if self.phone and phone_list and isinstance(phone_list, list):
             for item in phone_list:
                 if item.get("num") == self.phone:
                     best_source = item.get("source")
                     break
+        
         result["AI_Scrap_Source"] = best_source
         result["AI_Confidence_Score"] = f"{self.enriched_fields.get('final_confidence', 0)}%"
         
-        # Add Per-Row Latency
         if self.processing_start_ts and self.processing_end_ts:
             result["AI_Latency_Sec"] = round(self.processing_end_ts - self.processing_start_ts, 1)
+        
+        # Clear legacy mapping keys to avoid column pollution
+        for key in ["__fingerprint", "AI_Final_Status", "AI_Result_Phone"]:
+            if key in result: result.pop(key)
 
         return result
 
@@ -193,7 +300,9 @@ class ExcelRow:
 
 def read_excel(filepath: str) -> Tuple[List[ExcelRow], dict]:
     """Pandas-based universal file reader."""
-    pd = _safe_import_pandas()
+    global pd
+    if pd is None:
+        pd = _safe_import_pandas()
 
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"File not found: {filepath}")

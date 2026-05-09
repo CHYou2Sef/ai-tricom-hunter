@@ -116,14 +116,16 @@ RUN mkdir -p \
 # ── STAGE 2: RUNTIME (Clean Room) ────────────────────────────────────────
 FROM python:3.10-slim-bookworm
 
+# NOTE: PYTHONPATH is intentionally NOT set here.
+# Setting PYTHONPATH=/app/src caused numpy C-extension import failures:
+# Python resolved /app/src BEFORE site-packages, triggering the
+# "do not import from source directory" error.
+# Path management is handled by bootstrap.py using sys.path.append() semantics.
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH="/app/src" \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
-    DOCKER_ENV=true \
-    # Security: prevent Python from writing .pyc at runtime
-    PYTHONDONTWRITEBYTECODE=1
+    DOCKER_ENV=true
 
 WORKDIR /app
 

@@ -206,7 +206,7 @@ def _fill_row_from_ai_mode(raw_text: str, row: ExcelRow) -> Optional[str]:
         "email": "email", "linkedin": "linkedin", "website": "website", "siren": "siren",
         "siret": "siret", "legal_form": "forme_juridique", "naf": "naf",
         "dirigeant": "dirigeant", "capital": "capital", "ville": "ville", "code_postal": "code_postal",
-        "facebook": "facebook", "instagram": "instagram", "direct_phone": "phone_agent"
+        "facebook": "facebook", "instagram": "instagram", "direct_phone": "agent_phone"
     }
     # Centralised null-value set (Bug #3 — includes French "Non disponible" etc.)
     _null_values = {s.upper() for s in config.NULL_VALUE_STRINGS}
@@ -515,7 +515,16 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
                     f"phone kept for review: {row.phone}"
                 )
         else:
-            row.status = "DONE"
+            # Final check before marking DONE: do we actually have a phone?
+            # and is it not a blocked one?
+            from domain.search.phone_extractor import is_valid_french_phone
+            digits = re.sub(r"\D", "", str(row.phone or ""))
+            
+            if row.phone and is_valid_french_phone(digits):
+                row.status = "DONE"
+            else:
+                row.status = "NO TEL"
+                row.phone = None # Clear invalid phone
 
         # Store full list in enriched_fields for column expansion
         row.enriched_fields["phone_list"] = harvested

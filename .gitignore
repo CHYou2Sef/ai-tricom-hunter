@@ -42,11 +42,13 @@ benchmark_checkpoint.json
 telemetry.json
 
 # AI Debugger (Dev Env Only)
+downloaded_files/
 src/agents/debugger/
 WORK/debug_state.json
 WORK/debug_reports/
 WORK/.agent_output
 WORK/.config
+overview.txt
 
 
 # ── Logs and databases ──

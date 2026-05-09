@@ -33,9 +33,12 @@ cloakbrowser>=0.1.0
 
 # ── Tier 5: Nodriver (Chrome CDP-only, zero WebDriver fingerprint) ─────────
 nodriver>=0.34
-# FIX: websockets 14+ removed legacy protocol module required by uvicorn[standard].
-# nodriver requires >=10; uvicorn[standard] requires <14. This range satisfies both.
-websockets>=12.0,<14.0
+# FIX: websockets >=13.0 removed CONNECTING/OPEN/CLOSING/CLOSED from
+# websockets.legacy.protocol — uvicorn[standard] imports these by name at startup.
+# Prefer 12.x to avoid the breakage entirely. bootstrap.py Shim 3 handles
+# the case where pip resolves to 13.x despite this constraint.
+# nodriver requires >=10; staying at 12.x satisfies both nodriver and uvicorn.
+websockets>=12.0,<13.0
 
 # ── Tier 6: Crawl4AI (managed JS rendering, uses patchright internally) ────
 patchright>=1.51.0

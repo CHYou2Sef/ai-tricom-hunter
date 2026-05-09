@@ -77,6 +77,7 @@ AI_RESPONSE_SELECTORS = [
     "div[class*='osrp']",
 ]
 class SeleniumBaseAgent(BaseBrowserAgent):
+
     """
     Tier 1 browser agent powered by SeleniumBase UC Driver.
 
@@ -149,8 +150,26 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         async with self._lock:
             await self._start_locked()
 
+    async def _record_interruption(self, reason: str, details: str | None = None) -> None:
+        """Record interruption reason for debugging/escalation.
+
+        Tier2 expects this hook to exist; it must never raise.
+        """
+        try:
+            self.last_interruption_reason = reason
+            self.last_interruption_ts = time.time()
+            # Keep details for potential telemetry/diagnostics.
+            if details is not None:
+                # Store as a plain attribute to avoid changing the runtime contract elsewhere.
+                self._last_interruption_details = details  # type: ignore[attr-defined]
+            logger.warning(f"[SeleniumBase] Interruption recorded: {reason}{(' - ' + details) if details else ''}")
+        except Exception:
+            # Absolute safety: never let interruption recording break scraping.
+            pass
+
     async def _start_locked(self) -> None:
         """Internal lock-free start."""
+
         if self._driver:
             return
 
@@ -473,9 +492,10 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         # ── 7. Wait for stable response ────────────────────────────────────
         return await self._wait_for_stable_response_locked(timeout_sec=30)
 
-    async def search_google_ai(self, query: str) -> Optional[str]:
+    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """Alias maintaining full HybridEngine / benchmark compatibility."""
-        return await self.search_google_ai_mode(query)
+        return await self.search_google_ai_mode(query, ai_mode_url=ai_mode_url)
+
 
     async def submit_google_search(self, query: str) -> bool:
         """Navigate to Google, dismiss cookies, type query, press Enter."""

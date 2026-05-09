@@ -47,11 +47,12 @@ def ensure_singleton(lock_name: str, work_dir: Path):
     except (IOError, OSError):
         pid = "unknown"
         try:
-            with open(lock_file, 'r') as rf:
-                pid = rf.read().strip()
-        except:
+            if lock_file.exists():
+                with open(lock_file, 'r') as rf:
+                    pid = rf.read().strip() or "stale/empty"
+        except Exception:
             pass
             
         logger.error(f"❌ [Singleton] Another instance of '{lock_name}' is already running (PID: {pid}).")
-        logger.error(f"   Check running processes or use 'docker logs -f tricom_ai_agent' if in Docker.")
+        logger.error(f"   If you are SURE no other instance exists, delete {lock_file} and restart.")
         sys.exit(1)

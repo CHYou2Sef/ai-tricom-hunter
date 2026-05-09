@@ -803,9 +803,6 @@ class HybridAutomationEngine:
         return await self._execute_with_waterfall("extract_universal_data", use_browser=use_browser)
 
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
-            """AI Mode search via browser waterfall."""
-            return await self._execute_with_waterfall("search_google_ai_mode", prompt, ai_mode_url=ai_mode_url)
 
     async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
         """Legacy AI search fallback."""

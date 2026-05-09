@@ -24,8 +24,9 @@ mkdir -p /app/logs \
 # ── 1.5 Profile Sanitization (The Chrome Lock-Killer) ───────────────
 # Forcefully remove Chrome Singleton locks that cause "Profile in use" errors
 # on container restarts (very common on Linux/Fedora).
-echo "🧹 Cleaning stale Chrome profile locks..."
 # Cleanup in persistent volume
+echo "🧹 Cleaning stale application and Chrome locks..."
+find /app/WORK -name ".*.lock" -delete 2>/dev/null || true
 find /app/WORK/browser_profiles -name "SingletonLock" -delete 2>/dev/null || true
 find /app/WORK/browser_profiles -name "SingletonSocket" -delete 2>/dev/null || true
 find /app/WORK/browser_profiles -name "SingletonCookie" -delete 2>/dev/null || true
@@ -38,7 +39,6 @@ find /dev/shm -name "SingletonCookie" -delete 2>/dev/null || true
 chmod -R 777 /app/logs /app/WORK /tmp 2>/dev/null || true
 
 # ── 2. Infrastructure Health Check ──────────────────────────────────
-# Log all startup checks to a dedicated file for audit
 STARTUP_LOG="/app/logs/startup_infra.log"
 echo "🔍 [$(date)] Starting Infrastructure Health Check..." > "$STARTUP_LOG"
 
@@ -47,11 +47,40 @@ echo "🔍 [$(date)] Starting Infrastructure Health Check..." > "$STARTUP_LOG"
     python3 scripts/validator.py
     
     echo -e "\n--- Browser Binaries ---"
+    
+    # 🕵️ Auto-fix symlinks if missing (Playwright/Patchright often changes paths)
+    if ! command -v google-chrome &> /dev/null; then
+        echo "⚠️ google-chrome missing from PATH. Attempting recovery..."
+        CHROME_FIND=$(find /opt/ms-playwright -name "chrome" -path "*/chrome-linux/chrome" | head -n 1)
+        if [ -n "$CHROME_FIND" ]; then
+            ln -sf "$CHROME_FIND" /usr/bin/google-chrome
+            ln -sf /usr/bin/google-chrome /usr/bin/google-chrome-stable
+            echo "✅ Recovered Chrome at $CHROME_FIND"
+        else
+            # Fallback to cloakbrowser if available
+            CLOAK_FIND=$(find /root/.cloakbrowser -name "chrome" | head -n 1)
+            if [ -n "$CLOAK_FIND" ]; then
+                 ln -sf "$CLOAK_FIND" /usr/bin/google-chrome
+                 echo "✅ Recovered Cloak Chrome at $CLOAK_FIND"
+            fi
+        fi
+    fi
+
+    if ! command -v chromedriver &> /dev/null; then
+        echo "⚠️ chromedriver missing from PATH. Attempting recovery..."
+        DRV_FIND=$(find /usr/local -name "chromedriver" | head -n 1)
+        if [ -n "$DRV_FIND" ]; then
+            ln -sf "$DRV_FIND" /usr/local/bin/chromedriver
+            echo "✅ Recovered Chromedriver at $DRV_FIND"
+        fi
+    fi
+
+    # Final check
     google-chrome --version || echo "❌ Chrome missing"
     chromedriver --version || echo "❌ Chromedriver missing"
     
     echo -e "\n--- Directory Permissions ---"
-    ls -ld /app/WORK/INCOMING /app/logs
+    ls -ld /app/WORK/INCOMING /app/logs /tmp
     
 } >> "$STARTUP_LOG" 2>&1
 

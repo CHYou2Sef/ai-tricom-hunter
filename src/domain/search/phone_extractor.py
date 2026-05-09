@@ -202,19 +202,30 @@ def is_valid_french_phone(digits: str) -> bool:
     """
     # 1. Hard blocklist (Exact matches or Prefix matches)
     # We use startswith() to catch both full numbers and blocked prefixes (Arcep, etc.)
+    # We also check if the number is EXACTLY in the blocklist to handle long parasitic numbers.
     for blocked in config.FAKE_PHONE_BLOCKLIST:
-        if digits.startswith(blocked):
+        if digits == blocked or digits.startswith(blocked):
             logger.debug(f"[PhoneExtractor] Blocked (blocklist match: {blocked}): {digits}")
             return False
 
-    # 2. All same digit: '0000000000', '0666666666', etc.
+    # 2. Generic numbers often found on directory sites (e.g. 01 40 00 00 00)
+    # Often used as placeholders or generic switchboards.
+    generic_patterns = ["0140000000", "0100000000", "0600000000"]
+    if digits in generic_patterns:
+         logger.debug(f"[PhoneExtractor] Blocked (generic placeholder): {digits}")
+         return False
+
+    # 3. All same digit: '0000000000', '0666666666', etc.
     if len(set(digits)) == 1:
         logger.debug(f"[PhoneExtractor] Blocked (all-same-digit): {digits}")
         return False
 
-    # 3. Monotonically sequential digits (e.g. 0123456789)
+    # 4. Monotonically sequential digits (e.g. 0123456789)
     if digits == ''.join(str(i % 10) for i in range(len(digits))):
         logger.debug(f"[PhoneExtractor] Blocked (sequential ascending): {digits}")
+        return False
+    if digits == ''.join(str((9-i) % 10) for i in range(len(digits))):
+        logger.debug(f"[PhoneExtractor] Blocked (sequential descending): {digits}")
         return False
 
     return True
@@ -253,25 +264,33 @@ def normalize_phone(phone: Optional[str]) -> Optional[str]:
     if not phone:
         return None
 
-    digits_only = re.sub(r'[\s\.\-\(\)]', '', str(phone)).strip()
+    # 1. Basic cleaning
+    digits_only = re.sub(r'[\s\.\-\(\)\+]', '', str(phone)).strip()
     
     # Quick sanity checks to avoid parsing junk
     if len(digits_only) < 9 or len(digits_only) > 15:
         return None
         
-    # Convert +33XXXXXXXXX to 0XXXXXXXXX for our blocklist checks
-    fr_digits = digits_only
-    if fr_digits.startswith('+33') and len(fr_digits) == 12:
-        fr_digits = '0' + fr_digits[3:]
-
-    # Apply hallucination rules (Blocklist + sequential checks)
-    if fr_digits.startswith('0') and len(fr_digits) == 10:
-        if not is_valid_french_phone(fr_digits):
+    # 2. Pre-parsing Blocklist Check (Fast path)
+    # Convert various prefixes to 0XXXXXXXXX for our blocklist checks
+    check_digits = digits_only
+    if check_digits.startswith('33') and len(check_digits) == 11:
+        check_digits = '0' + check_digits[2:]
+    elif check_digits.startswith('0033') and len(check_digits) == 13:
+        check_digits = '0' + check_digits[4:]
+    
+    if check_digits.startswith('0') and len(check_digits) == 10:
+        if not is_valid_french_phone(check_digits):
             return None
 
     try:
         # Use phonenumbers to parse (defaults to France if no + code)
-        num = phonenumbers.parse(phone, "FR")
+        # Note: if it started with +, we use that. If not, we use "FR" default.
+        parse_str = str(phone)
+        if not parse_str.startswith('+') and digits_only.startswith('33'):
+             parse_str = '+' + parse_str
+             
+        num = phonenumbers.parse(parse_str, "FR")
         
         if not phonenumbers.is_valid_number(num):
             logger.debug(f"[PhoneExtractor] ❌ Blocked (phonenumbers invalid): '{phone}'")
@@ -280,6 +299,11 @@ def normalize_phone(phone: Optional[str]) -> Optional[str]:
         # Format uniformly (NATIONAL for FR numbers -> 0X XX XX XX XX)
         if num.country_code == 33:
             formatted = phonenumbers.format_number(num, PhoneNumberFormat.NATIONAL)
+            # CRITICAL: Final blocklist check on the normalized digits
+            final_digits = re.sub(r"\D", "", formatted)
+            if not is_valid_french_phone(final_digits):
+                logger.warning(f"🚫 [PhoneExtractor] Blocked after normalization: {formatted}")
+                return None
         else:
             formatted = phonenumbers.format_number(num, PhoneNumberFormat.INTERNATIONAL)
             

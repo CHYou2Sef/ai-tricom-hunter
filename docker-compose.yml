@@ -31,7 +31,9 @@ services:
     environment:
       - CHROMIUM_BINARY_PATH=/usr/bin/google-chrome-stable
       - DOCKER_ENV=true
-      - PYTHONPATH=/app/src
+      # NOTE: PYTHONPATH is intentionally NOT set here.
+      # It caused numpy "import from source directory" errors by prepending
+      # /app/src before site-packages. Path is managed by bootstrap.py.
       - LAYER0_ENABLED=true
       - LAYER2_ENABLED=true
       # Golden path explicit overrides (belt-and-suspenders with .env.prod)
@@ -55,6 +57,7 @@ services:
       - ./agent.yaml:/app/agent.yaml:ro,Z
       - ./SOUL.md:/app/SOUL.md:ro,Z
       - ./RULES.md:/app/RULES.md:ro,Z
+      - /var/run/docker.sock:/var/run/docker.sock
 
     command: python run/supervisor.py
 

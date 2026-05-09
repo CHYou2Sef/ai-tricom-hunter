@@ -776,6 +776,9 @@ FAKE_PHONE_BLOCKLIST: set = {
     "0399332293",   # Numéro parasitaire répertoire (Direct Service)
     "0157425531",   # Numéro parasitaire répertoire (Direct Service)
     "0756338884",   # Numéro parasitaire répertoire (Direct Service)
+    "0811191928",   # Numéro parasitaire répertoire (Direct Service)
+    "0800000000",   # Placeholder générique
+    "0140000000",   # Generic switchboard
 
     # Préfixes exclusivement réservés au démarchage téléphonique (à bloquer)
     # Source: Arcep, depuis le 1er janvier 2023

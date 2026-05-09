@@ -12,20 +12,32 @@
 
 import sys
 import os
+from pathlib import Path
+
+# ── CRITICAL: Set up sys.path BEFORE any heavy imports (uvicorn/numpy/pandas) ──
+# Use append() NOT insert(0,...) so site-packages always have priority over the
+# project root. insert(0,...) causes numpy "do not import from source directory"
+# errors in containerized environments where /app or /app/src shadows site-pkgs.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
+if str(PROJECT_ROOT / "src") not in sys.path:
+    sys.path.append(str(PROJECT_ROOT / "src"))
+
+# Also clean any PYTHONPATH-injected paths that might shadow site-packages.
+# In Docker, PYTHONPATH=/app/src can end up at position 0 via the environment,
+# but site-packages must stay FIRST for binary C-extensions (numpy, pandas).
+_SITE_PKGS = [p for p in sys.path if "site-packages" in p]
+_OTHERS    = [p for p in sys.path if "site-packages" not in p]
+sys.path[:] = _SITE_PKGS + _OTHERS
+
+# pyrefly: ignore [missing-import]
+import bootstrap  # noqa: F401 — websockets shim + logging init
+
 import asyncio
 import time
 import socket
-import uvicorn
-from pathlib import Path
-
-# Ensure root and src/ are on sys.path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-if str(PROJECT_ROOT / "src") not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT / "src"))
-
-import bootstrap  # noqa: F401 — initialises logging + path
+import uvicorn  # noqa — imported AFTER bootstrap path sanitization
 
 from core import config
 from core.logger import get_logger

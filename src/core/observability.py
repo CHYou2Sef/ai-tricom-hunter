@@ -26,7 +26,10 @@ import os
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+# OTLP exporter is optional in some “golden” runtime images.
+# Import it lazily inside setup_observability() to avoid hard-crashing
+# when opentelemetry-exporter-otlp is not installed.
+
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from prometheus_client import Counter
 
@@ -85,15 +88,27 @@ def setup_observability(app):
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
     if endpoint:
         provider = TracerProvider()
-        otlp_exporter = OTLPSpanExporter(endpoint=endpoint)
-        processor = BatchSpanProcessor(otlp_exporter)
-        provider.add_span_processor(processor)
-        trace.set_tracer_provider(provider)
-        
-        # Instrument FastAPI
-        FastAPIInstrumentor.instrument_app(app)
+        try:
+            # Lazy import: the exporter package may be absent in some images.
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter  # type: ignore
+
+            otlp_exporter = OTLPSpanExporter(endpoint=endpoint)
+            processor = BatchSpanProcessor(otlp_exporter)
+            provider.add_span_processor(processor)
+            trace.set_tracer_provider(provider)
+
+            # Instrument FastAPI
+            FastAPIInstrumentor.instrument_app(app)
+        except ModuleNotFoundError as e:
+            log.warning(
+                "OTLP tracing disabled (missing opentelemetry exporter dependency)",
+                error=str(e),
+            )
+        except Exception as e:
+            log.warning("OTLP tracing setup failed; disabling tracing", error=str(e))
     else:
         log.debug("OTLP Tracing disabled (no endpoint configured)")
+
     
     # 2. Add Custom Tracing Middleware (for headers & specific logs)
     app.add_middleware(TracingMiddleware)

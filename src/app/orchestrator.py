@@ -7,12 +7,14 @@
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
+
 import os
 import sys
 import time
 import random
 import asyncio
-from typing import List, Optional
+import re
+from typing import List, Optional, Any, Dict
 from pathlib import Path
 
 from core import config
@@ -82,10 +84,23 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: Fi
                 for _, row_data in df_sync.iterrows():
                     fp = row_data["__fingerprint"]
                     if pd.notna(fp):
-                        existing_data[fp] = {
-                            "phone": row_data.get("AI_Phone"),
-                            "agent_phone": row_data.get("AI_Agent_Phone")
-                        }
+                        entry = {}
+                        # Capture all AI_ and standard phone columns for the merge
+                        for col in df_sync.columns:
+                            val = row_data[col]
+                            if pd.isna(val) or str(val).lower() in config.NULL_VALUE_STRINGS:
+                                continue
+                                
+                            if col == "AI_Phone":
+                                entry["phone"] = val
+                            elif col in ["AI_Phone_Responsable", "AI_Agent_Phone"]:
+                                entry["agent_phone"] = val
+                            elif col == "AI_Status" or col == config.STATUS_COLUMN_NAME:
+                                entry["status"] = val
+                            elif col.startswith("AI_"):
+                                field_name = col[3:].lower()
+                                entry[field_name] = val
+                        existing_data[fp] = entry
         except Exception as e:
             logger.warning(f"[Agent] Failed to read fusion file for sync: {e}")
 
@@ -101,11 +116,26 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: Fi
             valid_a = normalize_phone(cp_data.get("agent_phone"))
             status = cp_data.get("status")
             
-            # H3 fix: LOW_CONF (SIREN mismatch) is a terminal state — don't re-process
-            if valid_p or valid_a or status in ["DONE", "NO TEL", "SKIP", "LOW_CONF"]:
-                r.phone = valid_p
-                r.agent_phone = valid_a
-                r.status = status or "DONE"
+            from domain.search.phone_extractor import is_valid_french_phone
+            
+            # H3 fix: Only restore if phone is actually valid (not blocked)
+            def is_real(p):
+                if not p: return False
+                digits = re.sub(r"\D", "", str(p))
+                return is_valid_french_phone(digits)
+
+            p_real = is_real(valid_p)
+            a_real = is_real(valid_a)
+            has_phone = p_real or a_real
+            
+            is_terminal = status in ["NO TEL", "SKIP", "LOW_CONF"]
+            
+            if has_phone or is_terminal:
+                # If we have an agent phone but no main phone, promote it
+                r.phone = valid_p if p_real else (valid_a if a_real else None)
+                r.agent_phone = valid_a if a_real else None
+                r.status = status if status else "DONE"
+                
                 # Restore all other enriched information
                 for k, v in cp_data.items():
                     if k not in ["phone", "agent_phone", "status"]:
@@ -116,14 +146,20 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: Fi
         # Priority 2: Check if already in Daily Fusion (Global Sync)
         if fp in existing_data:
             res = existing_data[fp]
-            # pandas may be unavailable; existing_data entries are only created when pd is available
-            valid_p = normalize_phone(res.get("phone")) if res.get("phone") is not None else None
-            valid_a = normalize_phone(res.get("agent_phone")) if res.get("agent_phone") is not None else None
+            valid_p = normalize_phone(res.get("phone")) if res.get("phone") else None
+            valid_a = normalize_phone(res.get("agent_phone")) if res.get("agent_phone") else None
             
             if valid_p or valid_a:
-                r.phone = valid_p
+                # Promotion: if we only have agent phone, use it as main
+                r.phone = valid_p if valid_p else valid_a
                 r.agent_phone = valid_a
-                r.status = "DONE"
+                r.status = res.get("status") if res.get("status") else "DONE"
+                
+                # Restore all other enriched information
+                for k, v in res.items():
+                    if k not in ["phone", "agent_phone", "status"]:
+                        r.enriched_fields[k] = v
+                        
                 sync_count += 1
                 continue
             
@@ -164,6 +200,11 @@ async def _execute_agent_task(ctx: WorkerContext, agent) -> None:
     if ctx.row.phone and getattr(config, 'ENRICH_ENABLED', False):
         await enrich_row(ctx.row, agent)
     
+    # Final safety check: ensure DONE status actually has a phone number
+    if ctx.row.status == "DONE" and not ctx.row.phone and not ctx.row.agent_phone:
+        ctx.row.status = "NO TEL"
+        logger.warning(f"[Orchestrator] Row {ctx.row.row_index} marked DONE but no phone found! Reverting to NO TEL.")
+
     # Atomic checkpoint: survives sudden SIGKILL / power loss
     ctx.progress.mark_row_done(
         ctx.row.row_index, 

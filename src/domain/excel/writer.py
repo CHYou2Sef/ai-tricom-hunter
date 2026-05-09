@@ -203,12 +203,10 @@ def _deduplicate_columns(df):
     return df
 
 def _drop_unwanted_ai_columns(df):
-
-    """Keep only essential AI columns in the final Excel for a clean look."""
-    allowed_ai_cols = {"AI_Phone", "AI_Phone_Responsable", config.STATUS_COLUMN_NAME}
-    extra_ai_cols = [c for c in df.columns if str(c).startswith("AI_") and c not in allowed_ai_cols]
-    if extra_ai_cols:
-        df = df.drop(columns=extra_ai_cols)
+    """
+    Keep all AI columns. 
+    Previously pruned for 'clean look', but users want all enriched data.
+    """
     return df
 
 def save_subset_to_excel(rows: list, target_path: Path) -> None:
@@ -223,15 +221,8 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
     data = [r.to_dict() if hasattr(r, 'to_dict') else r for r in rows]
     df = pd.DataFrame(data)
     
-    # Reorder/Rename status header to user's config
-    if "__status" in df.columns:
-        df = df.rename(columns={
-            "__status": config.STATUS_COLUMN_NAME, 
-            "__phone": "AI_Phone", 
-            "__agent_phone": "AI_Phone_Responsable"
-        })
-    
     # 2. Drop technical internal columns (starting with __)
+    # We keep the dataframe clean. to_dict already provided the user-facing columns.
     internal_cols = [c for c in df.columns if str(c).startswith("__") and c != "__fingerprint"]
     if internal_cols:
         df = df.drop(columns=internal_cols)

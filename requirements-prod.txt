@@ -19,7 +19,7 @@ cloakbrowser>=0.1.0
 nodriver>=0.34
 # FIX #2: websockets 14+ removed legacy protocol module required by uvicorn[standard].
 # nodriver requires >=10, uvicorn[standard] requires <14. This range satisfies both.
-websockets>=12.0,<14.0
+websockets>=12.0,<13.0
 botasaurus>=3.2.0
 botasaurus-driver
 crawl4ai>=0.4.0
