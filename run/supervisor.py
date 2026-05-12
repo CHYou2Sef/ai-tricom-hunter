@@ -228,8 +228,14 @@ async def main() -> None:
     finally:
         observer.stop()
         observer.join()
-        await server.shutdown()
+        # Uvicorn shutdown can crash if dependency versions mismatch (uvicorn/websockets).
+        # Avoid killing the whole supervisor with an exception during SIGINT.
+        try:
+            await server.shutdown()
+        except Exception as exc:
+            logger.warning(f"[Supervisor] Monitoring API shutdown error (ignored): {exc}")
         await close_agent_pool()
+
         print("\n" + "━" * 62)
         print("🏁  Supervisor stopped. All layers shut down.")
         print("━" * 62 + "\n")

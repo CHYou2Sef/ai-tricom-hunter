@@ -124,8 +124,7 @@ class CloakAgent(BaseBrowserAgent):
                 headless=getattr(config, "HEADLESS", False),
                 proxy=proxy_settings,
                 humanize=True, # Enable human-like behavior
-                geoip=True,    # Auto-detect timezone/locale from proxy
-                executable_path=exec_path,
+                geoip=False,   # Temporarily disable geoip to avoid geoip2 missing dependency error just in case
                 args=["--no-sandbox", "--disable-setuid-sandbox"] if os.getuid() == 0 else []
             )
             
@@ -218,7 +217,13 @@ class CloakAgent(BaseBrowserAgent):
             return None
 
         try:
+            # Guard: never build/search with an empty prompt (prevents generating URLs with `q=` empty).
+            prompt = (prompt or "").strip()
+            if not prompt:
+                raise ValueError("Empty prompt passed to Cloak search_google_ai_mode")
+
             from common.search_engine import generate_google_ai_url
+            
             
             # Extract essential search terms
             search_query = prompt
@@ -232,7 +237,11 @@ class CloakAgent(BaseBrowserAgent):
             
             url = ai_mode_url or generate_google_ai_url(search_query)
             logger.info(f"🕵️ [Cloak] Navigating to: {url}")
-            
+
+            # Hard guard: prevent accidental navigation with empty q= parameter.
+            if "q=" in url and re.search(r"[?&]q=(&|$)", url):
+                raise ValueError(f"Refusing Cloak navigation with empty q parameter. url={url}")
+
             if not await self._ensure_page_locked(): return None
             if not self.page:
                 return None

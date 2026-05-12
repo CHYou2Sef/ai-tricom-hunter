@@ -356,8 +356,25 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
     for prompt_key, tag in [(config.AI_MODE_SEARCH_PROMPT, "ai_std"), (config.AI_MODE_EXPERT_PROMPT, "ai_expert")]:
         if any(h['score'] >= 90 for h in harvested): break
             
-        prompt = prompt_key.replace("{nom}", str(nom)).replace("{adresse}", str(adr)).replace("{siren}", str(siren)).replace("{category}", str(category)).replace("{extra}", str(extra))
+        prompt = (
+            prompt_key.replace("{nom}", str(nom))
+            .replace("{adresse}", str(adr))
+            .replace("{siren}", str(siren))
+            .replace("{category}", str(category))
+            .replace("{extra}", str(extra))
+        )
+
+        prompt = (prompt or "").strip()
         logger.info(f"    💬 [Gemini] Prompt (Length: {len(prompt)}): {prompt[:150]}...")
+
+        # Prevent empty-query AI Mode navigation (fix for q= empty URLs)
+        if not prompt:
+            logger.error(
+                f"[PhoneHunter] Empty AI prompt — skipping search_google_ai_mode. "
+                f"row=#{row.row_index} nom='{nom}' siren='{siren}'"
+            )
+            continue
+
         ai_raw = await agent.search_google_ai_mode(prompt, row=row)
         last_meta = getattr(agent, "last_metadata", None)
         

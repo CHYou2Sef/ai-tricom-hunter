@@ -36,7 +36,10 @@ cloakbrowser
 
 # Tier 3: Nodriver (Stealth CDP-only agent, zero WebDriver fingerprints)
 nodriver>=0.34
-websockets>=12.0,<13.0
+# Uvicorn[websockets] requires websockets module symbols compatible with its websocket implementation.
+# Keep websockets pinned to a version that avoids `cannot import name 'SERVER'` and legacy.protocol state mismatches.
+websockets>=12.0,<14.0
+
 
 # Tier 4: Crawl4AI (Managed scraper, bypasses WAF, markdown support)
 crawl4ai>=0.4.0

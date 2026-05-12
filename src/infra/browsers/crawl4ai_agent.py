@@ -59,31 +59,22 @@ class Crawl4AIAgent(BaseBrowserAgent):
 
 
     async def _ensure_crawler_alive_locked(self) -> bool:
-        """Health-check Crawl4AI by attempting a minimal scrape.
+        """Check if the Crawl4AI crawler is ready.
 
-        Crawl4AI doesn't provide a real "ping" API; the safest approach is to
-        do a tiny request and confirm we can get a result.
+        Crawl4AI already manages its own browser lifecycle; repeatedly running
+        an internal "health scrape" can trigger Playwright recursion storms
+        (observed as `maximum recursion depth exceeded` during launch).
+
+        Strategy:
+          - If crawler exists, assume alive (no extra scrape).
+          - If crawler missing, start it.
+          - If start fails, return False so HybridEngine escalates tiers.
         """
-        now = asyncio.get_event_loop().time()
-        if self._crawler and (now - self._last_health_check < 10.0):
+        if self._crawler:
             return True
 
-        if not self._crawler:
-            await self._start_locked()
-            if not self._crawler:
-                return False
-
-        # Minimal scrape target: a fast, stable endpoint.
-        try:
-            test_url = "https://example.com/"
-            self._last_content = await self._scrape_locked(test_url) or ""
-            self._last_health_check = now
-            return bool(self._last_content)
-        except Exception as e:
-            logger.warning(f"[Crawl4AI] 💔 Crawler unresponsive: {e}. Resurrecting...")
-            await self._close_locked()
-            await self._start_locked()
-            return self._crawler is not None
+        await self._start_locked()
+        return self._crawler is not None
 
 
     async def get_page_source(self) -> str:
@@ -177,8 +168,8 @@ class Crawl4AIAgent(BaseBrowserAgent):
                     word_count_threshold=10,
                     exclude_external_links=True,
                     remove_overlay_elements=True,
-                    bypass_cache=True,
                 )
+
 
                 if result.success and result.markdown:
                     content = result.markdown.strip() or ""
@@ -289,24 +280,34 @@ class Crawl4AIAgent(BaseBrowserAgent):
             return false;
         })()
         """
+        # Crawl4AI/Playwright recursion storms appear during BrowserType.launch /
+        # internal async trampoline when the crawler is repeatedly resurrected.
+        # Hard cap this entrypoint per call so HybridEngine can escalate tiers.
         try:
-            from crawl4ai import CrawlerRunConfig  # type: ignore
+            from crawl4ai import CrawlerRunConfig, CacheMode  # type: ignore
             run_cfg = CrawlerRunConfig(
                 js_code=wait_js,
                 wait_for="[data-attrid='wa:/description'],.kno-rdesc,.wDYxhc",
                 wait_for_timeout=25000,
                 word_count_threshold=10,
                 remove_overlay_elements=True,
-                bypass_cache=True,
+                cache_mode=CacheMode.BYPASS,
             )
             if not self._crawler:
                 return None
             assert self._crawler is not None
             result = await self._crawler.arun(url=url, config=run_cfg)
-        except (ImportError, TypeError):
-            # Older crawl4ai API without CrawlerRunConfig — fall back to plain scrape
-            logger.warning("[Crawl4AI] CrawlerRunConfig not available — falling back to plain scrape.")
-            return await self._scrape_locked(url)
+        except Exception as exc:
+            # If Crawl4AI is throwing recursion/async loop errors, do not try again
+            # inside this tier; let HybridEngine escalate.
+            exc_str = str(exc).lower()
+            if "maximum recursion depth exceeded" in exc_str:
+                raise
+            if isinstance(exc, (ImportError, TypeError)):
+                logger.warning("[Crawl4AI] CrawlerRunConfig not available — falling back to plain scrape.")
+                return await self._scrape_locked(url)
+            raise
+
 
         if result and result.success and result.markdown:
             content = result.markdown.strip()

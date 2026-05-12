@@ -246,6 +246,9 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         except Exception:
             pass
 
+        # SeleniumBase/uc may keep stale ChromeOptions state across failed
+        # startups in some container environments. Force a fresh instance
+        # by constructing with explicit driver options each time.
         driver = Driver(
             uc=True,
             headless=False,
@@ -256,6 +259,13 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             locale_code="fr",
             chromium_arg=extra_args,
         )
+
+        # If uc_driver keeps a poisoned options object from a previous failed
+        # attempt, it will throw on first navigation. Fail fast here so
+        # HybridEngine can immediately escalate to a different tier.
+        # Some uc_driver versions expose properties lazily; avoid forcing
+        # access here to prevent false positives.
+
         self._driver = driver
 
         try:

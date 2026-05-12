@@ -48,6 +48,7 @@ WORK/debug_state.json
 WORK/debug_reports/
 WORK/.agent_output
 WORK/.config
+WORK/.supervisor.lock
 overview.txt
 
 
@@ -56,6 +57,7 @@ overview.txt
 logs/
 *.sqlite
 *.db
+*.lock
 
 # ── App local outputs/inputs (Except structures) ──
 input/**/*

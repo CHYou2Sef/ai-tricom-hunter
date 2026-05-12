@@ -572,6 +572,27 @@ class HybridAutomationEngine:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms
 
+                # Diagnostic: confirm which agent/method actually raised.
+                try:
+                    agent_name = type(agent).__name__ if agent is not None else "<agent=None>"
+                    agent_mod = type(agent).__module__ if agent is not None else ""
+                    method_obj = getattr(agent, method_name, None) if agent is not None else None
+                    import inspect
+                    sig = None
+                    if method_obj is not None:
+                        try:
+                            sig = str(inspect.signature(method_obj))
+                        except Exception:
+                            sig = "<no-signature>"
+                    logger.error(
+                        f"[HybridEngine][Diag] tier={tier} method={method_name} "
+                        f"agent={agent_name} ({agent_mod}) signature={sig} "
+                        f"exc={type(exc).__name__}: {exc}"
+                    )
+                except Exception:
+                    pass
+
+
                 # ── FIX #4: Triage exceptions — code bugs vs network failures ──
                 # Code-level errors (NameError, ImportError, TypeError, AttributeError)
                 # indicate a BUG in the tier code, NOT an IP ban. They must NOT
@@ -705,10 +726,12 @@ class HybridAutomationEngine:
             provider      = "Google"
             fallback_name = "DuckDuckGo"
         else:
-            primary_url   = config.DUCKDUCKGO_AI_MODE
+            # DuckDuckGo fallback disabled (fails intermittently and wastes attempts)
+            primary_url   = config.GOOGLE_AI_MODE_URL
             fallback_url  = config.GOOGLE_AI_MODE_URL
-            provider      = "DuckDuckGo"
+            provider      = "Google"
             fallback_name = "Google"
+
 
         logger.info(
             f"[HybridEngine] 🔄 Search provider: {provider} "
