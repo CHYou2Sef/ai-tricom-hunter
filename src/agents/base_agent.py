@@ -36,10 +36,13 @@ class BaseBrowserAgent:
 
     async def _handle_captcha_if_present(self) -> bool:
         """Shared CAPTCHA detection logic."""
-        if not self._page: return False
+        if not self._page: 
+            logger.info("No page found")
+            return False
         
         source = await self.get_page_source()
         if is_captcha_page(source):
+            logger.info("CAPTCHA found")
             return wait_for_human_captcha_solve()
         return True
 
@@ -133,21 +136,21 @@ class BaseBrowserAgent:
         """
         pass
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """
         AI Mode search via browser waterfall.
         To be implemented by child classes.
         """
         raise NotImplementedError
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """
         Legacy AI search fallback.
         To be implemented by child classes.
         """
         raise NotImplementedError
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """
         Interactive high-stealth search flow (Google.com -> type query -> Enter -> Click AI).
         To be implemented by child classes.

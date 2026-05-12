@@ -297,12 +297,12 @@ class NodriverAgent(BaseBrowserAgent):
     # SEARCH METHODS
     # ─────────────────────────────────────────────────────────────────
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Submit a query to Google via AI Mode URL."""
         async with self._lock:
-            return await self._search_google_ai_locked(query, ai_mode_url)
+            return await self._search_google_ai_locked(prompt, ai_mode_url, row=row)
 
-    async def _search_google_ai_locked(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def _search_google_ai_locked(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Internal lock-free search."""
         if not await self._ensure_page_locked():
             return None
@@ -311,9 +311,9 @@ class NodriverAgent(BaseBrowserAgent):
 
         try:
             from common.search_engine import generate_google_ai_url
-            url = ai_mode_url or generate_google_ai_url(query)
+            url = ai_mode_url or generate_google_ai_url(prompt)
 
-            logger.info(f"[Nodriver] 🔍 Google AI Mode: {query}")
+            logger.info(f"[Nodriver] 🔍 Google AI Mode: {prompt}")
             await self._page.get(url)
             await action_delay_async("read_wait")
 
@@ -342,21 +342,21 @@ class NodriverAgent(BaseBrowserAgent):
                 await self.report_proxy_error(self.current_proxy, 403)
             return None
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Alias for search_google_ai to maintain HybridEngine compatibility."""
-        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url)
+        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
 
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Interactive search fallback for Nodriver."""
-        return await self.search_google_ai(prompt)
+        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def submit_google_search(self, query: str) -> bool:
+    async def submit_google_search(self, prompt: str) -> bool:
         """Navigate to Google and submit a search query."""
         async with self._lock:
-            return await self._submit_google_search_locked(query)
+            return await self._submit_google_search_locked(prompt)
 
-    async def _submit_google_search_locked(self, query: str) -> bool:
+    async def _submit_google_search_locked(self, prompt: str) -> bool:
         """Internal lock-free submit."""
         if not await self._ensure_page_locked():
             return False
@@ -365,9 +365,9 @@ class NodriverAgent(BaseBrowserAgent):
         
         try:
             import urllib.parse
-            encoded = urllib.parse.quote_plus(query)
+            encoded = urllib.parse.quote_plus(prompt)
             url = f"https://www.google.com/search?q={encoded}"
-            logger.info(f"[Nodriver] 🔍 Google Search: {query}")
+            logger.info(f"[Nodriver] 🔍 Google Search: {prompt}")
             await self._page.get(url)
             await action_delay_async("navigate")
             
@@ -390,22 +390,22 @@ class NodriverAgent(BaseBrowserAgent):
                 await self.report_proxy_error(self.current_proxy, 403)
             return False
 
-    async def search_gemini_ai(self, query: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
         """Submit a query to Gemini via direct interaction."""
         async with self._lock:
-            return await self._search_gemini_ai_locked(query)
+            return await self._search_gemini_ai_locked(prompt)
 
-    async def _search_gemini_ai_locked(self, query: str) -> Optional[str]:
+    async def _search_gemini_ai_locked(self, prompt: str) -> Optional[str]:
         if not await self._ensure_page_locked():
             return None
         try:
-            logger.info(f"[Nodriver] 🤖 Gemini: {query}")
+            logger.info(f"[Nodriver] 🤖 Gemini: {prompt}")
             if not self._page: return None
             await self._page.get(config.GEMINI_URL)
             await action_delay_async("navigate")
             
             if not self._page: return None
-            await self._type_text_locked(self._page, query)
+            await self._type_text_locked(self._page, prompt)
             await action_delay_async("submit")
             await action_delay_async("read_wait")
             

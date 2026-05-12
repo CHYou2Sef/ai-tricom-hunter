@@ -110,7 +110,7 @@ class JinaAgent(BaseBrowserAgent):
             return self._last_content
         return ""
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Utilise le endpoint de recherche natif de Jina AI (s.jina.ai)."""
         import urllib.parse
         import re
@@ -175,15 +175,15 @@ class JinaAgent(BaseBrowserAgent):
             logger.error(f"[Jina] Erreur de recherche: {e}")
             return None
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Fallback transparent vers la recherche Jina."""
-        return await self.search_google_ai_mode(query, ai_mode_url=ai_mode_url)
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Interactive search fallback for Jina."""
-        return await self.search_google_ai_mode(prompt)
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def submit_google_search(self, query: str) -> bool:
+    async def submit_google_search(self, prompt: str) -> bool:
         """Jina est une API REST (Stateless), il n'y a pas de formulaire à soumettre."""
         return False
 

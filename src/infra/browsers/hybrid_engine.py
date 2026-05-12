@@ -108,6 +108,7 @@ class HybridAutomationEngine:
     # ── Configuration & Resource Locks ─────────────────────────────────────
     _CB_THRESHOLD = 3      # Consecutive failures before opening circuit
     _CB_PAUSE_SEC  = 300   # 5 minutes pause — lets WAF cool down + proxy rotate
+    _TIER_STARTUP_SEC = 120.0  # Max seconds to wait for any browser tier to start
     
     # Tier 5 (Camoufox/Firefox) is extremely heavy (~1 GB RAM).
     # We limit it to a single concurrent instance across ALL workers.
@@ -185,11 +186,27 @@ class HybridAutomationEngine:
     # ── Tier management ────────────────────────────────────────────────────
 
     async def start_tier(self, tier: int) -> bool:
+        """Start a browser tier, failing fast after _TIER_STARTUP_SEC seconds."""
+        try:
+            return await asyncio.wait_for(
+                self._start_tier_inner(tier),
+                timeout=self._TIER_STARTUP_SEC,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"[HybridEngine] ⏰ Tier {tier} startup TIMED OUT ({self._TIER_STARTUP_SEC:.0f}s) — "
+                "Chrome/chromedriver version mismatch or resource starvation. Skipping tier."
+            )
+            await self.stop_tier(tier)
+            return False
+
+    async def _start_tier_inner(self, tier: int) -> bool:
+        """Raw tier startup logic (no timeout guard — called by start_tier)."""
         try:
             # 1. Check if existing agent is alive
             agent_map = {
                 0: self._tier0, 2: self._tier2,
-                3: self._tier3, 4: self._tier4, 5: self._tier5, 
+                3: self._tier3, 4: self._tier4, 5: self._tier5,
                 6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
             }
             agent = agent_map.get(tier)
@@ -235,7 +252,7 @@ class HybridAutomationEngine:
                 await self._tier4.start()
                 logger.info(f"[HybridEngine] ✅ Tier 4 (CloakBrowser/Supreme) started for worker {self.worker_id}.")
 
-            # ── Tier 5: NodriverAgent (Chrome CDP) ────────────────────────
+            # ── Tier 5: NodriverAgent (Chrome CDP — no chromedriver) ──────
             elif tier == 5 and not self._tier5:
                 from infra.browsers.nodriver_agent import NodriverAgent
                 self._tier5 = NodriverAgent(worker_id=self._worker_id)
@@ -261,7 +278,7 @@ class HybridAutomationEngine:
                     logger.info(
                         f"[HybridEngine] ✅ Tier 7 🦊 (Camoufox) started for worker {self.worker_id} (Global Lock Acquired)."
                     )
-            
+
             # ── Tier 8: FirecrawlAgent (Premium managed) ───────────────────
             elif tier == 8 and not self._tier8:
                 if not config.FIRECRAWL_ENABLED:
@@ -295,7 +312,6 @@ class HybridAutomationEngine:
             return True
         except ImportError as ie:
             logger.warning(f"  ⏭️ [HybridEngine] Tier {tier} is NOT INSTALLED or DISABLED! Skip to next available tier.")
-            # Handle potential absence of .name in some ImportError variants
             pkg_name = getattr(ie, 'name', None) or "required dependencies"
             logger.warning(f"     Run: pip install {pkg_name}")
             return False
@@ -571,7 +587,7 @@ class HybridAutomationEngine:
                 if agent is None or not hasattr(agent, "is_block_response"):
                     _is_network_error = False
                 else:
-                    _is_network_error = bool(agent.is_block_response(exc))
+                    _is_network_error = agent.is_block_response(exc)
 
                 # Determine interruption reason for telemetry
                 if _is_code_error:
@@ -665,7 +681,7 @@ class HybridAutomationEngine:
     # ── Delegated Browser Methods ───────────────────────────────────────────
     # These act as drop-in replacements for PatchrightAgent methods.
     
-    async def search_google_ai_mode(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """
         AI Mode search via browser waterfall.
         
@@ -677,7 +693,7 @@ class HybridAutomationEngine:
         # the high-stealth interactive flow (navigating to Google, typing).
         if getattr(config, "FORCE_HUMAN_INTERACTIVE", False):
             logger.info("[HybridEngine] 🎭 Forcing Interactive (Human-Like) search flow.")
-            return await self.search_google_ai_interactive(prompt, row=row)
+            return await self.search_google_ai_interactive(prompt, ai_mode_url=None, row=row)
 
         # ── Engine selection ──────────────────────────────────────────────────
         toggle_interval = getattr(config, "ENGINE_TOGGLE_INTERVAL", 100)
@@ -701,7 +717,7 @@ class HybridAutomationEngine:
 
         # ── Primary attempt ───────────────────────────────────────────────────
         result = await self._execute_with_waterfall(
-            "search_google_ai_mode", prompt, ai_mode_url=primary_url
+            "search_google_ai_mode", prompt, ai_mode_url=primary_url, row=row
         )
 
         # ── Cross-provider fallback ───────────────────────────────────────────
@@ -714,7 +730,7 @@ class HybridAutomationEngine:
                 f"cross-provider fallback to {fallback_name}..."
             )
             result = await self._execute_with_waterfall(
-                "search_google_ai_mode", prompt, ai_mode_url=fallback_url
+                "search_google_ai_mode", prompt, ai_mode_url=fallback_url, row=row
             )
 
         # ── Scrapy Post-Discovery Bonus ───────────────────────────────────────
@@ -796,24 +812,24 @@ class HybridAutomationEngine:
                 return
         logger.debug("[HybridEngine] No active agent found for human noise generation.")
 
-    async def submit_google_search(self, query: str) -> bool:
-        return await self._execute_with_waterfall("submit_google_search", query)
+    async def submit_google_search(self, prompt: str) -> bool:
+        return await self._execute_with_waterfall("submit_google_search", prompt)
         
     async def extract_universal_data(self, use_browser: bool = False) -> dict:
         return await self._execute_with_waterfall("extract_universal_data", use_browser=use_browser)
 
 
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Legacy AI search fallback."""
-        return await self._execute_with_waterfall("search_google_ai", query, ai_mode_url=ai_mode_url)
+        return await self._execute_with_waterfall("search_google_ai", prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """
         Interactive high-stealth search flow (Human-Like).
         Navigates to Google, types query, Enter, then clicks AI Mode.
         """
-        return await self._execute_with_waterfall("search_google_ai_interactive", prompt, row=row)
+        return await self._execute_with_waterfall("search_google_ai_interactive", prompt, ai_mode_url=ai_mode_url, row=row)
 
     async def search_gemini_ai(self, prompt: str) -> Optional[str]:
         return await self._execute_with_waterfall("search_gemini_ai", prompt)

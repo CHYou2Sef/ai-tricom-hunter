@@ -434,7 +434,7 @@ class SeleniumAgent(BaseBrowserAgent):
 
     # ── Search methods ─────────────────────────────────────────────────────
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """
         PRIMARY SEARCH — direct navigation to Google AI Mode URL.
         """
@@ -474,7 +474,7 @@ class SeleniumAgent(BaseBrowserAgent):
                 await self._record_interruption("exception", str(exc))
                 return None
 
-    async def submit_google_search(self, query: str) -> bool:
+    async def submit_google_search(self, prompt: str) -> bool:
         """Navigate to Google, submit a search query, return True on success."""
         if not self._driver:
             return False
@@ -491,7 +491,7 @@ class SeleniumAgent(BaseBrowserAgent):
             if not box:
                 return False
 
-            await self._human_type(box, query)
+            await self._human_type(box, prompt)
             await asyncio.to_thread(box.submit)
             await asyncio.sleep(2)
             return True
@@ -500,18 +500,18 @@ class SeleniumAgent(BaseBrowserAgent):
             logger.error(f"[Selenium] submit_google_search error: {exc}")
             return False
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Alias maintaining full HybridEngine / benchmark compatibility."""
-        return await self.search_google_ai_mode(query, ai_mode_url=ai_mode_url)
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """
         Interactive high-stealth search flow.
         """
         # For now, we fallback to the mode navigation as Selenium UC is already stealthy
-        return await self.search_google_ai_mode(prompt)
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def search_gemini_ai(self, query: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
         """Submit a query to Gemini and return response text."""
         if not self._driver:
             return None
@@ -524,7 +524,7 @@ class SeleniumAgent(BaseBrowserAgent):
             if not box:
                 return None
 
-            await self._human_type(box, query)
+            await self._human_type(box, prompt)
             await asyncio.to_thread(box.send_keys, "\n")
             await asyncio.sleep(5)
             return await self.get_page_source()

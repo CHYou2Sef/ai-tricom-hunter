@@ -29,7 +29,10 @@ services:
     cpus: "4.0"
 
     environment:
-      - CHROMIUM_BINARY_PATH=/usr/bin/google-chrome-stable
+      # CHROMIUM_BINARY_PATH: leave unset — config.find_chrome_executable() resolves
+      # Patchright Playwright chromium (chrome-linux64/) first. Forcing
+      # /usr/bin/google-chrome-stable broke when that symlink was missing or pointed
+      # at a binary incompatible with SeleniumBase UC + bundled chromedriver.
       - DOCKER_ENV=true
       # NOTE: PYTHONPATH is intentionally NOT set here.
       # It caused numpy "import from source directory" errors by prepending
@@ -44,6 +47,14 @@ services:
       - JINA_ENABLED=false
       - CRAWLEE_ENABLED=false
       - BOTASAURUS_ENABLED=false
+      # ── Tier 2 (SeleniumBase) temporary bypass ─────────────────────────
+      # Chrome 147 hangs on UC-driver attach in this container image.
+      # Boot directly on Tier 5 (Nodriver/CDP — no chromedriver needed).
+      # Re-enable after rebuilding with a pinned Playwright/Patchright version.
+      - SELENIUMBASE_ENABLED=true
+      - HYBRID_DEFAULT_TIER=2
+      # Fail fast if any browser tier hangs during startup (safety net)
+      - BROWSER_STARTUP_TIMEOUT_SEC=60
 
     env_file:
       - .env.prod

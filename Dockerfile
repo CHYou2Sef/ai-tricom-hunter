@@ -58,7 +58,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 RUN patchright install chromium \
     && python3 -m cloakbrowser install \
     && crawl4ai-setup \
-    && seleniumbase install chromedriver
+    && seleniumbase install chromedriver \
+    && seleniumbase install uc_driver
 
 # ── BROWSER BINARY PRUNING ────────────────────────────────────────────────
 RUN \
@@ -96,9 +97,15 @@ RUN \
     # 3. Strip debug symbols from C-extensions.
     #    IMPORTANT: Exclude packages with PyInit_ or internal symbol requirements.
     #    numpy / pandas / lxml / cryptography / aiohttp all have critical .so symbols.
+    #    Wheel-bundled BLAS/LAPACK live under *.libs/ (e.g. numpy.libs/libscipy_openblas*.so).
+    #    strip breaks their ELF LOAD segments → "page-aligned" ImportError and a misleading
+    #    numpy "source directory" message from numpy.__config__ re-raise logic.
     find "$SITE" -name "*.so" \
         ! -path "*/numpy/*" \
+        ! -path "*/numpy.libs/*" \
         ! -path "*/pandas/*" \
+        ! -path "*/pandas.libs/*" \
+        ! -path "*/scipy.libs/*" \
         ! -path "*/lxml/*" \
         ! -path "*/cryptography/*" \
         ! -path "*/aiohttp/*" \
@@ -144,6 +151,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 libasound2 \
     fonts-liberation \
     libxshmfence1 libglu1-mesa \
+    # Patchright/Playwright Chromium (chrome-linux64) needs Cairo/Pango stack
+    libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libdbus-1-3 \
     && apt-get autoremove -y && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     # Remove documentation and locale bloat from base image
@@ -160,8 +169,10 @@ COPY --from=builder /root/.seleniumbase           /root/.seleniumbase
 COPY --from=builder /root/.cache/seleniumbase     /root/.cache/seleniumbase
 
 # ── Symlink patchright Chromium to /usr/bin (used by SeleniumBase / Scrapy) ─
-RUN CHROMIUM_BIN=$(find /opt/ms-playwright -name "chrome" \
-        -path "*/chrome-linux/chrome" | head -n 1) && \
+# Playwright ships chrome under chrome-linux64/ (new) or chrome-linux/ (legacy).
+RUN CHROMIUM_BIN=$(find /opt/ms-playwright -name "chrome" \( \
+        -path "*/chrome-linux64/chrome" -o -path "*/chrome-linux/chrome" \) \
+        -type f 2>/dev/null | head -n 1) && \
     if [ -n "$CHROMIUM_BIN" ]; then \
         ln -sf "$CHROMIUM_BIN" /usr/bin/google-chrome && \
         ln -sf /usr/bin/google-chrome /usr/bin/google-chrome-stable || true; \

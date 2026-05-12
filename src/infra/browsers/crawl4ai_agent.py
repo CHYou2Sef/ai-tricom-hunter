@@ -117,10 +117,11 @@ class Crawl4AIAgent(BaseBrowserAgent):
                 logger.debug(f"[Crawl4AI] Re-using existing proxy: {self.current_proxy}")
 
         browser_args = ["--no-sandbox", "--disable-setuid-sandbox"] if os.getuid() == 0 else []
+        _proxy = {"server": self.current_proxy} if self.current_proxy else None
         browser_cfg = BrowserConfig(
-            headless=getattr(config, "HEADLESS", True), 
+            headless=getattr(config, "HEADLESS", True),
             extra_args=browser_args,
-            proxy=self.current_proxy
+            proxy_config=_proxy
         )
         self._crawler = AsyncWebCrawler(config=browser_cfg)
         await self._crawler.__aenter__()
@@ -247,35 +248,97 @@ class Crawl4AIAgent(BaseBrowserAgent):
         self._last_content = content
         return content
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """
         Use Crawl4AI to scrape Google AI Mode results for a query.
-        This is the Tier 3 equivalent of PlaywrightAgent.search_google_ai_mode().
 
-        Returns extracted page text for downstream enrichment.
+        Google AI Mode (udm=50) is a dynamic SPA — the AI answer is streamed
+        after the page loads. A plain scrape returns an empty shell.
+        We use Crawl4AI's js_code hook to wait for the AI response container.
         """
         from common.search_engine import generate_google_ai_url
-        url = ai_mode_url or generate_google_ai_url(query)
-        logger.info(f"[Crawl4AI] 🔍 Google AI Mode scrape: {query}")
-        return await self.scrape(url)
+        url = ai_mode_url or generate_google_ai_url(prompt)
+        logger.info(f"[Crawl4AI] 🔍 Google AI Mode (JS-wait): {prompt[:80]}...")
+        async with self._lock:
+            return await self._search_google_ai_mode_locked(url)
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
-        """Alias for search_google_ai (scrape) to maintain HybridEngine compatibility."""
-        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url)
+    async def _search_google_ai_mode_locked(self, url: str) -> Optional[str]:
+        """Internal: scrape Google AI Mode with JS wait for dynamic answer."""
+        if not await self._ensure_crawler_alive_locked():
+            return None
 
+        # JS injected AFTER page load: waits up to 30s for the AI answer container.
+        # Google AI Mode renders its answer inside [data-hveid], .YzFz, or .kno-result.
+        wait_js = """
+        (async () => {
+            const selectors = [
+                '[data-attrid="wa:/description"]',
+                '.kno-rdesc',
+                '.IZ6rdc',
+                '[jsname="yEVEwb"]',
+                '.wDYxhc',
+                '.LGOjhe',
+            ];
+            for (let i = 0; i < 60; i++) {
+                for (const sel of selectors) {
+                    const el = document.querySelector(sel);
+                    if (el && el.innerText && el.innerText.length > 50) return true;
+                }
+                await new Promise(r => setTimeout(r, 500));
+            }
+            return false;
+        })()
+        """
+        try:
+            from crawl4ai import CrawlerRunConfig  # type: ignore
+            run_cfg = CrawlerRunConfig(
+                js_code=wait_js,
+                wait_for="[data-attrid='wa:/description'],.kno-rdesc,.wDYxhc",
+                wait_for_timeout=25000,
+                word_count_threshold=10,
+                remove_overlay_elements=True,
+                bypass_cache=True,
+            )
+            if not self._crawler:
+                return None
+            assert self._crawler is not None
+            result = await self._crawler.arun(url=url, config=run_cfg)
+        except (ImportError, TypeError):
+            # Older crawl4ai API without CrawlerRunConfig — fall back to plain scrape
+            logger.warning("[Crawl4AI] CrawlerRunConfig not available — falling back to plain scrape.")
+            return await self._scrape_locked(url)
 
+        if result and result.success and result.markdown:
+            content = result.markdown.strip()
+            if self.is_block_response(content):
+                logger.warning("[Crawl4AI] Google AI Mode — blocked/CAPTCHA response detected.")
+                await self.report_proxy_error(self.current_proxy, 403)
+                return None
+            logger.info(f"[Crawl4AI] ✅ Google AI Mode — {len(content)} chars extracted.")
+            self._last_content = content
+            return content
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+        logger.warning(f"[Crawl4AI] Google AI Mode returned empty (status={getattr(result, 'status_code', '?')}). Falling back to plain page.")
+        # Last resort: return whatever was rendered
+        fallback = getattr(result, "markdown", None) or getattr(result, "html", None) or ""
+        self._last_content = fallback
+        return fallback or None
+
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+        """Alias for search_google_ai — maintains HybridEngine interface."""
+        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
+
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Interactive search fallback for Crawl4AI."""
-        return await self.search_google_ai(prompt)
+        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def submit_google_search(self, query: str) -> bool:
+    async def submit_google_search(self, prompt: str) -> bool:
         """
         Crawl4AI implementation of submit_google_search.
         """
         import urllib.parse
-        url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
-        logger.info(f"[Crawl4AI] 🔍 Google Search (submit): {query}")
+        url = f"https://www.google.com/search?q={urllib.parse.quote_plus(prompt)}"
+        logger.info(f"[Crawl4AI] 🔍 Google Search (submit): {prompt}")
         content = await self.scrape(url)
         # self._last_content is already updated in self.scrape()
         if content and len(content) > 200:
@@ -308,7 +371,7 @@ class Crawl4AIAgent(BaseBrowserAgent):
         self._last_content = content or ""
         return bool(content)
 
-    async def search_gemini_ai(self, query: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
         """
         Crawl4AI doesn't support interactive chat easily. 
         Escalating to next tier if Tier 3 cannot perform this.

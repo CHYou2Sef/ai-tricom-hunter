@@ -51,10 +51,13 @@ sys.path[:] = _SITE_PKGS + _OTHERS + _PROJECT
 # Solution: flush every numpy.* and pandas.* entry from the module cache NOW,
 # immediately after fixing sys.path. The next `import pandas` will re-resolve
 # from scratch using the corrected path and succeed.
-for _m in list(sys.modules):
-    if _m == "numpy" or _m.startswith("numpy.") \
-            or _m == "pandas" or _m.startswith("pandas."):
-        sys.modules.pop(_m, None)
+# Disabled: evicting numpy/pandas modules from sys.modules can corrupt
+# their already-loaded C-extension state and crash on next import.
+# The sys.path reordering above is the safe fix.
+# for _m in list(sys.modules):
+#     if _m == "numpy" or _m.startswith("numpy.") \
+#             or _m == "pandas" or _m.startswith("pandas."):
+#         sys.modules.pop(_m, None)
 
 # ── 2. Websockets compatibility shims ────────────────────────────────────
 try:
@@ -65,7 +68,7 @@ try:
     if not hasattr(websockets, "protocol"):
         try:
             from websockets.legacy import protocol as _lp
-            websockets.protocol = _lp
+            websockets.protocol = _lp  # type: ignore[attr-defined]
             sys.modules["websockets.protocol"] = _lp
         except (ImportError, AttributeError):
             pass
@@ -81,7 +84,7 @@ try:
                 server = _wsserver
 
             _shim = _AsyncioShim()
-            websockets.asyncio = _shim
+            websockets.asyncio = _shim  # type: ignore[attr-defined]
             sys.modules["websockets.asyncio"]        = _shim          # type: ignore[assignment]
             sys.modules["websockets.asyncio.client"] = _wsclient      # type: ignore[assignment]
             sys.modules["websockets.asyncio.server"] = _wsserver      # type: ignore[assignment]

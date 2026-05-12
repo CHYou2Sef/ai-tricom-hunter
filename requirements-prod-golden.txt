@@ -41,7 +41,7 @@ nodriver>=0.34
 websockets>=12.0,<13.0
 
 # ── Tier 6: Crawl4AI (managed JS rendering, uses patchright internally) ────
-patchright>=1.51.0
+patchright==1.49.0
 crawl4ai>=0.4.0
 
 # ── Scrapy Sniper (post-discovery bonus — fast HTTP phone extraction) ───────

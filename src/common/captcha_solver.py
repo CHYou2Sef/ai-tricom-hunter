@@ -331,8 +331,13 @@ async def _manual_solve_async(captcha_type: str) -> bool:
     solved = [False]
 
     def wait_input():
-        input("")
-        solved[0] = True
+        try:
+            input("")
+            solved[0] = True
+        except EOFError:
+            # Docker / non-interactive: stdin is /dev/null.
+            # No human at the keyboard — let the timeout expire naturally.
+            pass
 
     t = threading.Thread(target=wait_input, daemon=True)
     t.start()

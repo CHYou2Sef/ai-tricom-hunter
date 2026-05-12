@@ -138,7 +138,7 @@ class CrawleeAgent(BaseBrowserAgent):
 
     # ── Stub methods for BaseBrowserAgent contract ─────────────────────────
     
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """
         Implémentation de la recherche pour Crawlee (Tier 8).
         Extrait les termes de recherche et lance un mini-crawl sur Google Search.
@@ -170,13 +170,13 @@ class CrawleeAgent(BaseBrowserAgent):
             return self._last_content
         return None
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
-        return await self.search_google_ai_mode(query, ai_mode_url=ai_mode_url)
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
-        return await self.search_google_ai_mode(prompt)
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def submit_google_search(self, query: str) -> bool:
+    async def submit_google_search(self, prompt: str) -> bool:
         return False
 
     async def rotate_proxy(self) -> None:

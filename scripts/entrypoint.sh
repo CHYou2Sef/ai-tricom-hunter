@@ -51,7 +51,9 @@ echo "🔍 [$(date)] Starting Infrastructure Health Check..." > "$STARTUP_LOG"
     # 🕵️ Auto-fix symlinks if missing (Playwright/Patchright often changes paths)
     if ! command -v google-chrome &> /dev/null; then
         echo "⚠️ google-chrome missing from PATH. Attempting recovery..."
-        CHROME_FIND=$(find /opt/ms-playwright -name "chrome" -path "*/chrome-linux/chrome" | head -n 1)
+        CHROME_FIND=$(find /opt/ms-playwright -name "chrome" \( \
+            -path "*/chrome-linux64/chrome" -o -path "*/chrome-linux/chrome" \) \
+            -type f 2>/dev/null | head -n 1)
         if [ -n "$CHROME_FIND" ]; then
             ln -sf "$CHROME_FIND" /usr/bin/google-chrome
             ln -sf /usr/bin/google-chrome /usr/bin/google-chrome-stable
@@ -61,9 +63,16 @@ echo "🔍 [$(date)] Starting Infrastructure Health Check..." > "$STARTUP_LOG"
             CLOAK_FIND=$(find /root/.cloakbrowser -name "chrome" | head -n 1)
             if [ -n "$CLOAK_FIND" ]; then
                  ln -sf "$CLOAK_FIND" /usr/bin/google-chrome
+                 ln -sf /usr/bin/google-chrome /usr/bin/google-chrome-stable
                  echo "✅ Recovered Cloak Chrome at $CLOAK_FIND"
             fi
         fi
+    fi
+
+    # docker-compose may set CHROMIUM_BINARY_PATH=/usr/bin/google-chrome-stable; keep alias in sync
+    if [ -e /usr/bin/google-chrome ] && [ ! -e /usr/bin/google-chrome-stable ]; then
+        ln -sf /usr/bin/google-chrome /usr/bin/google-chrome-stable
+        echo "✅ Linked google-chrome-stable → google-chrome"
     fi
 
     if ! command -v chromedriver &> /dev/null; then
@@ -95,6 +104,15 @@ export DISPLAY=:99
 
 # Give Xvfb short time to initialize
 sleep 1
+
+# ── 3.5 SeleniumBase UC driver (image should bake this via Dockerfile) ───
+# Runtime evidence: missing uc_driver forces a mid-start download and makes
+# `docker compose logs` look hung until SeleniumBase finishes printing.
+UC_DRV="/usr/local/lib/python3.10/site-packages/seleniumbase/drivers/uc_driver"
+if [ ! -x "$UC_DRV" ]; then
+    echo "📥 SeleniumBase uc_driver missing in image — running: python3 -m seleniumbase install uc_driver"
+    python3 -m seleniumbase install uc_driver >>"$STARTUP_LOG" 2>&1 || echo "⚠️ uc_driver install failed — see $STARTUP_LOG"
+fi
 
 # ── 4. Execution ────────────────────────────────────────────────────
 echo "🚀 Booting IA Agent Engine..."

@@ -242,16 +242,16 @@ class CamoufoxAgent(BaseBrowserAgent):
     # SEARCH METHODS  (mirrors PatchrightAgent interface)
     # ─────────────────────────────────────────────────────────────────
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Search Google AI Mode (Firefox)."""
         async with self._lock:
             if not await self._ensure_page_locked():
                 return None
             try:
                 from common.search_engine import generate_google_ai_url
-                url = ai_mode_url or generate_google_ai_url(query)
+                url = ai_mode_url or generate_google_ai_url(prompt)
 
-                logger.info(f"[Camoufox] 🔍 Google AI Mode (Firefox): {query}")
+                logger.info(f"[Camoufox] 🔍 Google AI Mode (Firefox): {prompt}")
                 await self._page.goto(url, wait_until="load", timeout=30000)
                 await action_delay_async("read_wait")
 
@@ -280,25 +280,25 @@ class CamoufoxAgent(BaseBrowserAgent):
                         await self.report_proxy_error(self.current_proxy, 403)
                 return None
 
-    async def search_google_ai_mode(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Alias for search_google_ai — HybridEngine compatibility."""
-        return await self.search_google_ai(query, ai_mode_url=ai_mode_url)
+        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """
         Interactive high-stealth search flow for Camoufox.
         """
-        return await self.search_google_ai(prompt)
+        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def submit_google_search(self, query: str) -> bool:
+    async def submit_google_search(self, prompt: str) -> bool:
         """Navigate to Google standard search results page."""
         async with self._lock:
             if not await self._ensure_page_locked():
                 return False
             try:
                 import urllib.parse
-                url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
-                logger.info(f"[Camoufox] 🔍 Google Search (Firefox): {query}")
+                url = f"https://www.google.com/search?q={urllib.parse.quote_plus(prompt)}"
+                logger.info(f"[Camoufox] 🔍 Google Search (Firefox): {prompt}")
                 await self._page.goto(url, wait_until="domcontentloaded", timeout=20000)
                 await action_delay_async("navigate")
                 await self._handle_google_cookies_locked()
@@ -340,7 +340,7 @@ class CamoufoxAgent(BaseBrowserAgent):
             logger.error(f"[Camoufox] crawl_website error: {exc}")
             return ""
 
-    async def search_gemini_ai(self, query: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
         """
         Deep search using Google Gemini (Firefox/Camoufox).
         """
@@ -348,7 +348,7 @@ class CamoufoxAgent(BaseBrowserAgent):
             if not await self._ensure_page_locked():
                 return None
             try:
-                logger.info(f"[Camoufox] 🤖 Gemini (Firefox): {query}")
+                logger.info(f"[Camoufox] 🤖 Gemini (Firefox): {prompt}")
                 await self._page.goto(config.GEMINI_URL, wait_until="load")
                 await asyncio.sleep(4)
                 
@@ -371,7 +371,7 @@ class CamoufoxAgent(BaseBrowserAgent):
                     
                 await chat_input.click()
                 if not self._page: return None
-                await self._page.keyboard.type(query)
+                await self._page.keyboard.type(prompt)
                 await self._page.keyboard.press("Enter")
                 
                 # Stable response extraction

@@ -102,6 +102,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         self._driver = None                         # seleniumbase.Driver instance
         self.current_proxy: Optional[str] = None
         self._session_start_ts: float = 0.0
+        self._last_content: str = ""
         self._fingerprint = get_fingerprint_bundle()
         self.last_interruption_reason: Optional[str] = None
         self.last_interruption_ts: Optional[float] = None
@@ -181,8 +182,22 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             f"[SeleniumBase] 🚀 Starting UC Driver "
             f"(worker={self.worker_id}, proxy={self.current_proxy or 'direct'})..."
         )
+        _timeout = getattr(config, "BROWSER_STARTUP_TIMEOUT_SEC", 90.0)
         try:
-            await asyncio.to_thread(self._sync_start)
+            await asyncio.wait_for(
+                asyncio.to_thread(self._sync_start),
+                timeout=_timeout,
+            )
+        except asyncio.TimeoutError:
+            _msg = (
+                f"[SeleniumBase] ⏰ UC Driver TIMED OUT after {_timeout:.0f}s — "
+                "Chrome/chromedriver version mismatch (e.g. Playwright Chromium updated "
+                "but uc_driver cache is stale). Tier 2 will be skipped by HybridEngine."
+            )
+            logger.error(_msg)
+            await self._record_interruption("startup_timeout", _msg)
+            self._driver = None
+            raise RuntimeError(_msg)
         except Exception as exc:
             await self._record_interruption("startup_failure", str(exc))
             raise
@@ -208,15 +223,30 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             logger.info(f"[SeleniumBase] 🔌 Using proxy: {proxy_str}")
 
         # ── Suppression of automation alerts & Sandbox handling ──
+        # Docker runs Chrome as root without /dev/shm sizing → needs classic flags.
         extra_args = "--disable-infobars --disable-notifications"
-        if not getattr(config, "DOCKER_ENV", False):
-            extra_args += " --no-sandbox=false" 
+        if getattr(config, "DOCKER_ENV", False):
+            extra_args += " --no-sandbox --disable-dev-shm-usage"
 
         # ── Persistent Profile Handling ──
         profile_path = config.get_worker_profile_path(self.worker_id, "seleniumbase")
         logger.info(f"[SeleniumBase] 📂 Using persistent profile: {profile_path}")
 
-        self._driver = Driver(
+        # SeleniumBase may print a long uc_driver bootstrap to stdout without flush;
+        # keep structured logs so docker-compose -f does not look "stuck" mid-start.
+        logger.info(
+            "[SeleniumBase] ⏳ Launching UC Driver (first run can take 30–120s while "
+            "Chrome attaches to Xvfb)…"
+        )
+        try:
+            import sys
+
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+
+        driver = Driver(
             uc=True,
             headless=False,
             user_data_dir=profile_path,
@@ -226,6 +256,19 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             locale_code="fr",
             chromium_arg=extra_args,
         )
+        self._driver = driver
+
+        try:
+            import sys
+
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+        logger.info("[SeleniumBase] Driver() constructor returned; finishing session setup…")
+
+        if not self._driver:
+            raise RuntimeError("SeleniumBase Driver initialization returned None")
 
         # ── Resize window to fingerprinted viewport ────────────────────────
         try:
@@ -346,12 +389,12 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
     # ── Search methods ────────────────────────────────────────────────────────
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """⭐ PRIMARY SEARCH — direct navigation to Google AI Mode."""
         async with self._lock:
-            return await self._search_google_ai_mode_locked(prompt, ai_mode_url)
+            return await self._search_google_ai_mode_locked(prompt, ai_mode_url, row)
 
-    async def _search_google_ai_mode_locked(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def _search_google_ai_mode_locked(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Internal locked AI Mode search."""
         if not await self._ensure_driver_alive_locked():
             return None
@@ -415,12 +458,12 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             await self._record_interruption("exception", str(exc))
             return None
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """🎭 HIGH-STEALTH INTERACTIVE SEARCH (Human-Like)"""
         async with self._lock:
-            return await self._search_google_ai_interactive_locked(prompt, row)
+            return await self._search_google_ai_interactive_locked(prompt, ai_mode_url, row)
 
-    async def _search_google_ai_interactive_locked(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def _search_google_ai_interactive_locked(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Internal locked interactive search."""
         if not await self._ensure_driver_alive_locked():
             return None
@@ -492,22 +535,23 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         # ── 7. Wait for stable response ────────────────────────────────────
         return await self._wait_for_stable_response_locked(timeout_sec=30)
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Alias maintaining full HybridEngine / benchmark compatibility."""
-        return await self.search_google_ai_mode(query, ai_mode_url=ai_mode_url)
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
 
 
-    async def submit_google_search(self, query: str) -> bool:
-        """Navigate to Google, dismiss cookies, type query, press Enter."""
+    async def submit_google_search(self, prompt: str) -> bool:
+        """Navigate to Google, dismiss cookies, type prompt, press Enter."""
         async with self._lock:
-            return await self._submit_google_search_locked(query)
+            return await self._submit_google_search_locked(prompt)
 
-    async def _submit_google_search_locked(self, query: str) -> bool:
+    async def _submit_google_search_locked(self, prompt: str) -> bool:
         """Internal locked search submission."""
         if not await self._ensure_driver_alive_locked():
             return False
 
         try:
+            assert self._driver is not None  # guaranteed by _ensure_driver_alive_locked()
             await asyncio.to_thread(self._driver.get, config.GOOGLE_URL)
             await asyncio.sleep(1)
 
@@ -520,7 +564,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             for sel in ["textarea[name='q']", "input[name='q']"]:
                 try:
                     await asyncio.to_thread(self._driver.wait_for_element_visible, sel, timeout=5)
-                    await asyncio.to_thread(self._sync_human_type_locked, self._driver, sel, query)
+                    await asyncio.to_thread(self._sync_human_type_locked, self._driver, sel, prompt)
                     await asyncio.to_thread(self._driver.send_keys, sel, "\n")
                     await asyncio.sleep(2)
                     return True
@@ -535,18 +579,19 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                     await self.report_proxy_error(self.current_proxy, 403)
             return False
 
-    async def search_gemini_ai(self, query: str) -> Optional[str]:
-        """Submit a query to Gemini and return the streamed response text."""
+    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
+        """Submit a prompt to Gemini and return the streamed response text."""
         async with self._lock:
-            return await self._search_gemini_ai_locked(query)
+            return await self._search_gemini_ai_locked(prompt)
 
-    async def _search_gemini_ai_locked(self, query: str) -> Optional[str]:
+    async def _search_gemini_ai_locked(self, prompt: str) -> Optional[str]:
         """Internal locked Gemini search."""
         if not await self._ensure_driver_alive_locked():
             return None
 
         try:
-            logger.info(f"🚀 [SeleniumBase-Gemini] DeepSearch: {query}")
+            assert self._driver is not None  # guaranteed by _ensure_driver_alive_locked()
+            logger.info(f"🚀 [SeleniumBase-Gemini] DeepSearch: {prompt}")
             await asyncio.to_thread(self._driver.get, config.GEMINI_URL)
             await asyncio.sleep(3)
             if not self._driver: return None
@@ -563,7 +608,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                 logger.warning("[SeleniumBase-Gemini] Input area not found.")
                 return None
 
-            await asyncio.to_thread(self._sync_human_type_locked, self._driver, input_sel, query)
+            await asyncio.to_thread(self._sync_human_type_locked, self._driver, input_sel, prompt)
             await asyncio.to_thread(self._driver.send_keys, input_sel, "\n")
             await asyncio.sleep(1)
 

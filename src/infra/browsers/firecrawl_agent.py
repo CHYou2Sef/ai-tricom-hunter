@@ -151,7 +151,7 @@ class FirecrawlAgent(BaseBrowserAgent):
 
     # ── Stub methods for BaseBrowserAgent contract ─────────────────────────
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Adaptateur pour la recherche Google via Firecrawl."""
         if not self.enabled or not self._app:
             return None
@@ -204,14 +204,14 @@ class FirecrawlAgent(BaseBrowserAgent):
                 logger.error(f"[Firecrawl] Native search failed: {e}")
             return None
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
-        return await self.search_google_ai_mode(query, ai_mode_url=ai_mode_url)
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Interactive search fallback for Firecrawl."""
-        return await self.search_google_ai_mode(prompt)
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def submit_google_search(self, query: str) -> bool:
+    async def submit_google_search(self, prompt: str) -> bool:
         """Pas de session interactive pour soumettre un formulaire."""
         return False
 

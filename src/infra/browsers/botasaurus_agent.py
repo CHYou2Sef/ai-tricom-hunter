@@ -41,11 +41,11 @@ from botasaurus.browser import browser, Driver
     proxy=lambda data: data.get("proxy")
 )
 def search_google_ai_task(driver: Driver, data: dict):
-    query = str(data.get("query") or data.get("prompt") or "")
+    prompt = str(data.get("prompt") or "")
     ai_mode_url = data.get("ai_mode_url")
 
     from common.search_engine import generate_google_ai_url
-    url = ai_mode_url or generate_google_ai_url(query)
+    url = ai_mode_url or generate_google_ai_url(prompt)
     
     driver.get(url)
     driver.sleep(2)
@@ -74,9 +74,9 @@ def crawl_url_task(driver: Driver, data: dict):
     proxy=lambda data: data.get("proxy")
 )
 def submit_google_search_task(driver: Driver, data: dict):
-    query = str(data.get("query") or "")
+    prompt = str(data.get("prompt") or "")
     import urllib.parse
-    encoded = urllib.parse.quote_plus(query)
+    encoded = urllib.parse.quote_plus(prompt)
     url = f"https://www.google.com/search?q={encoded}"
     driver.get(url)
     driver.sleep(2)
@@ -91,14 +91,14 @@ def submit_google_search_task(driver: Driver, data: dict):
     proxy=lambda data: data.get("proxy")
 )
 def search_gemini_ai_task(driver: Driver, data: dict):
-    query = str(data.get("query") or "")
+    prompt = str(data.get("prompt") or "")
     driver.get(config.GEMINI_URL)
     driver.sleep(2)
     
     # Needs actual interaction for Gemini, this is basic
     input_box = driver.select("textarea")
     if input_box:
-        driver.type("textarea", query)
+        driver.type("textarea", prompt)
         driver.sleep(1)
         driver.click("button[type='submit']")
         driver.sleep(4)
@@ -192,15 +192,15 @@ class BotasaurusAgent(BaseBrowserAgent):
         return self._last_content
 
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
-        logger.info(f"[Botasaurus] 🔍 Google AI Mode: {query}")
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+        logger.info(f"[Botasaurus] 🔍 Google AI Mode: {prompt}")
 
         try:
             # On passe le profil dynamiquement via les data si nécessaire, 
             # ou on laisse Botasaurus gérer des profils temporaires isolés.
             async with self._lock:
                 html = await asyncio.to_thread(search_google_ai_task, {
-                    "query": query,
+                    "prompt": prompt,
                     "ai_mode_url": ai_mode_url,
                     "profile": f"botasaurus_worker_{self.worker_id}",
                     "proxy": self.current_proxy
@@ -223,19 +223,19 @@ class BotasaurusAgent(BaseBrowserAgent):
             logger.error(f"[Botasaurus] Error: {e}")
             return None
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
-        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url)
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Interactive search fallback for Botasaurus."""
-        return await self.search_google_ai(prompt)
+        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
 
 
-    async def submit_google_search(self, query: str) -> bool:
-        logger.info(f"[Botasaurus] 🔍 Google Search: {query}")
+    async def submit_google_search(self, prompt: str) -> bool:
+        logger.info(f"[Botasaurus] 🔍 Google Search: {prompt}")
         try:
             async with self._lock:
-                success = await asyncio.to_thread(submit_google_search_task, {"query": query, "proxy": self.current_proxy})
+                success = await asyncio.to_thread(submit_google_search_task, {"prompt": prompt, "proxy": self.current_proxy})
                 # Re-check content if possible (Botasaurus task returns bool here, but let's be safe)
                 if not success:
                     await self.report_proxy_error("google_search", 403)
@@ -248,11 +248,11 @@ class BotasaurusAgent(BaseBrowserAgent):
             logger.error(f"[Botasaurus] Error: {e}")
             return False
 
-    async def search_gemini_ai(self, query: str) -> Optional[str]:
-        logger.info(f"[Botasaurus] 🤖 Gemini search: {query}")
+    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
+        logger.info(f"[Botasaurus] 🤖 Gemini search: {prompt}")
         try:
             async with self._lock:
-                html = await asyncio.to_thread(search_gemini_ai_task, {"query": query, "proxy": self.current_proxy})
+                html = await asyncio.to_thread(search_gemini_ai_task, {"prompt": prompt, "proxy": self.current_proxy})
                 self._last_content = html or ""
                 
                 if self.is_block_response(self._last_content):

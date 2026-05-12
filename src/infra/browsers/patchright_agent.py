@@ -209,16 +209,13 @@ class PatchrightAgent(BaseBrowserAgent):
 
     # ── Main Search Method (phone-focused, NO AI/LLM) ─────────────────────
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
-        """Perform a Google search and extract content. Alias for compatibility."""
-        return await self.search_google_ai_mode(query, ai_mode_url=ai_mode_url)
 
-    async def submit_google_search(self, query: str) -> bool:
+    async def submit_google_search(self, prompt: str) -> bool:
         """Navigate to Google and submit search query."""
         async with self._lock:
-            return await self._submit_google_search_locked(query)
+            return await self._submit_google_search_locked(prompt)
 
-    async def _submit_google_search_locked(self, query: str) -> bool:
+    async def _submit_google_search_locked(self, prompt: str) -> bool:
         if not await self._ensure_page_locked():
             return False
         
@@ -226,7 +223,7 @@ class PatchrightAgent(BaseBrowserAgent):
         if not page: return False
         
         try:
-            logger.info(f"[Patchright] 🔍 Google Search: {query}")
+            logger.info(f"[Patchright] 🔍 Google Search: {prompt}")
             await page.goto(config.GOOGLE_URL, wait_until="load", timeout=30000)
             await self._handle_google_cookies_locked(page)
             await self._handle_captcha_if_present_locked(page)
@@ -246,7 +243,7 @@ class PatchrightAgent(BaseBrowserAgent):
             search_input = await self._find_input_locked(page, GOOGLE_SEARCH_INPUT)
             if search_input:
                 await search_input.click()
-                await self._human_type_locked(page, query)
+                await self._human_type_locked(page, prompt)
                 await search_input.press("Enter")
                 await asyncio.sleep(2)
                 return True
@@ -257,9 +254,9 @@ class PatchrightAgent(BaseBrowserAgent):
                 await self.report_proxy_error(self.current_proxy, 403)
             return False
 
-    async def _navigate_and_search_locked(self, page: Page, query: str) -> None:
+    async def _navigate_and_search_locked(self, page: Page, prompt: str) -> None:
         """Internal lock-free navigate and search."""
-        logger.info(f"[Google] Search: {query}")
+        logger.info(f"[Google] Search: {prompt}")
         await page.goto(config.GOOGLE_URL, wait_until="load")
         await self._handle_google_cookies_locked(page)
         await self._handle_captcha_if_present_locked(page)
@@ -270,7 +267,7 @@ class PatchrightAgent(BaseBrowserAgent):
         search_box = await self._find_input_locked(page, GOOGLE_SEARCH_INPUT)
         if search_box:
             await search_box.click()
-            await self._human_type_locked(page, query)
+            await self._human_type_locked(page, prompt)
             await search_box.press("Enter")
             await asyncio.sleep(2)
             await self._click_ai_mode_tab_locked(page)
@@ -377,7 +374,7 @@ class PatchrightAgent(BaseBrowserAgent):
             logger.error(f"[Patchright] Crawl error for {url}: {e}")
             return ""
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """PRIMARY SEARCH METHOD — TIER 0"""
         async with self._lock:
             if not await self._ensure_page_locked():
@@ -493,14 +490,14 @@ class PatchrightAgent(BaseBrowserAgent):
             await self._close_locked()
             await self._start_locked()
 
-    async def search_gemini_ai(self, query: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
         """Deep search using Google Gemini."""
         async with self._lock:
             if not await self._ensure_page_locked(): return None
             page = self._page
             if not page: return None
             try:
-                logger.info(f"🚀 [Gemini] search: {query}")
+                logger.info(f"🚀 [Gemini] search: {prompt}")
                 await page.goto(config.GEMINI_URL, wait_until="load")
                 chat_input = None
                 for s in GEMINI_INPUT_SELECTORS:
@@ -508,7 +505,7 @@ class PatchrightAgent(BaseBrowserAgent):
                     if chat_input: break
                 if not chat_input: return None
                 await chat_input.click()
-                await self._human_type_locked(page, query)
+                await self._human_type_locked(page, prompt)
                 await page.keyboard.press("Enter")
                 return await self._wait_for_streaming_response_locked(page, GEMINI_RESPONSE_SELECTORS)
             except Exception as e:
@@ -559,6 +556,10 @@ class PatchrightAgent(BaseBrowserAgent):
             except: continue
         return None
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+        """Legacy AI search fallback."""
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Interactive high-stealth search flow."""
-        return await self.search_google_ai_mode(prompt)
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)

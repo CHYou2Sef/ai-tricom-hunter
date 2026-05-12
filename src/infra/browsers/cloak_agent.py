@@ -188,6 +188,8 @@ class CloakAgent(BaseBrowserAgent):
             return False
         
         try:
+            if not self.page:
+                return False
             await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
             
             # Post-navigation health check (detect immediate blocks)
@@ -206,12 +208,12 @@ class CloakAgent(BaseBrowserAgent):
             logger.debug(f"[Cloak] Failed to visit {url}: {e}")
             return False
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """⭐ PRIMARY SEARCH — Google AI Mode via CloakBrowser."""
         async with self._lock:
-            return await self._search_google_ai_mode_locked(prompt, ai_mode_url)
+            return await self._search_google_ai_mode_locked(prompt, ai_mode_url, row)
 
-    async def _search_google_ai_mode_locked(self, prompt: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def _search_google_ai_mode_locked(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         if not await self._ensure_page_locked():
             return None
 
@@ -312,12 +314,12 @@ class CloakAgent(BaseBrowserAgent):
                 continue
         return prev_text if prev_text else None
 
-    async def submit_google_search(self, query: str) -> bool:
+    async def submit_google_search(self, prompt: str) -> bool:
         """Submit a standard Google search."""
         async with self._lock:
-            return await self._submit_google_search_locked(query)
+            return await self._submit_google_search_locked(prompt)
 
-    async def _submit_google_search_locked(self, query: str) -> bool:
+    async def _submit_google_search_locked(self, prompt: str) -> bool:
         """Internal lock-free search submission."""
         if not await self._ensure_page_locked():
             return False
@@ -347,7 +349,7 @@ class CloakAgent(BaseBrowserAgent):
                     search_box = search_box_locator.first
                     if await search_box.is_visible():
                         await search_box.click()
-                        await self.page.keyboard.type(query, delay=random.randint(50, 150))
+                        await self.page.keyboard.type(prompt, delay=random.randint(50, 150))
                         await search_box.press("Enter")
                         
                         # Post-submission check
@@ -421,25 +423,25 @@ class CloakAgent(BaseBrowserAgent):
             logger.error(f"[Cloak] Crawl error for {url}: {e}")
             return ""
 
-    async def search_google_ai(self, query: str, ai_mode_url: Optional[str] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Legacy AI search fallback."""
-        return await self.search_google_ai_mode(query, ai_mode_url=ai_mode_url)
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def search_google_ai_interactive(self, prompt: str, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Interactive search fallback for Cloak."""
-        return await self.search_google_ai_mode(prompt)
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def search_gemini_ai(self, query: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
         """Search via Gemini UI."""
         async with self._lock:
-            return await self._search_gemini_ai_locked(query)
+            return await self._search_gemini_ai_locked(prompt)
 
-    async def _search_gemini_ai_locked(self, query: str) -> Optional[str]:
+    async def _search_gemini_ai_locked(self, prompt: str) -> Optional[str]:
         if not await self._ensure_page_locked():
             return None
 
         try:
-            logger.info(f"🚀 [Cloak-Gemini] DeepSearch: {query}")
+            logger.info(f"🚀 [Cloak-Gemini] DeepSearch: {prompt}")
             if not self.page:
                 return None
             await self.page.goto(config.GEMINI_URL, wait_until="load")
@@ -467,7 +469,7 @@ class CloakAgent(BaseBrowserAgent):
 
             if not self.page: return None
             await chat_input.click()
-            await self._human_type_cloak_locked(query)
+            await self._human_type_cloak_locked(prompt)
             await self.page.keyboard.press("Enter")
 
             return await self._wait_for_streaming_response_locked(GEMINI_RESPONSE_SELECTORS, stable_wait_sec=4)

@@ -238,6 +238,10 @@ ACTION_DELAY_PROFILES = {
 BROWSER_MAX_RECONNECT_ATTEMPTS = int(os.getenv("BROWSER_MAX_RECONNECT_ATTEMPTS", "3"))
 # Timeout in seconds to detect a stale (unresponsive) page
 BROWSER_STALE_TIMEOUT_SEC      = int(os.getenv("BROWSER_STALE_TIMEOUT_SEC", "15"))
+# Max seconds to wait for any browser tier to start (e.g. Driver() constructor).
+# If exceeded, the tier is skipped and the HybridEngine falls through to the next.
+# Set lower in docker-compose env to fail faster when Chrome 147 hangs on UC attach.
+BROWSER_STARTUP_TIMEOUT_SEC    = float(os.getenv("BROWSER_STARTUP_TIMEOUT_SEC", "90"))
 
 # ═══════════════════════════════════════════════════════════════════
 # 🤖  CAPTCHA SOLVER  (optional — works without API keys)
@@ -395,13 +399,18 @@ def find_chrome_executable() -> str:
         
     # 2. Docker Context
     if os.path.exists("/.dockerenv") or os.environ.get("DOCKER_ENV"):
-        # We prioritize our optimized/stealth binaries over system chrome to save space
-        # Try Patchright (Optimized for anti-bot)
-        patch_path = "/opt/ms-playwright/chromium-1151/chrome-linux/chrome" # Typical path
-        # But we will use a more robust way: find it via glob in case version changes
+        # We prioritize Patchright/Playwright Chromium (stock layout for SeleniumBase UC).
+        # Playwright ≥1.40+ uses chrome-linux64/; older builds used chrome-linux/.
         import glob
-        patch_candidates = glob.glob("/opt/ms-playwright/chromium-*/chrome-linux/chrome")
-        if patch_candidates and os.path.exists(patch_candidates[0]):
+
+        patch_candidates: list[str] = []
+        for pattern in (
+            "/opt/ms-playwright/chromium-*/chrome-linux64/chrome",
+            "/opt/ms-playwright/chromium-*/chrome-linux/chrome",
+        ):
+            patch_candidates.extend(glob.glob(pattern))
+        patch_candidates = sorted({p for p in patch_candidates if os.path.isfile(p)}, reverse=True)
+        if patch_candidates:
             return patch_candidates[0]
 
         # Try CloakBrowser
