@@ -421,12 +421,13 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             return None
 
         # ── URL construction ─────────────────────────────────────────────
+        from common.search_engine import generate_google_ai_url, extract_search_terms
         if ai_mode_url:
             import urllib.parse
-            url = ai_mode_url + urllib.parse.quote_plus(prompt)
+            clean_query = extract_search_terms(prompt)
+            url = ai_mode_url + urllib.parse.quote_plus(clean_query)
             provider_label = "AI-Mode"
         else:
-            from common.search_engine import generate_google_ai_url
             url = generate_google_ai_url(prompt)
             provider_label = "Google-AI-Mode"
 

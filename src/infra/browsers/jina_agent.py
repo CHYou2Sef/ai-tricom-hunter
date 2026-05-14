@@ -74,13 +74,13 @@ class JinaAgent(BaseBrowserAgent):
                 # Validation standard des erreurs
                 if response.status_code == 402:
                     logger.error("[Jina] 🛑 CRÉDITS ÉPUISÉS (Statut 402).")
-                    self.report_proxy_error(url, 402)
+                    await self.report_proxy_error(url, 402)
                     self.enabled = False
                     return False
                 
                 if response.status_code == 403:
                     logger.warning(f"[Jina] 🛑 BLOCAGE DÉTECTÉ (403) pour {url}")
-                    self.report_proxy_error(url, 403)
+                    await self.report_proxy_error(url, 403)
                     return False
 
                 if response.status_code == 200:
@@ -89,13 +89,13 @@ class JinaAgent(BaseBrowserAgent):
                     # Check for WAF content blocks in the markdown
                     if self.is_block_response(self._last_content):
                         logger.warning(f"[Jina] 🛑 BLOCAGE DÉTECTÉ (Contenu) pour {url}")
-                        self.report_proxy_error(url, 403)
+                        await self.report_proxy_error(url, 403)
                         return False
                         
                     return True
                 else:
                     logger.error(f"[Jina] Failed with status {response.status_code}")
-                    self.report_proxy_error(url, response.status_code)
+                    await self.report_proxy_error(url, response.status_code)
                     return False
         except Exception as e:
             logger.error(f"[Jina] Error fetching {url}: {e}")
@@ -112,27 +112,17 @@ class JinaAgent(BaseBrowserAgent):
 
     async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
         """Utilise le endpoint de recherche natif de Jina AI (s.jina.ai)."""
-        import urllib.parse
-        import re
+        from common.search_engine import extract_search_terms
+        search_query = extract_search_terms(prompt)
 
         # Si un ai_mode_url est fourni, on l'utilise directement
         if ai_mode_url:
-            logger.info(f"[Jina] Reading direct AI Mode URL: {ai_mode_url}")
-            if await self.goto_url(ai_mode_url):
+            import urllib.parse
+            url = ai_mode_url + urllib.parse.quote_plus(search_query)
+            logger.info(f"[Jina] Reading direct AI Mode URL: {url}")
+            if await self.goto_url(url):
                 return self._last_content
             return None
-
-        search_query = prompt
-        if len(prompt) > 200 or "###" in prompt:
-            name_match = re.search(r"NAME:\s*(.*)", prompt)
-            addr_match = re.search(r"ADDRESS:\s*(.*)", prompt)
-            if name_match:
-                search_query = name_match.group(1).strip()
-                if addr_match:
-                    addr = addr_match.group(1).strip()
-                    search_query += f" {addr}"
-            else:
-                search_query = prompt[:150]
 
         search_url = f"https://s.jina.ai/{urllib.parse.quote(search_query)}"
         headers = {"Accept": "text/plain"}
@@ -148,29 +138,26 @@ class JinaAgent(BaseBrowserAgent):
                 
                 if response.status_code == 402:
                     logger.error("[Jina] 🛑 CRÉDITS ÉPUISÉS (Statut 402).")
-                    self.report_proxy_error(search_url, 402)
+                    await self.report_proxy_error(search_url, 402)
                     self.enabled = False
                     return None
                     
                 if response.status_code == 403:
                     logger.warning(f"[Jina] 🛑 BLOCAGE DÉTECTÉ (403) via s.jina.ai")
-                    self.report_proxy_error(search_url, 403)
+                    await self.report_proxy_error(search_url, 403)
                     return None
 
                 if response.status_code == 200:
                     content = response.text
                     if self.is_block_response(content):
                         logger.warning(f"[Jina] 🛑 BLOCAGE DÉTECTÉ (Contenu) via s.jina.ai")
-                        self.report_proxy_error(search_url, 403)
+                        await self.report_proxy_error(search_url, 403)
                         return None
                     return content
                 else:
                     logger.error(f"[Jina] Echec de la recherche (statut {response.status_code})")
-                    self.report_proxy_error(search_url, response.status_code)
+                    await self.report_proxy_error(search_url, response.status_code)
                     return None
-        except Exception as e:
-            logger.error(f"[Jina] Erreur de recherche: {e}")
-            return None
         except Exception as e:
             logger.error(f"[Jina] Erreur de recherche: {e}")
             return None

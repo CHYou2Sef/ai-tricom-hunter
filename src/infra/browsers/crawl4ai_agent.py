@@ -156,7 +156,8 @@ class Crawl4AIAgent(BaseBrowserAgent):
         if not await self._ensure_crawler_alive_locked():
             return None
 
-        backoff_delays = [5, 15, 30]
+        speed_multiplier = getattr(config, "NETWORK_SPEED_MULTIPLIER", 1.0)
+        backoff_delays = [d * speed_multiplier for d in [5, 15, 30]]
 
         for attempt, delay in enumerate(backoff_delays, start=1):
             try:
@@ -168,6 +169,7 @@ class Crawl4AIAgent(BaseBrowserAgent):
                     word_count_threshold=10,
                     exclude_external_links=True,
                     remove_overlay_elements=True,
+                    bypass_cache=True,
                 )
 
 
@@ -247,8 +249,14 @@ class Crawl4AIAgent(BaseBrowserAgent):
         after the page loads. A plain scrape returns an empty shell.
         We use Crawl4AI's js_code hook to wait for the AI response container.
         """
-        from common.search_engine import generate_google_ai_url
-        url = ai_mode_url or generate_google_ai_url(prompt)
+        from common.search_engine import extract_search_terms, generate_google_ai_url
+        search_query = extract_search_terms(prompt)
+        
+        if ai_mode_url:
+            import urllib.parse
+            url = ai_mode_url + urllib.parse.quote_plus(search_query)
+        else:
+            url = generate_google_ai_url(prompt)
         logger.info(f"[Crawl4AI] 🔍 Google AI Mode (JS-wait): {prompt[:80]}...")
         async with self._lock:
             return await self._search_google_ai_mode_locked(url)
@@ -367,7 +375,7 @@ class Crawl4AIAgent(BaseBrowserAgent):
         (e.g. google.com/search?q=). When prompt is empty we fail fast so
         HybridEngine can escalate to another tier.
         """
-        if prompt is None or not str(prompt).strip():
+        if prompt is None or not prompt.strip():
             raise ValueError("Crawl4AIAgent.search_google_ai_mode() received empty prompt; refusing to build AI-mode URL.")
         return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
 

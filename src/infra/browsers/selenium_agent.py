@@ -442,8 +442,14 @@ class SeleniumAgent(BaseBrowserAgent):
             if not await self._ensure_driver_alive_locked():
                 return None
             
-            from common.search_engine import generate_google_ai_url
-            url = ai_mode_url or generate_google_ai_url(prompt)
+            if ai_mode_url:
+                import urllib.parse
+                from common.search_engine import extract_search_terms
+                clean_query = extract_search_terms(prompt)
+                url = ai_mode_url + urllib.parse.quote_plus(clean_query)
+            else:
+                from common.search_engine import generate_google_ai_url
+                url = generate_google_ai_url(prompt)
 
             try:
                 logger.info(f"🤖 [Selenium-AI-Mode] Navigating for prompt ({len(prompt)} chars)")

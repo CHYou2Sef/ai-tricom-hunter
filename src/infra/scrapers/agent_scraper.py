@@ -17,9 +17,11 @@
 ║    Solution: never import reactor directly — let crochet own it.         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
+
 import asyncio
 import json
 import logging
+from typing import Any, Generator, Optional
 
 # ── FIX: Initialize crochet FIRST — before any Scrapy/Twisted imports ────────
 # crochet.setup() installs the Twisted reactor in a dedicated background
@@ -35,6 +37,7 @@ import scrapy
 from scrapy.crawler import CrawlerRunner
 from scrapy.signalmanager import dispatcher
 from scrapy import signals
+from scrapy.http import Response
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +65,13 @@ FALLBACK_SELECTORS = {
 class GenericSpider(scrapy.Spider):
     name = "generic_spider"
 
-    def __init__(self, url=None, extraction_rules=None, *args, **kwargs):
+    def __init__(self, url: Optional[str] = None, extraction_rules: Optional[str] = None, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
-        self.start_urls = [url] if url else []
-        self.extraction_rules = json.loads(extraction_rules) if extraction_rules else {}
-        self.results = []
+        self.start_urls: list[str] = [url] if url else []
+        self.extraction_rules: dict[str, str] = json.loads(extraction_rules) if extraction_rules else {}
+        self.results: list[dict[str, Any]] = []
 
-    def parse(self, response):
+    def parse(self, response: Response, **kwargs: Any) -> Generator[dict[str, Any], None, None]:
         item = {}
 
         # 1. Try LLM-generated dynamic rules first
@@ -95,7 +98,7 @@ class GenericSpider(scrapy.Spider):
 
 
 @crochet.wait_for(timeout=30.0)
-def _run_spider_crochet(url: str, extraction_rules: dict, results_list: list):
+def _run_spider_crochet(url: str, extraction_rules: dict[str, str], results_list: list[dict[str, Any]]) -> Any:
     """
     Run the Scrapy spider via crochet's blocking bridge.
 
@@ -106,7 +109,7 @@ def _run_spider_crochet(url: str, extraction_rules: dict, results_list: list):
     function on every call to prevent signal handler accumulation across
     multiple invocations (which would cause duplicate items in results_list).
     """
-    def _on_item_scraped(item, response, spider):
+    def _on_item_scraped(item: dict[str, Any], response: Response, spider: scrapy.Spider) -> None:
         results_list.append(dict(item))
 
     # Connect signal for this specific run
@@ -141,7 +144,7 @@ def _run_spider_crochet(url: str, extraction_rules: dict, results_list: list):
             extraction_rules=json.dumps(extraction_rules),
         )
 
-        def _cleanup(result):
+        def _cleanup(result: Any) -> Any:
             try:
                 dispatcher.disconnect(_on_item_scraped, signal=signals.item_scraped)
             except Exception:
@@ -154,7 +157,7 @@ def _run_spider_crochet(url: str, extraction_rules: dict, results_list: list):
     return _deferred_with_cleanup()
 
 
-async def run_ai_spider(url: str, selectors: dict = None) -> dict:
+async def run_ai_spider(url: str, selectors: dict[str, str] = {}) -> dict[str, Any]:
     """
     Async wrapper: run the Scrapy Sniper inside the HybridEngine waterfall.
 
@@ -162,13 +165,14 @@ async def run_ai_spider(url: str, selectors: dict = None) -> dict:
     freeze the asyncio event loop.  The results list is mutated via the
     item_scraped signal handler inside _run_spider_crochet.
     """
-    if not url or not url.strip():
+    url = url.strip()
+    if not url:
         logger.warning("[Scrapy Sniper] Empty URL — skipping.")
         return {}
 
-    results: list = []
+    results: list[dict[str, Any]] = []
     try:
-        await asyncio.to_thread(_run_spider_crochet, url.strip(), selectors or {}, results)
+        await asyncio.to_thread(_run_spider_crochet, url, selectors or {}, results)
 
         if results:
             logger.info(f"[Scrapy Sniper] ✅ Extracted {len(results)} item(s) from {url}")

@@ -539,7 +539,7 @@ class HybridAutomationEngine:
                     "extract_universal_data":       15.0,  # Fast DOM extraction
                     "get_page_source":              10.0,  # Instant snapshot
                 }
-                _timeout = _TIMEOUT_MAP.get(method_name, 30.0)
+                _timeout = _TIMEOUT_MAP.get(method_name, 30.0) * getattr(config, "NETWORK_SPEED_MULTIPLIER", 1.0)
                 try:
                     result = await asyncio.wait_for(method(*args, **kwargs), timeout=_timeout)
                 except asyncio.TimeoutError:

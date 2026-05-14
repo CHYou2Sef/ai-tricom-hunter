@@ -323,8 +323,13 @@ class NodriverAgent(BaseBrowserAgent):
         if not self._page: return None
 
         try:
-            from common.search_engine import generate_google_ai_url
-            url = ai_mode_url or generate_google_ai_url(prompt)
+            from common.search_engine import generate_google_ai_url, extract_search_terms
+            if ai_mode_url:
+                import urllib.parse
+                clean_query = extract_search_terms(prompt)
+                url = ai_mode_url + urllib.parse.quote_plus(clean_query)
+            else:
+                url = generate_google_ai_url(prompt)
 
             logger.info(f"[Nodriver] 🔍 Google AI Mode: {prompt}")
             await self._page.get(url)

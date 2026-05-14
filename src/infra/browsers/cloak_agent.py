@@ -119,14 +119,18 @@ class CloakAgent(BaseBrowserAgent):
         try:
             # Cloak handles fingerprints at C++ level.
             # We use launch_persistent_context_async for session persistence.
-            self.context = await launch_persistent_context_async(
-                user_data_dir=self.profile_path,
-                headless=getattr(config, "HEADLESS", False),
-                proxy=proxy_settings,
-                humanize=True, # Enable human-like behavior
-                geoip=False,   # Temporarily disable geoip to avoid geoip2 missing dependency error just in case
-                args=["--no-sandbox", "--disable-setuid-sandbox"] if os.getuid() == 0 else []
-            )
+            kwargs = {
+                "user_data_dir": self.profile_path,
+                "headless": getattr(config, "HEADLESS", False),
+                "proxy": proxy_settings,
+                "humanize": True, # Enable human-like behavior
+                "geoip": False,   # Temporarily disable geoip to avoid geoip2 missing dependency error
+                "args": ["--no-sandbox", "--disable-setuid-sandbox"] if os.getuid() == 0 else []
+            }
+            if exec_path:
+                kwargs["executable_path"] = exec_path
+
+            self.context = await launch_persistent_context_async(**kwargs)
             
             if not self.context:
                 raise RuntimeError("Failed to create Cloak context")
@@ -222,20 +226,16 @@ class CloakAgent(BaseBrowserAgent):
             if not prompt:
                 raise ValueError("Empty prompt passed to Cloak search_google_ai_mode")
 
-            from common.search_engine import generate_google_ai_url
-            
+            from common.search_engine import generate_google_ai_url, extract_search_terms
             
             # Extract essential search terms
-            search_query = prompt
-            if len(prompt) > 200 or "###" in prompt:
-                name_match = re.search(r"NAME:\s*(.*)", prompt)
-                addr_match = re.search(r"ADDRESS:\s*(.*)", prompt)
-                if name_match:
-                    search_query = name_match.group(1).strip()
-                    if addr_match:
-                        search_query += f" {addr_match.group(1).strip()}"
+            search_query = extract_search_terms(prompt)
             
-            url = ai_mode_url or generate_google_ai_url(search_query)
+            if ai_mode_url:
+                import urllib.parse
+                url = ai_mode_url + urllib.parse.quote_plus(search_query)
+            else:
+                url = generate_google_ai_url(search_query)
             logger.info(f"🕵️ [Cloak] Navigating to: {url}")
 
             # Hard guard: prevent accidental navigation with empty q= parameter.

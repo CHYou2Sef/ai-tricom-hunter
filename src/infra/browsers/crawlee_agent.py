@@ -143,27 +143,16 @@ class CrawleeAgent(BaseBrowserAgent):
         Implémentation de la recherche pour Crawlee (Tier 8).
         Extrait les termes de recherche et lance un mini-crawl sur Google Search.
         """
-        import re
-        from common.search_engine import generate_google_ai_url
-
+        from common.search_engine import generate_google_ai_url, extract_search_terms
+            
+        # Extract essential search terms
+        search_query = extract_search_terms(prompt)
+        
         if ai_mode_url:
-            logger.info(f"[Crawlee] Navigating direct AI Mode URL: {ai_mode_url}")
-            if await self.goto_url(ai_mode_url):
-                return self._last_content
-            return None
-
-        search_query = prompt
-        if len(prompt) > 200 or "###" in prompt:
-            name_match = re.search(r"NAME:\s*(.*)", prompt)
-            addr_match = re.search(r"ADDRESS:\s*(.*)", prompt)
-            if name_match:
-                search_query = name_match.group(1).strip()
-                if addr_match:
-                    search_query += f" {addr_match.group(1).strip()}"
-            else:
-                search_query = prompt[:150]
-
-        url = generate_google_ai_url(search_query)
+            import urllib.parse
+            url = ai_mode_url + urllib.parse.quote_plus(search_query)
+        else:
+            url = generate_google_ai_url(search_query)
         logger.info(f"[Crawlee] 🔍 Recherche Google pour: {search_query}")
         
         if await self.goto_url(url):

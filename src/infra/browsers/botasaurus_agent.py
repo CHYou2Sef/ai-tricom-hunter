@@ -44,8 +44,13 @@ def search_google_ai_task(driver: Driver, data: dict):
     prompt = str(data.get("prompt") or "")
     ai_mode_url = data.get("ai_mode_url")
 
-    from common.search_engine import generate_google_ai_url
-    url = ai_mode_url or generate_google_ai_url(prompt)
+    from common.search_engine import generate_google_ai_url, extract_search_terms
+    if ai_mode_url:
+        import urllib.parse
+        clean_query = extract_search_terms(prompt)
+        url = ai_mode_url + urllib.parse.quote_plus(clean_query)
+    else:
+        url = generate_google_ai_url(prompt)
     
     driver.get(url)
     driver.sleep(2)

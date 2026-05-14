@@ -243,6 +243,9 @@ BROWSER_STALE_TIMEOUT_SEC      = int(os.getenv("BROWSER_STALE_TIMEOUT_SEC", "15"
 # Set lower in docker-compose env to fail faster when Chrome 147 hangs on UC attach.
 BROWSER_STARTUP_TIMEOUT_SEC    = float(os.getenv("BROWSER_STARTUP_TIMEOUT_SEC", "90"))
 
+# Network speed multiplier for timeouts and delays (1.0 = normal, 2.0 = 2x slower internet, etc.)
+NETWORK_SPEED_MULTIPLIER       = float(os.getenv("NETWORK_SPEED_MULTIPLIER", "1.0"))
+
 # ═══════════════════════════════════════════════════════════════════
 # 🤖  CAPTCHA SOLVER  (optional — works without API keys)
 # ═══════════════════════════════════════════════════════════════════

@@ -156,23 +156,15 @@ class FirecrawlAgent(BaseBrowserAgent):
         if not self.enabled or not self._app:
             return None
 
+        from common.search_engine import extract_search_terms
+        search_query = extract_search_terms(prompt)
+
         if ai_mode_url:
-            logger.info(f"[Firecrawl] Scraping direct AI Mode URL: {ai_mode_url}")
-            await self.goto_url(ai_mode_url)
+            import urllib.parse
+            url = ai_mode_url + urllib.parse.quote_plus(search_query)
+            logger.info(f"[Firecrawl] Scraping direct AI Mode URL: {url}")
+            await self.goto_url(url)
             return self._last_content
-
-        import re
-
-        search_query = prompt
-        if len(prompt) > 200 or "###" in prompt:
-            name_match = re.search(r"NAME:\s*(.*)", prompt)
-            addr_match = re.search(r"ADDRESS:\s*(.*)", prompt)
-            if name_match:
-                search_query = name_match.group(1).strip()
-                if addr_match:
-                    search_query += f" {addr_match.group(1).strip()}"
-            else:
-                search_query = prompt[:150]
 
         logger.info(f"[Firecrawl] Recherche via endpoint natif: {search_query}")
         try:
