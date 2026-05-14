@@ -246,9 +246,19 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         except Exception:
             pass
 
-        # SeleniumBase/uc may keep stale ChromeOptions state across failed
-        # startups in some container environments. Force a fresh instance
-        # by constructing with explicit driver options each time.
+        # SeleniumBase/uc can keep stale uc_driver/chrome options state
+        # across failed startups. Always force a brand-new uc_session by:
+        #  1) deleting any previous user_data_dir (since we rely on persistent profiles)
+        #  2) creating a fresh Driver instance.
+        try:
+            # Delete persistent profile dir to avoid poisoned options.
+            # Failures are non-fatal; start attempt will still proceed.
+            import shutil
+            if os.path.isdir(profile_path):
+                shutil.rmtree(profile_path, ignore_errors=True)
+        except Exception:
+            pass
+
         driver = Driver(
             uc=True,
             headless=False,
@@ -259,6 +269,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             locale_code="fr",
             chromium_arg=extra_args,
         )
+
 
         # If uc_driver keeps a poisoned options object from a previous failed
         # attempt, it will throw on first navigation. Fail fast here so
@@ -413,7 +424,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         if ai_mode_url:
             import urllib.parse
             url = ai_mode_url + urllib.parse.quote_plus(prompt)
-            provider_label = "DDG-AI" if "duckduckgo" in ai_mode_url else "AI-Mode"
+            provider_label = "AI-Mode"
         else:
             from common.search_engine import generate_google_ai_url
             url = generate_google_ai_url(prompt)
@@ -766,13 +777,13 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                 delay = random.uniform(config.TYPING_MIN_DELAY_SEC, config.TYPING_MAX_DELAY_SEC)
             time.sleep(delay)
 
-    async def _wait_for_stable_response_locked(self, timeout_sec: int = 25) -> Optional[str]:
+    async def _wait_for_stable_response_locked(self, timeout_sec: int = 15) -> Optional[str]:
         """Poll the page until text stops changing (locked)."""
         deadline = time.monotonic() + timeout_sec
         prev_text = ""
         stable_count = 0
         while time.monotonic() < deadline:
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(1.0)
             if not self._driver: break
             current = await self._extract_first_selector_locked(AI_RESPONSE_SELECTORS)
             if not current:

@@ -526,7 +526,7 @@ CHROMIUM_BINARY_PATH = find_chrome_executable()
 # ═══════════════════════════════════════════════════════════════════
 
 # Primary engine  →  Google AI bar (AI Overviews / SGE)
-# Fallback engine →  DuckDuckGo AI Chat (duck.ai)
+# Fallback engine →  Google Gemini (Deep Search)
 PRIMARY_ENGINE  = "google"               # Google Search (SGE / Knowledge Graph)
 FALLBACK_ENGINE = "gemini"               # Google Gemini (Deep Search)
 
@@ -542,17 +542,17 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", _ollama_def)
 OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "60"))
 
 # ── AI Mode — direct URL that activates the 'AI Mode' tab in Google ──
-# The `aep=42` + `udm=50` parameters bypass standard results and go straight
-# to the AI conversational interface (as seen in the user's screenshot).
-GOOGLE_AI_MODE_URL = "https://www.google.com/search?udm=50&aep=42&source=chrome.crn.rb&q="
+# The `aep=22` + `udm=50` parameters bypass standard results and go straight
+# to the AI conversational interface. `nfpr=1` disables auto-correct redirects.
+GOOGLE_AI_MODE_URL = "https://www.google.com/search?udm=50&aep=22&nfpr=1&no_sw_cr=1&gl=fr&hl=fr&q="
 
-DUCKDUCKGO_AI_MODE = "https://duckduckgo.com/chat?q="
+
 
 # The AI Mode search input element
 GOOGLE_AI_MODE_INPUT = "textarea[name='q'], div[contenteditable='true'], .nojsq"
 
 # Maximum seconds to wait for the AI answer to appear on screen
-AI_RESPONSE_TIMEOUT = 60   # seconds
+AI_RESPONSE_TIMEOUT = 30   # seconds (Optimized for performance fail-fast)
 
 
 # ═══════════════════════════════════════════════════════════════════

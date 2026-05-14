@@ -33,6 +33,8 @@ def generate_google_ai_url(query: str, region: str = "fr") -> str:
         "q": query,
         "udm": "50",    # Requested: Gemini/AI specific
         "aep": "22",    # Requested: Experimental generative
+        "nfpr": "1",    # No auto-correct redirect (performance)
+        "no_sw_cr": "1",# Disable slow ServiceWorker caches (performance)
         "gl": region,
         "hl": "fr",
     }

@@ -303,9 +303,44 @@ class Crawl4AIAgent(BaseBrowserAgent):
             exc_str = str(exc).lower()
             if "maximum recursion depth exceeded" in exc_str:
                 raise
+
             if isinstance(exc, (ImportError, TypeError)):
-                logger.warning("[Crawl4AI] CrawlerRunConfig not available — falling back to plain scrape.")
-                return await self._scrape_locked(url)
+                # CrawlerRunConfig not available — log version for diagnostics
+                try:
+                    import crawl4ai as _c4a  # type: ignore
+                    _ver = getattr(_c4a, "__version__", "unknown")
+                except Exception:
+                    _ver = "not installed"
+                logger.warning(
+                    f"[Crawl4AI] CrawlerRunConfig not available (crawl4ai=={_ver}). "
+                    f"Trying minimal arun() with JS wait..."
+                )
+                # Use the old-style arun() API that only takes a URL + kwargs
+                # This still runs the full Playwright engine (not a bare HTTP scrape)
+                if not self._crawler:
+                    return None
+                try:
+                    result = await self._crawler.arun(
+                        url=url,
+                        wait_for="[data-attrid='wa:/description'],.kno-rdesc,.wDYxhc",
+                        timeout=30000,
+                        word_count_threshold=10,
+                        remove_overlay_elements=True,
+                        bypass_cache=True,
+                    )
+                    content = (
+                        getattr(result, "markdown", None)
+                        or getattr(result, "text", None)
+                        or ""
+                    ).strip()
+                    if content and not self.is_block_response(content):
+                        self._last_content = content
+                        return content
+                    logger.warning("[Crawl4AI] Minimal arun() also returned empty/blocked. Escalating.")
+                    return None
+                except Exception as inner_exc:
+                    logger.error(f"[Crawl4AI] Minimal arun() failed: {inner_exc}")
+                    return None
             raise
 
 
@@ -326,7 +361,14 @@ class Crawl4AIAgent(BaseBrowserAgent):
         return fallback or None
 
     async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
-        """Alias for search_google_ai — maintains HybridEngine interface."""
+        """Alias for search_google_ai — maintains HybridEngine interface.
+
+        Important: do not allow empty prompts to flow into DuckDuckGo/Google URLs
+        (e.g. google.com/search?q=). When prompt is empty we fail fast so
+        HybridEngine can escalate to another tier.
+        """
+        if prompt is None or not str(prompt).strip():
+            raise ValueError("Crawl4AIAgent.search_google_ai_mode() received empty prompt; refusing to build AI-mode URL.")
         return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
 
     async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:

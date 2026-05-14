@@ -36,6 +36,7 @@ import os
 import json
 import random
 import asyncio
+import time
 import httpx
 from enum import Enum
 from dataclasses import dataclass, field
@@ -60,10 +61,11 @@ class ProxyState(Enum):
     BAN     → too many errors; taken off the pool, rotation triggered
     ROTATING→ transient state while we switch to a fresh proxy
     """
-    HEALTHY  = "HEALTHY"
-    WARN     = "WARN"
-    BAN      = "BAN"
-    ROTATING = "ROTATING"
+    HEALTHY   = "HEALTHY"
+    WARN      = "WARN"
+    QUARANTINE = "QUARANTINE"  # Temporary ban (e.g. 1 hour)
+    BAN       = "BAN"         # Permanent or long-term ban
+    ROTATING  = "ROTATING"
 
 
 @dataclass
@@ -83,6 +85,7 @@ class ProxyRecord:
     error_count: int = 0
     last_status: int = 0
     banned_at: Optional[float] = None
+    quarantine_until: Optional[float] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -119,19 +122,36 @@ class ProxyManager:
 
     async def get_proxy(self) -> Optional[str]:
         """
-        Return the next available HEALTHY proxy address.
-        Fetches from public sources if the pool is empty.
-        Returns None if no proxies are available (run direct).
+        Return the next available healthy proxy.
+        Refills from remote sources if pool is empty.
+        Returns None to signal direct (un-proxied) connection.
         """
         async with self._lock:
             if not self._active_pool:
                 await self._refill_pool_locked()
 
-            # Pick first available address from pool
+            now = asyncio.get_event_loop().time()
+
+            # Pick first available address from pool.
+            # Skip proxies still in quarantine.
             while self._active_pool:
                 addr = self._active_pool.pop(0)
                 record = self._records.get(addr)
-                if record and record.state not in (ProxyState.BAN, ProxyState.ROTATING):
+                if not record:
+                    continue
+
+                # 🩺 QUARANTINE CHECK: release quarantine when time has elapsed
+                if record.state == ProxyState.QUARANTINE:
+                    if record.quarantine_until and now >= record.quarantine_until:
+                        logger.info(f"[ProxyManager] 🏥 Proxy {addr} recovered from quarantine.")
+                        record.state = ProxyState.HEALTHY
+                        record.error_count = 0
+                        record.quarantine_until = None
+                    else:
+                        # Still quarantined — skip
+                        continue
+
+                if record.state not in (ProxyState.BAN, ProxyState.ROTATING):
                     logger.info(f"[ProxyManager] 🔌 Using proxy: {addr} (state={record.state.value})")
                     return addr
 
@@ -195,16 +215,21 @@ class ProxyManager:
     # ── Internal Methods ──────────────────────────────────────────────────
 
     async def _ban_proxy_locked(self, record: ProxyRecord) -> None:
-        """Transition a proxy to BAN state and trigger an exponential backoff rotation."""
-        if record.state == ProxyState.BAN:
-            return  # Already banned, ignore
+        """Transition a proxy to QUARANTINE or BAN state and trigger an exponential backoff rotation."""
+        if record.state in (ProxyState.BAN, ProxyState.QUARANTINE):
+            return  # Already restricted
 
-        record.state     = ProxyState.BAN
-        record.banned_at = asyncio.get_event_loop().time()
+        # 🛡️ QUARANTINE: Default to 1 hour (3600s) for hard WAF blocks
+        quarantine_duration = getattr(config, "PROXY_QUARANTINE_SEC", 3600)
+        now = asyncio.get_event_loop().time()
+
+        record.state = ProxyState.QUARANTINE
+        record.banned_at = now
+        record.quarantine_until = now + quarantine_duration
 
         logger.error(
-            f"[ProxyManager] 🚫 BAN — proxy {record.address} "
-            f"({record.error_count} errors). Triggering rotation."
+            f"[ProxyManager] 🚫 QUARANTINE — proxy {record.address} "
+            f"({record.error_count} errors). Restricted until {time.strftime('%H:%M:%S', time.localtime(time.time() + quarantine_duration))}"
         )
         await self._rotate_with_backoff_locked()
 

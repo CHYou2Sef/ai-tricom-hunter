@@ -2,14 +2,10 @@
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "-p no:pytest_html --disable-plugin-auto-load"
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
 select = ["E", "F", "I", "UP"]
 
-[tool.pyright]
-venvPath = "."
-venv = "venv"
-analyze = "src"
-enableTypeChecking = false

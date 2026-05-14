@@ -128,7 +128,6 @@ class HybridAutomationEngine:
         self._tier8: Optional[BaseBrowserAgent] = None   # FirecrawlAgent     (Premium managed)
         self._tier9: Optional[BaseBrowserAgent] = None   # JinaAgent          (High-speed Markdown)
         self._tier10: Optional[BaseBrowserAgent] = None  # CrawleeAgent       (Industrial crawler)
-        self._current_tier = 2
 
         # ── Circuit Breaker state ─────────────────────────────────────────────
         # Prevents infinite retry storms when ALL tiers fail due to IP banning.
@@ -138,6 +137,7 @@ class HybridAutomationEngine:
         self._circuit_breaker_until = 0.0
         self._consecutive_failures = 0
         self._last_target_url: Optional[str] = None  # For re-navigation catch-up
+        self._last_failure_reason: Optional[str] = None  # "network"|"captcha_waf"|"code_bug"|"exception"|None
         self.current_row_index: int = 0             # Track current row for telemetry
         self.last_successful_tier_used: Optional[int] = None # For per-row export
 
@@ -391,12 +391,28 @@ class HybridAutomationEngine:
           tier will fail.  After _CB_THRESHOLD consecutive failures we pause
           for _CB_PAUSE_SEC seconds to let the WAF cool down.
         """
-        # ── 0. DISK SPACE GUARD (Bug #5 — proactive auto-cleanup) ────────────
+        # ── 0. PER-CALL STATE RESET ───────────────────────────────────────────
+        # Reset failure reason + soft-retry flags so previous-row state never
+        # bleeds into this call.
+        self._last_failure_reason = None
+        # Clear any soft-retry flags from the previous row (keyed as
+        # "_soft_retry_{tier}_{method_name}" on self)
+        for _attr in [k for k in self.__dict__ if k.startswith("_soft_retry_")]:
+            delattr(self, _attr)
+
+        # ── 0.1 DISK SPACE GUARD (Bug #5 — proactive auto-cleanup) ──────────
         try:
             from common.disk_cleanup import check_and_cleanup
             check_and_cleanup(threshold_pct=85)
         except Exception:
             pass  # Disk cleanup is best-effort — never block execution
+            
+        # ── 0.5 PROMPT VALIDATION ─────────────────────────────────────────────
+        if "search" in method_name:
+            prompt_val = args[0] if len(args) > 0 else kwargs.get("prompt", "")
+            if not prompt_val or not str(prompt_val).strip():
+                logger.warning(f"[HybridEngine] Empty prompt provided for {method_name}. Aborting.")
+                return None
 
         # ── 1. CIRCUIT BREAKER CHECK ──────────────────────────────────────────
         if self._circuit_breaker_open:
@@ -508,14 +524,31 @@ class HybridAutomationEngine:
             self._stats[tier]["attempts"] += 1
 
             try:
-                # ── 2.2 THE SAFETY NET: TIMEOUT GUARD (Fail-Fast) ────────────
-                # Prevents a single hung browser from blocking the whole agent loop.
+                # ── 2.2 ADAPTIVE TIMEOUT GUARD ───────────────────────────────
+                # AI-mode searches can legitimately take 20-60s to stream.
+                # A flat 15s timeout kills valid results and wastes tier escalations.
+                # Method-specific budgets prevent hung browsers from blocking.
+                _TIMEOUT_MAP = {
+                    "search_google_ai_mode":        90.0,  # AI Overview streams slowly
+                    "search_google_ai":             90.0,  # Legacy AI search alias
+                    "search_google_ai_interactive": 90.0,  # Human-interactive flow
+                    "search_gemini_ai":             60.0,  # Gemini chat response
+                    "crawl_website":                45.0,  # Deep-crawl a single page
+                    "submit_google_search":         30.0,  # Type + Enter + wait
+                    "goto_url":                     20.0,  # Simple navigation
+                    "extract_universal_data":       15.0,  # Fast DOM extraction
+                    "get_page_source":              10.0,  # Instant snapshot
+                }
+                _timeout = _TIMEOUT_MAP.get(method_name, 30.0)
                 try:
-                    result = await asyncio.wait_for(method(*args, **kwargs), timeout=20.0)
+                    result = await asyncio.wait_for(method(*args, **kwargs), timeout=_timeout)
                 except asyncio.TimeoutError:
-                    logger.warning(f"⏳ [HybridEngine] Tier {tier} TIMEOUT in '{method_name}' after 20s. Escalating...")
-                    await self.stop_tier(tier) # KILL IMMEDIATELY
-                    continue # Try next tier
+                    logger.warning(
+                        f"⏳ [HybridEngine] Tier {tier} TIMEOUT in '{method_name}' "
+                        f"after {_timeout:.0f}s. Escalating..."
+                    )
+                    await self.stop_tier(tier)  # Kill hung browser immediately
+                    continue
                 
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms
@@ -555,10 +588,37 @@ class HybridAutomationEngine:
 
                 # 📈 Prometheus Metric: EMPTY
                 SCRAPING_RESULTS.labels(tier=str(tier), scrap_method=method_name, status="EMPTY").inc()
-                
-                logger.warning(
-                    f"[HybridEngine] Tier {tier} method '{method_name}' returned empty. Escalating..."
-                )
+
+                # ── SOFT-RETRY (Issue #3 fix) ─────────────────────────────────
+                # On a clean empty result (no exception, no block signal), do ONE
+                # soft-retry with a brief pause on the SAME tier before escalating.
+                # Rationale: Google AI Mode sometimes streams results late; killing
+                # the tier immediately and restarting a new browser amplifies ban risk.
+                # Only applies to AI-search methods — fast extract methods escalate now.
+                _is_search_method = "search" in method_name
+                _soft_retry_key = f"_soft_retry_{tier}_{method_name}"
+                _already_retried = getattr(self, _soft_retry_key, False)
+
+                if _is_search_method and not _already_retried:
+                    setattr(self, _soft_retry_key, True)
+                    logger.info(
+                        f"[HybridEngine] 🔄 Tier {tier} '{method_name}' empty — "
+                        f"soft-retry in 3s (same tier, no browser restart)..."
+                    )
+                    await asyncio.sleep(3)
+                    # Reset t0 for accurate per-retry latency
+                    t0 = time.perf_counter()
+                    # Don't escalate — go back to the top of the loop for the same tier
+                    continue
+                else:
+                    # Soft-retry already used or non-search method → escalate
+                    if hasattr(self, _soft_retry_key):
+                        delattr(self, _soft_retry_key)
+                    logger.warning(
+                        f"[HybridEngine] Tier {tier} method '{method_name}' returned empty "
+                        f"{'after soft-retry' if _already_retried else ''}. Escalating..."
+                    )
+
                 # 📈 Persistent Telemetry: EMPTY
                 get_telemetry().record(
                     engine_name=TIER_NAMES.get(tier, f"Tier {tier}"),
@@ -567,7 +627,7 @@ class HybridAutomationEngine:
                     latency_sec=elapsed_ms / 1000.0,
                     method_name=method_name
                 )
-                get_telemetry().save() # Persist real-time metrics
+                get_telemetry().save()  # Persist real-time metrics
             except Exception as exc:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms
@@ -595,10 +655,10 @@ class HybridAutomationEngine:
 
                 # ── FIX #4: Triage exceptions — code bugs vs network failures ──
                 # Code-level errors (NameError, ImportError, TypeError, AttributeError)
-                # indicate a BUG in the tier code, NOT an IP ban. They must NOT
-                # increment _consecutive_failures or trigger the circuit breaker,
-                # which would cause a 300s dead-sleep on every single row.
-                _CODE_LEVEL_ERRORS = (NameError, ImportError, TypeError, AttributeError, SyntaxError)
+                # indicate a BUG in the tier code, or a VALIDATION error, NOT an IP ban. 
+                # They must NOT increment _consecutive_failures or trigger the circuit 
+                # breaker, which would cause a 300s dead-sleep on every single row.
+                _CODE_LEVEL_ERRORS = (NameError, ImportError, TypeError, AttributeError, SyntaxError, ValueError, AssertionError)
                 _is_code_error = isinstance(exc, _CODE_LEVEL_ERRORS)
 
                 exc_str = str(exc).lower()
@@ -628,6 +688,8 @@ class HybridAutomationEngine:
                     reason = "exception"
                     logger.error(f"[HybridEngine] Tier {tier} exception in '{method_name}': {exc}")
 
+                self._last_failure_reason = reason
+
                 # 📈 Prometheus Metric: FAILURE
                 SCRAPING_RESULTS.labels(tier=str(tier), scrap_method=method_name, status="FAILURE").inc()
 
@@ -650,10 +712,14 @@ class HybridAutomationEngine:
             # Waterfall Escalate - KILL CURRENT TIER FIRST
             await self.stop_tier(tier)
 
-            # Cool-down between tiers to let WAF sessions partially reset
-            # (skipped for code-level errors via `continue` above)
-            logger.info(f"[HybridEngine] 🕒 Cool-down delay: 8s...")
-            await asyncio.sleep(8)
+            # ── Smart cool-down: only pause for genuine network/WAF failures ──
+            # Empty results or code bugs do NOT need a WAF cooldown period.
+            _last_reason = getattr(self, "_last_failure_reason", None)
+            if _last_reason in ("network", "captcha_waf"):
+                logger.info("[HybridEngine] 🕒 Network/WAF failure — cooling down 8s before next tier...")
+                await asyncio.sleep(8)
+            else:
+                logger.debug(f"[HybridEngine] ⚡ Escalating immediately (reason={_last_reason or 'empty'}).")
 
             self._current_tier = min(tier + 1, max_tier)
 
@@ -669,7 +735,8 @@ class HybridAutomationEngine:
         # Conservative approach: increment CB counter only for network-type runs.
         # (Code-bug tiers `continue` before reaching this point, so reaching
         # here means at least one genuine network-level attempt was made.)
-        self._consecutive_failures += 1
+        if getattr(self, "_last_failure_reason", None) in ("network", "captcha_waf"):
+            self._consecutive_failures += 1
 
         alert(
             "CRITICAL",
@@ -709,33 +776,25 @@ class HybridAutomationEngine:
         Implements a dynamic engine-toggle strategy and an optional 
         interactive human-like flow.
         """
-        # ── 0. Optional Interactive Flow (Human-Like) ──────────────────────────
+        # ── 0. Validation & Pre-flight ─────────────────────────────────────────
+        prompt = (prompt or "").strip()
+        if not prompt:
+            logger.warning("[HybridEngine] Refusing search with empty prompt.")
+            return None
+
+        # ── 0.5 Optional Interactive Flow (Human-Like) ──────────────────────────
         # If enabled in config, we bypass the direct URL generation and use
         # the high-stealth interactive flow (navigating to Google, typing).
         if getattr(config, "FORCE_HUMAN_INTERACTIVE", False):
             logger.info("[HybridEngine] 🎭 Forcing Interactive (Human-Like) search flow.")
             return await self.search_google_ai_interactive(prompt, ai_mode_url=None, row=row)
 
-        # ── Engine selection ──────────────────────────────────────────────────
-        toggle_interval = getattr(config, "ENGINE_TOGGLE_INTERVAL", 100)
-        slot = (self.current_row_index // toggle_interval) % 2
-
-        if slot == 0:
-            primary_url   = config.GOOGLE_AI_MODE_URL
-            fallback_url  = config.DUCKDUCKGO_AI_MODE
-            provider      = "Google"
-            fallback_name = "DuckDuckGo"
-        else:
-            # DuckDuckGo fallback disabled (fails intermittently and wastes attempts)
-            primary_url   = config.GOOGLE_AI_MODE_URL
-            fallback_url  = config.GOOGLE_AI_MODE_URL
-            provider      = "Google"
-            fallback_name = "Google"
-
+        primary_url   = config.GOOGLE_AI_MODE_URL
+        provider      = "Google"
 
         logger.info(
             f"[HybridEngine] 🔄 Search provider: {provider} "
-            f"(row={self.current_row_index}, slot={slot}, interval={toggle_interval})"
+            f"(row={self.current_row_index})"
         )
 
         # ── Primary attempt ───────────────────────────────────────────────────
@@ -743,68 +802,7 @@ class HybridAutomationEngine:
             "search_google_ai_mode", prompt, ai_mode_url=primary_url, row=row
         )
 
-        # ── Cross-provider fallback ───────────────────────────────────────────
-        # Only if the primary attempt completely failed and the circuit breaker
-        # is not open (which indicates an IP-level block — switching provider
-        # would be equally useless until the cooldown period expires).
-        if not result and not self._circuit_breaker_open:
-            logger.warning(
-                f"[HybridEngine] ⚠️  {provider} returned empty — "
-                f"cross-provider fallback to {fallback_name}..."
-            )
-            result = await self._execute_with_waterfall(
-                "search_google_ai_mode", prompt, ai_mode_url=fallback_url, row=row
-            )
-
-        # ── Scrapy Post-Discovery Bonus ───────────────────────────────────────
-        # If the browser found a website URL in the JSON but no phone,
-        # fire Scrapy for a cheap, fast HTTP extraction before escalating.
-        if result and self._should_run_scrapy_bonus(result):
-            website = self._extract_website_from_result(result)
-            if website:
-                try:
-                    t0 = time.perf_counter()
-                    self._stats["scrapy_bonus"]["attempts"] += 1
-                    from infra.scrapers.agent_scraper import run_ai_spider
-                    scrapy_data = await asyncio.wait_for(
-                        run_ai_spider(website), timeout=12.0
-                    )
-                    elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                    phone = scrapy_data.get("phone") or scrapy_data.get("telephone")
-                    if phone:
-                        self._stats["scrapy_bonus"]["successes"] += 1
-                        logger.info(
-                            f"[HybridEngine] ⚡ Scrapy bonus hit! Phone={phone} "
-                            f"from {website} in {elapsed_ms}ms"
-                        )
-                        return f'{result}\n[scrapy_bonus_phone: {phone}]'
-                except Exception as exc:
-                    logger.debug(f"[HybridEngine] Scrapy bonus failed ({website}): {exc}")
         return result
-
-    def _should_run_scrapy_bonus(self, result: str) -> bool:
-        """Return True if the browser result has a website but no phone number."""
-        import re
-        has_phone = bool(re.search(r'0[1-9](?:[\s.-]?\d{2}){4}', result))
-        has_website = any(kw in result.lower() for kw in ('"website"', 'http://', 'https://'))
-        return has_website and not has_phone
-
-    def _extract_website_from_result(self, result: str) -> Optional[str]:
-        """Extract the first website URL from an AI Mode JSON/text result."""
-        import re, json as _json
-        # Try JSON parse first
-        m = re.search(r'\{.*\}', result, re.DOTALL)
-        if m:
-            try:
-                data = _json.loads(m.group(0))
-                url = data.get("website") or data.get("site_web") or data.get("url")
-                if url and url.startswith("http"):
-                    return url
-            except Exception:
-                pass
-        # Fallback: regex URL extraction
-        m2 = re.search(r'https?://[^\s"\'>]+', result)
-        return m2.group(0) if m2 else None
 
     async def generate_human_noise(self) -> None:
         """

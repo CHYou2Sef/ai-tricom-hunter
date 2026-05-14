@@ -21,9 +21,8 @@ SOURCE_WEIGHTS = {
     "aeo_schema":   1.00,   # JSON-LD structured data (Schema.org) — highest trust
     "gemini_json":  0.90,   # Gemini RAG returning clean JSON
     "google_ai":    0.75,   # Google AI Overview text (regex-extracted)
-    "duckduckgo":   0.65,   # DuckDuckGo AI Chat text
     "gemini_text":  0.60,   # Gemini free-text (non-JSON response)
-    "page_html":    0.45,   # Raw page HTML scrape
+    "jina":         0.50,   # Fallback Markdown extraction
     "heuristic":    0.30,   # Fallback guess / pattern match on noisy text
 }
 

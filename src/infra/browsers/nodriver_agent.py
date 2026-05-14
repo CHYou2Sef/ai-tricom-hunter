@@ -78,15 +78,27 @@ class NodriverAgent(BaseBrowserAgent):
         vp = self._bundle["viewport"]
         logger.info(f"[Nodriver] 🚀 Starting stealth browser ({vp['width']}×{vp['height']})")
 
+        # ── Chrome CLI Flags ──────────────────────────────────────────────────
+        # These flags are critical for stability in containerized environments.
         browser_args = [
             f"--window-size={vp['width']},{vp['height']}",
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-infobars",
             "--disable-notifications",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--remote-debugging-port=0", # Auto-assign
         ]
+
+        # 🛡️ SANDBOX FIX: If running as root (UID 0), Chrome MUST have these flags
+        # or it will immediately crash with a 'failed to set sandbox' error.
         if os.getuid() == 0:
-            browser_args.extend(["--no-sandbox", "--disable-setuid-sandbox"])
+            logger.warning("[Nodriver] Running as ROOT. Applying --no-sandbox flags.")
+            if "--no-sandbox" not in browser_args:
+                browser_args.append("--no-sandbox")
+            if "--disable-setuid-sandbox" not in browser_args:
+                browser_args.append("--disable-setuid-sandbox")
 
         if self.current_proxy:
             if "@" in self.current_proxy:
@@ -104,16 +116,17 @@ class NodriverAgent(BaseBrowserAgent):
         nd_path = config.CHROMIUM_BINARY_PATH if config.CHROMIUM_BINARY_PATH else None
 
         try:
+            # 🚀 Launch browser via CDP
             self._browser = await nd.start(
                 browser_executable_path=nd_path,
                 browser_args=browser_args,
                 user_data_dir=profile_path,
-                headless=getattr(config, "HEADLESS", False),
-                sandbox=False if os.getuid() == 0 else True,
+                headless=getattr(config, "HEADLESS", False)
             )
+
             await asyncio.sleep(2)
             if not self._browser:
-                return
+                raise RuntimeError("[Nodriver] Browser object is None after start.")
                 
             self._page = self._browser.main_tab
             await self._inject_fingerprint_locked(self._page)
