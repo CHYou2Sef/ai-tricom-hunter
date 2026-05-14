@@ -101,7 +101,7 @@ class JinaAgent(BaseBrowserAgent):
             logger.error(f"[Jina] Error fetching {url}: {e}")
             return False
 
-    async def crawl_website(self, url: str) -> str:
+    async def crawl_website(self, url: str, **kwargs) -> str:
         """
         Simple 'crawl' for Jina: just read the main URL.
         Jina Reader is designed to extract the meat of a single page.
@@ -110,8 +110,10 @@ class JinaAgent(BaseBrowserAgent):
             return self._last_content
         return ""
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
         """Utilise le endpoint de recherche natif de Jina AI (s.jina.ai)."""
+        ai_mode_url = kwargs.get("ai_mode_url")
+        row = kwargs.get("row")
         from common.search_engine import extract_search_terms
         search_query = extract_search_terms(prompt)
 
@@ -162,13 +164,13 @@ class JinaAgent(BaseBrowserAgent):
             logger.error(f"[Jina] Erreur de recherche: {e}")
             return None
 
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Fallback transparent vers la recherche Jina."""
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, **kwargs) -> Optional[str]:
         """Interactive search fallback for Jina."""
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
     async def submit_google_search(self, prompt: str) -> bool:
         """Jina est une API REST (Stateless), il n'y a pas de formulaire à soumettre."""

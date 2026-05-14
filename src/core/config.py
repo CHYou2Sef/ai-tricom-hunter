@@ -716,8 +716,8 @@ ROTATE_USER_AGENT = True
 
 # Type queries character by character (mimics human typing speed)
 HUMAN_TYPING          = True
-TYPING_MIN_DELAY_SEC  = 0.04   # min seconds per character
-TYPING_MAX_DELAY_SEC  = 0.16   # max seconds per character
+TYPING_MIN_DELAY_SEC  = 0.02   # min seconds per character
+TYPING_MAX_DELAY_SEC  = 0.08   # max seconds per character
 
 # Maximum consecutive CAPTCHA blocks before the agent pauses everything
 # and sends an alert to the log + console

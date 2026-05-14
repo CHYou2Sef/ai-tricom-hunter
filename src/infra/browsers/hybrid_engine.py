@@ -107,7 +107,7 @@ class HybridAutomationEngine:
     """
     # ── Configuration & Resource Locks ─────────────────────────────────────
     _CB_THRESHOLD = 3      # Consecutive failures before opening circuit
-    _CB_PAUSE_SEC  = 300   # 5 minutes pause — lets WAF cool down + proxy rotate
+    _CB_PAUSE_SEC  = 60   # 5 minutes pause — lets WAF cool down + proxy rotate
     _TIER_STARTUP_SEC = 120.0  # Max seconds to wait for any browser tier to start
     
     # Tier 5 (Camoufox/Firefox) is extremely heavy (~1 GB RAM).
@@ -717,7 +717,7 @@ class HybridAutomationEngine:
             _last_reason = getattr(self, "_last_failure_reason", None)
             if _last_reason in ("network", "captcha_waf"):
                 logger.info("[HybridEngine] 🕒 Network/WAF failure — cooling down 8s before next tier...")
-                await asyncio.sleep(8)
+                await asyncio.sleep(3)
             else:
                 logger.debug(f"[HybridEngine] ⚡ Escalating immediately (reason={_last_reason or 'empty'}).")
 
@@ -852,11 +852,17 @@ class HybridAutomationEngine:
         """
         return await self._execute_with_waterfall("search_google_ai_interactive", prompt, ai_mode_url=ai_mode_url, row=row)
 
-    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
-        return await self._execute_with_waterfall("search_gemini_ai", prompt)
+    async def search_gemini_ai(self, prompt: str, **kwargs) -> Optional[str]:
+        """
+        Gemini AI search via browser waterfall.
+        """
+        return await self._execute_with_waterfall("search_gemini_ai", prompt, **kwargs)
 
-    async def crawl_website(self, url: str) -> Optional[str]:
-        return await self._execute_with_waterfall("crawl_website", url)
+    async def crawl_website(self, url: str, **kwargs) -> Optional[str]:
+        """
+        Deep-crawl a website via browser waterfall.
+        """
+        return await self._execute_with_waterfall("crawl_website", url, **kwargs)
 
     # ── Diagnostics ────────────────────────────────────────────────────────
 

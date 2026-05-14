@@ -130,19 +130,21 @@ class CrawleeAgent(BaseBrowserAgent):
                     await self.rotate_proxy()
                 return False
 
-    async def crawl_website(self, url: str) -> str:
-        """Leverage Crawlee for a single-page 'crawl'."""
+    async def crawl_website(self, url: str, **kwargs) -> str:
+        """Visit a URL and return visible page text (crawlee-powered)."""
         if await self.goto_url(url):
             return self._last_content
         return ""
 
     # ── Stub methods for BaseBrowserAgent contract ─────────────────────────
     
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
         """
         Implémentation de la recherche pour Crawlee (Tier 8).
         Extrait les termes de recherche et lance un mini-crawl sur Google Search.
         """
+        ai_mode_url = kwargs.get("ai_mode_url")
+        row = kwargs.get("row")
         from common.search_engine import generate_google_ai_url, extract_search_terms
             
         # Extract essential search terms
@@ -159,11 +161,11 @@ class CrawleeAgent(BaseBrowserAgent):
             return self._last_content
         return None
 
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+    async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+    async def search_google_ai_interactive(self, prompt: str, **kwargs) -> Optional[str]:
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
     async def submit_google_search(self, prompt: str) -> bool:
         return False

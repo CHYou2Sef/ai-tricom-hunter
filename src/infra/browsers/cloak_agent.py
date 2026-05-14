@@ -120,17 +120,18 @@ class CloakAgent(BaseBrowserAgent):
             # Cloak handles fingerprints at C++ level.
             # We use launch_persistent_context_async for session persistence.
             kwargs = {
-                "user_data_dir": self.profile_path,
                 "headless": getattr(config, "HEADLESS", False),
                 "proxy": proxy_settings,
                 "humanize": True, # Enable human-like behavior
                 "geoip": False,   # Temporarily disable geoip to avoid geoip2 missing dependency error
                 "args": ["--no-sandbox", "--disable-setuid-sandbox"] if os.getuid() == 0 else []
             }
-            if exec_path:
-                kwargs["executable_path"] = exec_path
 
-            self.context = await launch_persistent_context_async(**kwargs)
+            self.context = await launch_persistent_context_async(
+                user_data_dir=str(self.profile_path),
+                executable_path=exec_path,
+                **kwargs
+            )
             
             if not self.context:
                 raise RuntimeError("Failed to create Cloak context")
@@ -211,9 +212,11 @@ class CloakAgent(BaseBrowserAgent):
             logger.debug(f"[Cloak] Failed to visit {url}: {e}")
             return False
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
         """⭐ PRIMARY SEARCH — Google AI Mode via CloakBrowser."""
         async with self._lock:
+            ai_mode_url = kwargs.get("ai_mode_url")
+            row = kwargs.get("row")
             return await self._search_google_ai_mode_locked(prompt, ai_mode_url, row)
 
     async def _search_google_ai_mode_locked(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
@@ -396,7 +399,7 @@ class CloakAgent(BaseBrowserAgent):
         except Exception:
             pass
 
-    async def crawl_website(self, url: str) -> str:
+    async def crawl_website(self, url: str, **kwargs) -> str:
         """Deep crawl of a website."""
         async with self._lock:
             return await self._crawl_website_locked(url)
@@ -432,15 +435,15 @@ class CloakAgent(BaseBrowserAgent):
             logger.error(f"[Cloak] Crawl error for {url}: {e}")
             return ""
 
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Legacy AI search fallback."""
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, **kwargs) -> Optional[str]:
         """Interactive search fallback for Cloak."""
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
-    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Search via Gemini UI."""
         async with self._lock:
             return await self._search_gemini_ai_locked(prompt)

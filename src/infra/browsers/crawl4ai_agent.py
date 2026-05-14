@@ -215,22 +215,24 @@ class Crawl4AIAgent(BaseBrowserAgent):
         logger.error(f"[Crawl4AI] All attempts exhausted for {url}")
         return None
 
-    async def crawl_website(self, base_url: str, max_pages: int = 3) -> str:
+    async def crawl_website(self, url: str, **kwargs) -> str:
         """Deep-crawl a website: homepage + up to max_pages sub-pages."""
+        max_pages = kwargs.get("max_pages", 3)
         async with self._lock:
-            return await self._crawl_website_locked(base_url, max_pages)
+            return await self._crawl_website_locked(url, max_pages)
 
-    async def _crawl_website_locked(self, base_url: str, max_pages: int = 3) -> str:
+    async def _crawl_website_locked(self, url: str, max_pages: int = 3) -> str:
         """Internal lock-free deep crawl."""
         all_content: List[str] = []
+        base_url = url # Keep base_url for sub-link extraction context
 
         # ── Scrape homepage ────────────────────────────────────────
-        homepage = await self._scrape_locked(base_url)
+        homepage = await self._scrape_locked(url)
         if homepage:
-            all_content.append(f"## {base_url}\n\n{homepage}")
+            all_content.append(f"## {url}\n\n{homepage}")
 
         # ── Discover and visit contact/about pages ─────────────────
-        sub_urls = self._extract_contact_links(homepage or "", base_url)
+        sub_urls = self._extract_contact_links(homepage or "", url)
         for url in sub_urls[:max_pages - 1]:
             sub_content = await self._scrape_locked(url)
             if sub_content:
@@ -241,14 +243,12 @@ class Crawl4AIAgent(BaseBrowserAgent):
         self._last_content = content
         return content
 
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """
         Use Crawl4AI to scrape Google AI Mode results for a query.
-
-        Google AI Mode (udm=50) is a dynamic SPA — the AI answer is streamed
-        after the page loads. A plain scrape returns an empty shell.
-        We use Crawl4AI's js_code hook to wait for the AI response container.
         """
+        ai_mode_url = kwargs.get("ai_mode_url")
+        row = kwargs.get("row")
         from common.search_engine import extract_search_terms, generate_google_ai_url
         search_query = extract_search_terms(prompt)
         
@@ -368,20 +368,15 @@ class Crawl4AIAgent(BaseBrowserAgent):
         self._last_content = fallback
         return fallback or None
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
-        """Alias for search_google_ai — maintains HybridEngine interface.
-
-        Important: do not allow empty prompts to flow into DuckDuckGo/Google URLs
-        (e.g. google.com/search?q=). When prompt is empty we fail fast so
-        HybridEngine can escalate to another tier.
-        """
+    async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
+        """Alias for search_google_ai — maintains HybridEngine interface."""
         if prompt is None or not prompt.strip():
             raise ValueError("Crawl4AIAgent.search_google_ai_mode() received empty prompt; refusing to build AI-mode URL.")
-        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai(prompt, **kwargs)
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, **kwargs) -> Optional[str]:
         """Interactive search fallback for Crawl4AI."""
-        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai(prompt, **kwargs)
 
     async def submit_google_search(self, prompt: str) -> bool:
         """
@@ -422,7 +417,7 @@ class Crawl4AIAgent(BaseBrowserAgent):
         self._last_content = content or ""
         return bool(content)
 
-    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """
         Crawl4AI doesn't support interactive chat easily. 
         Escalating to next tier if Tier 3 cannot perform this.

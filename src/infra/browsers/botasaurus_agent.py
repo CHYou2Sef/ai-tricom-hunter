@@ -197,7 +197,9 @@ class BotasaurusAgent(BaseBrowserAgent):
         return self._last_content
 
 
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
+        ai_mode_url = kwargs.get("ai_mode_url")
+        row = kwargs.get("row")
         logger.info(f"[Botasaurus] 🔍 Google AI Mode: {prompt}")
 
         try:
@@ -228,12 +230,12 @@ class BotasaurusAgent(BaseBrowserAgent):
             logger.error(f"[Botasaurus] Error: {e}")
             return None
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
-        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
+    async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
+        return await self.search_google_ai(prompt, **kwargs)
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, **kwargs) -> Optional[str]:
         """Interactive search fallback for Botasaurus."""
-        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai(prompt, **kwargs)
 
 
     async def submit_google_search(self, prompt: str) -> bool:
@@ -253,7 +255,7 @@ class BotasaurusAgent(BaseBrowserAgent):
             logger.error(f"[Botasaurus] Error: {e}")
             return False
 
-    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str, **kwargs) -> Optional[str]:
         logger.info(f"[Botasaurus] 🤖 Gemini search: {prompt}")
         try:
             async with self._lock:
@@ -275,7 +277,7 @@ class BotasaurusAgent(BaseBrowserAgent):
             logger.error(f"[Botasaurus] Error: {e}")
             return None
 
-    async def crawl_url(self, url: str) -> str:
+    async def crawl_website(self, url: str, **kwargs) -> str:
         logger.info(f"[Botasaurus] → {url}")
         try:
             async with self._lock:
@@ -290,7 +292,7 @@ class BotasaurusAgent(BaseBrowserAgent):
                     await self.rotate_proxy()
                     return ""
                     
-                # For crawl_url(), HybridEngine callers expect *text*, but keep
+                # For crawl_website(), HybridEngine callers expect *text*, but keep
                 # raw HTML available for get_page_source()/UUE.
                 text = re.sub(r"<[^>]+>", " ", self._last_content)
                 text = re.sub(r"\s+", " ", text).strip()
@@ -303,8 +305,6 @@ class BotasaurusAgent(BaseBrowserAgent):
             logger.error(f"[Botasaurus] Error: {e}")
             return ""
 
-    async def crawl_website(self, url: str) -> str:
-        return await self.crawl_url(url)
 
     async def generate_human_noise(self) -> None:
         pass # Not critical for Botasaurus due to its own anti-detect features

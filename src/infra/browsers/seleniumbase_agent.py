@@ -410,13 +410,15 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
     # ── Search methods ────────────────────────────────────────────────────────
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
         """⭐ PRIMARY SEARCH — direct navigation to Google AI Mode."""
         async with self._lock:
-            return await self._search_google_ai_mode_locked(prompt, ai_mode_url, row)
+            return await self._search_google_ai_mode_locked(prompt, **kwargs)
 
-    async def _search_google_ai_mode_locked(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def _search_google_ai_mode_locked(self, prompt: str, **kwargs) -> Optional[str]:
         """Internal locked AI Mode search."""
+        ai_mode_url = kwargs.get("ai_mode_url")
+        row = kwargs.get("row")
         if not await self._ensure_driver_alive_locked():
             return None
 
@@ -480,13 +482,15 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             await self._record_interruption("exception", str(exc))
             return None
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, **kwargs) -> Optional[str]:
         """🎭 HIGH-STEALTH INTERACTIVE SEARCH (Human-Like)"""
         async with self._lock:
-            return await self._search_google_ai_interactive_locked(prompt, ai_mode_url, row)
+            return await self._search_google_ai_interactive_locked(prompt, **kwargs)
 
-    async def _search_google_ai_interactive_locked(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def _search_google_ai_interactive_locked(self, prompt: str, **kwargs) -> Optional[str]:
         """Internal locked interactive search."""
+        ai_mode_url = kwargs.get("ai_mode_url")
+        row = kwargs.get("row")
         if not await self._ensure_driver_alive_locked():
             return None
 
@@ -557,9 +561,9 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         # ── 7. Wait for stable response ────────────────────────────────────
         return await self._wait_for_stable_response_locked(timeout_sec=30)
 
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Alias maintaining full HybridEngine / benchmark compatibility."""
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
 
     async def submit_google_search(self, prompt: str) -> bool:
@@ -601,7 +605,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                     await self.report_proxy_error(self.current_proxy, 403)
             return False
 
-    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Submit a prompt to Gemini and return the streamed response text."""
         async with self._lock:
             return await self._search_gemini_ai_locked(prompt)
@@ -642,8 +646,8 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                     await self.report_proxy_error(self.current_proxy, 403)
             return None
 
-    async def crawl_website(self, url: str) -> str:
-        """Deep crawl of a website: homepage + subpages."""
+    async def crawl_website(self, url: str, **kwargs) -> str:
+        """Deep-crawl a website: homepage + wait for stability."""
         async with self._lock:
             return await self._crawl_website_locked(url)
 

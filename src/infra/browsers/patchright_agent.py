@@ -17,6 +17,7 @@ import random
 import re
 import json
 import urllib.parse
+import os
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -89,6 +90,11 @@ class PatchrightAgent(BaseBrowserAgent):
         self._fingerprint = get_fingerprint_bundle()
         vp = self._fingerprint["viewport"]
         launch_args = [f"--window-size={vp['width']},{vp['height']}"]
+        
+        # 🛡️ Hardened Sandbox Fix for Root/Docker
+        if os.getuid() == 0:
+            logger.info("[Patchright] 🛡️ Running as ROOT: Disabling sandbox flags.")
+            launch_args.extend(["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"])
 
         geolocation = None
         permissions = []
@@ -318,7 +324,7 @@ class PatchrightAgent(BaseBrowserAgent):
                 await self.report_proxy_error(self.current_proxy, 403)
             return False
 
-    async def crawl_website(self, url: str) -> str:
+    async def crawl_website(self, url: str, **kwargs) -> str:
         """Deep crawl of a website."""
         async with self._lock:
             return await self._crawl_website_locked(url)
@@ -374,8 +380,9 @@ class PatchrightAgent(BaseBrowserAgent):
             logger.error(f"[Patchright] Crawl error for {url}: {e}")
             return ""
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
         """PRIMARY SEARCH METHOD — TIER 0"""
+        ai_mode_url = kwargs.get("ai_mode_url")
         async with self._lock:
             if not await self._ensure_page_locked():
                 return None
@@ -496,7 +503,7 @@ class PatchrightAgent(BaseBrowserAgent):
             await self._close_locked()
             await self._start_locked()
 
-    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Deep search using Google Gemini."""
         async with self._lock:
             if not await self._ensure_page_locked(): return None
@@ -562,10 +569,10 @@ class PatchrightAgent(BaseBrowserAgent):
             except: continue
         return None
 
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Legacy AI search fallback."""
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, **kwargs) -> Optional[str]:
         """Interactive high-stealth search flow."""
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai_mode(prompt, **kwargs)

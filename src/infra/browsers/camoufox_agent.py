@@ -242,8 +242,10 @@ class CamoufoxAgent(BaseBrowserAgent):
     # SEARCH METHODS  (mirrors PatchrightAgent interface)
     # ─────────────────────────────────────────────────────────────────
 
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Search Google AI Mode (Firefox)."""
+        ai_mode_url = kwargs.get("ai_mode_url")
+        row = kwargs.get("row")
         async with self._lock:
             if not await self._ensure_page_locked():
                 return None
@@ -285,15 +287,15 @@ class CamoufoxAgent(BaseBrowserAgent):
                         await self.report_proxy_error(self.current_proxy, 403)
                 return None
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
         """Alias for search_google_ai — HybridEngine compatibility."""
-        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai(prompt, **kwargs)
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, **kwargs) -> Optional[str]:
         """
         Interactive high-stealth search flow for Camoufox.
         """
-        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai(prompt, **kwargs)
 
     async def submit_google_search(self, prompt: str) -> bool:
         """Navigate to Google standard search results page."""
@@ -329,9 +331,8 @@ class CamoufoxAgent(BaseBrowserAgent):
                 return False
 
 
-    async def crawl_website(self, url: str) -> str:
-        """
-        Visit a URL and return visible page text.
+    async def crawl_website(self, url: str, **kwargs) -> str:
+        """Visit a URL and return body text (Firefox).
         Used by HybridEngine as Tier 4 deep-scraper fallback.
         """
         if not await self.goto_url(url):
@@ -345,7 +346,7 @@ class CamoufoxAgent(BaseBrowserAgent):
             logger.error(f"[Camoufox] crawl_website error: {exc}")
             return ""
 
-    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """
         Deep search using Google Gemini (Firefox/Camoufox).
         """

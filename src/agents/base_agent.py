@@ -136,21 +136,28 @@ class BaseBrowserAgent:
         """
         pass
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
         """
         AI Mode search via browser waterfall.
         To be implemented by child classes.
         """
         raise NotImplementedError
 
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """
         Legacy AI search fallback.
         To be implemented by child classes.
         """
         raise NotImplementedError
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str, **kwargs) -> Optional[str]:
+        """
+        Gemini AI search fallback.
+        To be implemented by child classes.
+        """
+        raise NotImplementedError
+
+    async def search_google_ai_interactive(self, prompt: str, **kwargs) -> Optional[str]:
         """
         Interactive high-stealth search flow (Google.com -> type query -> Enter -> Click AI).
         To be implemented by child classes.
@@ -160,6 +167,13 @@ class BaseBrowserAgent:
     async def is_alive(self) -> bool:
         """
         Check if the browser agent and its underlying process are still healthy.
+        To be implemented by child classes.
+        """
+        raise NotImplementedError
+
+    async def crawl_website(self, url: str, **kwargs) -> str:
+        """
+        Deep crawl of a website.
         To be implemented by child classes.
         """
         raise NotImplementedError

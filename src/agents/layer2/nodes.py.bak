@@ -5,7 +5,7 @@ All nodes are pure functions: (Layer2State) -> Layer2State.
 Tool instances are module-level singletons (created once, reused per call).
 """
 import json
-import asyncio
+import time
 from pathlib import Path
 from typing import List
 
@@ -73,7 +73,7 @@ def scrape_facebook_node(state: Layer2State) -> Layer2State:
         if result.get("error"):
             errors.append(f"facebook:{item['url']}:{result['error']}")
         # Respect rate limit — social platforms ban fast crawlers
-        asyncio.get_event_loop().run_in_executor(None, time.sleep, min(2, config.MIN_DELAY_SECONDS))
+        time.sleep(config.MIN_DELAY_SECONDS)
 
     return {**state, "scraped_results": results, "error_log": errors}
 
@@ -92,7 +92,7 @@ def scrape_linkedin_node(state: Layer2State) -> Layer2State:
         results.append({**result, "source_type": "linkedin"})
         if result.get("error"):
             errors.append(f"linkedin:{item['url']}:{result['error']}")
-        asyncio.get_event_loop().run_in_executor(None, time.sleep, min(2, config.MIN_DELAY_SECONDS))
+        time.sleep(config.MIN_DELAY_SECONDS)
 
     return {**state, "scraped_results": results, "error_log": errors}
 

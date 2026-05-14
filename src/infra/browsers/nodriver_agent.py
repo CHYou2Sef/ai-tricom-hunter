@@ -121,7 +121,8 @@ class NodriverAgent(BaseBrowserAgent):
                 browser_executable_path=nd_path,
                 browser_args=browser_args,
                 user_data_dir=profile_path,
-                headless=getattr(config, "HEADLESS", False)
+                headless=getattr(config, "HEADLESS", False),
+                sandbox=(os.getuid() != 0)  # Disable sandbox if running as root
             )
 
             await asyncio.sleep(2)
@@ -310,13 +311,15 @@ class NodriverAgent(BaseBrowserAgent):
     # SEARCH METHODS
     # ─────────────────────────────────────────────────────────────────
 
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Submit a query to Google via AI Mode URL."""
         async with self._lock:
-            return await self._search_google_ai_locked(prompt, ai_mode_url, row=row)
+            return await self._search_google_ai_locked(prompt, **kwargs)
 
-    async def _search_google_ai_locked(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def _search_google_ai_locked(self, prompt: str, **kwargs) -> Optional[str]:
         """Internal lock-free search."""
+        ai_mode_url = kwargs.get("ai_mode_url")
+        row = kwargs.get("row")
         if not await self._ensure_page_locked():
             return None
         
@@ -360,14 +363,14 @@ class NodriverAgent(BaseBrowserAgent):
                 await self.report_proxy_error(self.current_proxy, 403)
             return None
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
         """Alias for search_google_ai to maintain HybridEngine compatibility."""
-        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai(prompt, **kwargs)
 
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, **kwargs) -> Optional[str]:
         """Interactive search fallback for Nodriver."""
-        return await self.search_google_ai(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai(prompt, **kwargs)
 
     async def submit_google_search(self, prompt: str) -> bool:
         """Navigate to Google and submit a search query."""
@@ -408,7 +411,7 @@ class NodriverAgent(BaseBrowserAgent):
                 await self.report_proxy_error(self.current_proxy, 403)
             return False
 
-    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Submit a query to Gemini via direct interaction."""
         async with self._lock:
             return await self._search_gemini_ai_locked(prompt)
@@ -453,16 +456,13 @@ class NodriverAgent(BaseBrowserAgent):
             except Exception:
                 break
 
-    async def crawl_website(self, url: str) -> str:
-        """Alias for crawl_url to maintain HybridEngine contract."""
-        return await self.crawl_url(url)
 
-    async def crawl_url(self, url: str) -> str:
+    async def crawl_website(self, url: str, **kwargs) -> str:
         """Visit a URL and return all visible text from the body."""
         async with self._lock:
-            return await self._crawl_url_locked(url)
+            return await self._crawl_website_locked(url)
 
-    async def _crawl_url_locked(self, url: str) -> str:
+    async def _crawl_website_locked(self, url: str) -> str:
         """Internal lock-free crawl."""
         if not await self._goto_url_locked(url):
             return ""
@@ -478,7 +478,7 @@ class NodriverAgent(BaseBrowserAgent):
             text = re.sub(r"\s+", " ", text).strip()
             return text[:8000]
         except Exception as exc:
-            logger.error(f"[Nodriver] crawl_url error: {exc}")
+            logger.error(f"[Nodriver] crawl_website error: {exc}")
             return ""
 
     # ─────────────────────────────────────────────────────────────────

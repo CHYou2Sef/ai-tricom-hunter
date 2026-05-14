@@ -434,10 +434,12 @@ class SeleniumAgent(BaseBrowserAgent):
 
     # ── Search methods ─────────────────────────────────────────────────────
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
         """
         PRIMARY SEARCH — direct navigation to Google AI Mode URL.
         """
+        ai_mode_url = kwargs.get("ai_mode_url")
+        row = kwargs.get("row")
         async with self._lock:
             if not await self._ensure_driver_alive_locked():
                 return None
@@ -506,18 +508,18 @@ class SeleniumAgent(BaseBrowserAgent):
             logger.error(f"[Selenium] submit_google_search error: {exc}")
             return False
 
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Alias maintaining full HybridEngine / benchmark compatibility."""
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, **kwargs) -> Optional[str]:
         """
         Interactive high-stealth search flow.
         """
         # For now, we fallback to the mode navigation as Selenium UC is already stealthy
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
-    async def search_gemini_ai(self, prompt: str) -> Optional[str]:
+    async def search_gemini_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Submit a query to Gemini and return response text."""
         if not self._driver:
             return None
@@ -539,7 +541,7 @@ class SeleniumAgent(BaseBrowserAgent):
             logger.error(f"[Selenium] search_gemini_ai error: {exc}")
             return None
 
-    async def crawl_website(self, url: str) -> str:
+    async def crawl_website(self, url: str, **kwargs) -> str:
         """Visit a URL and return all visible page text (capped at 8k chars)."""
         if not await self.goto_url(url):
             return ""

@@ -123,19 +123,33 @@ class FirecrawlAgent(BaseBrowserAgent):
             logger.error(f"[Firecrawl] Map failed for {url}: {e}")
             return []
 
-    async def crawl(self, url: str, limit: int = 10) -> Optional[Dict[str, Any]]:
-        """Crawl a site asynchronously."""
+    async def crawl_website(self, url: str, **kwargs) -> str:
+        """Crawl a site asynchronously and return combined markdown."""
         if not self.enabled or not self._app:
-            return None
+            return ""
             
-        logger.info(f"[Firecrawl] Starting crawl: {url} (limit={limit})")
+        logger.info(f"[Firecrawl] Starting crawl: {url}")
         try:
+            # Note: Firecrawl crawl is asynchronous, but we wait for it here
+            # for simpler integration with the waterfall.
             result = await asyncio.to_thread(
                 self._app.crawl_url, 
                 url, 
-                params={"limit": limit, "scrapeOptions": {"formats": ["markdown"]}}
+                params={"limit": 5, "scrapeOptions": {"formats": ["markdown"]}}
             )
-            return result
+            
+            if result and isinstance(result, dict) and 'data' in result:
+                pages = result['data']
+                combined = []
+                for p in pages:
+                    content = p.get('markdown') or p.get('content') or ""
+                    if content:
+                        combined.append(f"--- PAGE: {p.get('url')} ---\n{content}")
+                
+                self._last_content = "\n\n".join(combined)
+                return self._last_content
+            
+            return ""
         except Exception as e:
             err_msg = str(e)
             if "Insufficient credits" in err_msg or "Payment Required" in err_msg:
@@ -143,7 +157,7 @@ class FirecrawlAgent(BaseBrowserAgent):
                 self.enabled = False
             else:
                 logger.error(f"[Firecrawl] Crawl failed for {url}: {e}")
-            return None
+            return ""
 
     async def close(self):
         """Cleanup (Firecrawl SDK handles its own sessions)."""
@@ -151,8 +165,10 @@ class FirecrawlAgent(BaseBrowserAgent):
 
     # ── Stub methods for BaseBrowserAgent contract ─────────────────────────
 
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
         """Adaptateur pour la recherche Google via Firecrawl."""
+        ai_mode_url = kwargs.get("ai_mode_url")
+        row = kwargs.get("row")
         if not self.enabled or not self._app:
             return None
 
@@ -196,12 +212,12 @@ class FirecrawlAgent(BaseBrowserAgent):
                 logger.error(f"[Firecrawl] Native search failed: {e}")
             return None
 
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+    async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(self, prompt: str, **kwargs) -> Optional[str]:
         """Interactive search fallback for Firecrawl."""
-        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
     async def submit_google_search(self, prompt: str) -> bool:
         """Pas de session interactive pour soumettre un formulaire."""
