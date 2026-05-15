@@ -296,7 +296,7 @@ class Crawl4AIAgent(BaseBrowserAgent):
             run_cfg = CrawlerRunConfig(
                 js_code=wait_js,
                 wait_for="[data-attrid='wa:/description'],.kno-rdesc,.wDYxhc",
-                wait_for_timeout=25000,
+                wait_for_timeout=45000,
                 word_count_threshold=10,
                 remove_overlay_elements=True,
                 cache_mode=CacheMode.BYPASS,
@@ -331,7 +331,7 @@ class Crawl4AIAgent(BaseBrowserAgent):
                     result = await self._crawler.arun(
                         url=url,
                         wait_for="[data-attrid='wa:/description'],.kno-rdesc,.wDYxhc",
-                        timeout=30000,
+                        timeout=60000,
                         word_count_threshold=10,
                         remove_overlay_elements=True,
                         bypass_cache=True,

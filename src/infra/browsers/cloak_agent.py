@@ -116,6 +116,11 @@ class CloakAgent(BaseBrowserAgent):
         from core.config import find_cloak_binary
         exec_path = find_cloak_binary() or None
 
+        # Set executable path via environment to avoid duplicate kwarg conflict
+        # with launch_persistent_context_async internal browser setup
+        if exec_path:
+            os.environ["CLOAKBROWSER_BINARY_PATH"] = exec_path
+
         try:
             # Cloak handles fingerprints at C++ level.
             # We use launch_persistent_context_async for session persistence.
@@ -129,7 +134,6 @@ class CloakAgent(BaseBrowserAgent):
 
             self.context = await launch_persistent_context_async(
                 user_data_dir=str(self.profile_path),
-                executable_path=exec_path,
                 **kwargs
             )
             

@@ -86,6 +86,10 @@ class NodriverAgent(BaseBrowserAgent):
             "--no-default-browser-check",
             "--disable-infobars",
             "--disable-notifications",
+            "--single-process",
+            "--disable-crash-reporter",
+            "--disable-logging",
+            "--blink-settings=imagesEnabled=false",
             "--disable-gpu",
             "--disable-dev-shm-usage",
             "--remote-debugging-port=0", # Auto-assign

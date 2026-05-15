@@ -40,6 +40,7 @@ from typing import Optional, Any, Dict, List, TYPE_CHECKING
 from core import config
 from agents.base_agent import BaseBrowserAgent
 from common.anti_bot import (
+    build_cdp_injection_script,
     get_fingerprint_bundle,
     is_captcha_page,
     wait_for_human_captcha_solve,
@@ -287,7 +288,15 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         except Exception:
             pass
         logger.info("[SeleniumBase] Driver() constructor returned; finishing session setup…")
-
+        
+        # Inject fingerprint bundle via execute_script for enhanced stealth
+        try:
+            script = build_cdp_injection_script(self._fingerprint)
+            self._driver.execute_script(script)
+            logger.info("[SeleniumBase] Fingerprint bundle injected via CDP")
+        except Exception as inj_exc:
+            logger.warning(f"[SeleniumBase] Fingerprint injection failed: {inj_exc}")
+        
         if not self._driver:
             raise RuntimeError("SeleniumBase Driver initialization returned None")
 
