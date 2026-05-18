@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 """
 ╔════════════════════════════════════════════════════════════════════════╗
 ║  browser/hybrid_engine.py                                              ║
@@ -40,9 +41,87 @@ from common.metrics import get_telemetry
 logger = get_logger(__name__)
 
 
+# ��────────────────────────────────────────────────────────────────────────────
+# NETWORK SPEED PROBE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class NetworkSpeedProbe:
+    """
+    Lightweight network quality probe to adapt timeouts based on connection quality.
+    Measures TCP connect latency and small-asset download speed.
+    """
+
+    _last_check_time = 0.0
+    _last_score = "medium"  # "good" | "medium" | "bad"
+    _last_latency_ms = 100.0
+    _probe_interval_sec = 30.0  # Re-probe every 30s to avoid overhead
+
+    @classmethod
+    async def probe(cls) -> tuple[str, float]:
+        """
+        Run a quick network quality check.
+
+        Returns:
+            tuple of (score, latency_ms)
+            score: "good" (< 100ms), "medium" (100-300ms), "bad" (> 300ms)
+        """
+        now = time.time()
+        if now - cls._last_check_time < cls._probe_interval_sec:
+            return cls._last_score, cls._last_latency_ms
+
+        cls._last_check_time = now
+        latency_ms = await cls._measure_latency()
+        cls._last_latency_ms = latency_ms
+
+        if latency_ms < 100:
+            cls._last_score = "good"
+        elif latency_ms < 300:
+            cls._last_score = "medium"
+        else:
+            cls._last_score = "bad"
+
+        logger.debug(
+            f"[NetworkProbe] score={cls._last_score} latency={latency_ms:.0f}ms"
+        )
+        return cls._last_score, cls._last_latency_ms
+
+    @staticmethod
+    async def _measure_latency() -> float:
+        """Measure TCP connect latency to a known host."""
+        import socket
+
+        test_host = "www.google.com"
+        test_port = 443
+        delays = []
+
+        for _ in range(3):
+            try:
+                t0 = time.perf_counter()
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5.0)
+                sock.connect((test_host, test_port))
+                sock.close()
+                delays.append((time.perf_counter() - t0) * 1000)
+            except Exception:
+                delays.append(500.0)  # Fallback for connection failures
+
+        return sum(delays) / len(delays) if delays else 500.0
+
+    @classmethod
+    def get_timeout_multiplier(cls) -> float:
+        """Return a timeout multiplier based on current network score."""
+        if cls._last_score == "good":
+            return 1.0
+        elif cls._last_score == "medium":
+            return 1.5
+        else:
+            return 2.5
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # URL TIER CLASSIFIER
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def classify_url(url: str) -> int:
     """
@@ -100,33 +179,36 @@ TIER_NAMES = {
 # HYBRID ENGINE  (async context manager)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class HybridAutomationEngine:
     """
     The main orchestrator. Manages all three tier agents as a pool
     and routes each task to the appropriate one.
     """
+
     # ── Configuration & Resource Locks ─────────────────────────────────────
-    _CB_THRESHOLD = 3      # Consecutive failures before opening circuit
-    _CB_PAUSE_SEC  = 60   # 5 minutes pause — lets WAF cool down + proxy rotate
+    _CB_THRESHOLD = 3  # Consecutive failures before opening circuit
+    _CB_PAUSE_SEC = 60  # 5 minutes pause — lets WAF cool down + proxy rotate
     _TIER_STARTUP_SEC = 120.0  # Max seconds to wait for any browser tier to start
-    
+
     # Tier 5 (Camoufox/Firefox) is extremely heavy (~1 GB RAM).
     # We limit it to a single concurrent instance across ALL workers.
     _tier4_global_lock = asyncio.Lock()  # Originally named for Tier 4, reused for Tier 5
-    
+
     def __init__(self, worker_id: int = 0):
         self._worker_id = worker_id
-        from agents.base_agent import BaseBrowserAgent # Local import to avoid circular dependency
-        self._tier0: Optional[BaseBrowserAgent] = None   # SeleniumAgent      (Legacy/Benchmark)
+        from agents.base_agent import BaseBrowserAgent  # Local import to avoid circular dependency
+
+        self._tier0: Optional[BaseBrowserAgent] = None  # SeleniumAgent      (Legacy/Benchmark)
         # Tier 1 slot removed — Scrapy is now a post-discovery bonus, not a waterfall tier.
-        self._tier2: Optional[BaseBrowserAgent] = None   # SeleniumBaseAgent  (UC Driver) ⭐ PRIMARY
-        self._tier3: Optional[BaseBrowserAgent] = None   # BotasaurusAgent    (Anti-detect)
-        self._tier4: Optional[BaseBrowserAgent] = None   # CloakAgent         (Supreme Stealth)
-        self._tier5: Optional[BaseBrowserAgent] = None   # NodriverAgent      (Chrome CDP)
-        self._tier6: Optional[BaseBrowserAgent] = None   # Crawl4AIAgent      (Chrome managed)
-        self._tier7: Optional[BaseBrowserAgent] = None   # CamoufoxAgent      (Firefox anti-detect)
-        self._tier8: Optional[BaseBrowserAgent] = None   # FirecrawlAgent     (Premium managed)
-        self._tier9: Optional[BaseBrowserAgent] = None   # JinaAgent          (High-speed Markdown)
+        self._tier2: Optional[BaseBrowserAgent] = None  # SeleniumBaseAgent  (UC Driver) ⭐ PRIMARY
+        self._tier3: Optional[BaseBrowserAgent] = None  # BotasaurusAgent    (Anti-detect)
+        self._tier4: Optional[BaseBrowserAgent] = None  # CloakAgent         (Supreme Stealth)
+        self._tier5: Optional[BaseBrowserAgent] = None  # NodriverAgent      (Chrome CDP)
+        self._tier6: Optional[BaseBrowserAgent] = None  # Crawl4AIAgent      (Chrome managed)
+        self._tier7: Optional[BaseBrowserAgent] = None  # CamoufoxAgent      (Firefox anti-detect)
+        self._tier8: Optional[BaseBrowserAgent] = None  # FirecrawlAgent     (Premium managed)
+        self._tier9: Optional[BaseBrowserAgent] = None  # JinaAgent          (High-speed Markdown)
         self._tier10: Optional[BaseBrowserAgent] = None  # CrawleeAgent       (Industrial crawler)
 
         # ── Circuit Breaker state ─────────────────────────────────────────────
@@ -137,15 +219,17 @@ class HybridAutomationEngine:
         self._circuit_breaker_until = 0.0
         self._consecutive_failures = 0
         self._last_target_url: Optional[str] = None  # For re-navigation catch-up
-        self._last_failure_reason: Optional[str] = None  # "network"|"captcha_waf"|"code_bug"|"exception"|None
-        self.current_row_index: int = 0             # Track current row for telemetry
-        self.last_successful_tier_used: Optional[int] = None # For per-row export
+        self._last_failure_reason: Optional[str] = (
+            None  # "network"|"captcha_waf"|"code_bug"|"exception"|None
+        )
+        self.current_row_index: int = 0  # Track current row for telemetry
+        self.last_successful_tier_used: Optional[int] = None  # For per-row export
 
         self._stats: Dict[Any, Dict[str, Any]] = {
-            0:  {"attempts": 0, "successes": 0, "total_ms": 0},
+            0: {"attempts": 0, "successes": 0, "total_ms": 0},
             # Scrapy bonus step tracked separately
             "scrapy_bonus": {"attempts": 0, "successes": 0, "total_ms": 0},
-            2:  {"attempts": 0, "successes": 0, "total_ms": 0},  # SeleniumBase
+            2: {"attempts": 0, "successes": 0, "total_ms": 0},  # SeleniumBase
             3: {"attempts": 0, "successes": 0, "total_ms": 0},  # Botasaurus
             4: {"attempts": 0, "successes": 0, "total_ms": 0},  # Patchright
             5: {"attempts": 0, "successes": 0, "total_ms": 0},  # Nodriver
@@ -153,7 +237,7 @@ class HybridAutomationEngine:
             7: {"attempts": 0, "successes": 0, "total_ms": 0},  # Camoufox
             8: {"attempts": 0, "successes": 0, "total_ms": 0},  # Firecrawl
             9: {"attempts": 0, "successes": 0, "total_ms": 0},  # Jina
-            10: {"attempts": 0, "successes": 0, "total_ms": 0}, # Crawlee
+            10: {"attempts": 0, "successes": 0, "total_ms": 0},  # Crawlee
         }
 
     @property
@@ -182,7 +266,7 @@ class HybridAutomationEngine:
 
     async def __aexit__(self, *args):
         await self.stop_all()
-        
+
     # ── Tier management ────────────────────────────────────────────────────
 
     async def start_tier(self, tier: int) -> bool:
@@ -205,9 +289,16 @@ class HybridAutomationEngine:
         try:
             # 1. Check if existing agent is alive
             agent_map = {
-                0: self._tier0, 2: self._tier2,
-                3: self._tier3, 4: self._tier4, 5: self._tier5,
-                6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
+                0: self._tier0,
+                2: self._tier2,
+                3: self._tier3,
+                4: self._tier4,
+                5: self._tier5,
+                6: self._tier6,
+                7: self._tier7,
+                8: self._tier8,
+                9: self._tier9,
+                10: self._tier10,
             }
             agent = agent_map.get(tier)
             if agent:
@@ -221,58 +312,83 @@ class HybridAutomationEngine:
             # ── Tier 0: Legacy SeleniumAgent (ucd benchmark) ───────────────
             if tier == 0 and not self._tier0:
                 from infra.browsers.selenium_agent import SeleniumAgent
+
                 self._tier0 = SeleniumAgent(worker_id=self._worker_id)
                 await self._tier0.start()
-                logger.info(f"[HybridEngine] ✅ Tier 0 (SeleniumUCD/Legacy) started for worker {self.worker_id}.")
+                logger.info(
+                    f"[HybridEngine] ✅ Tier 0 (SeleniumUCD/Legacy) started for worker {self.worker_id}."
+                )
 
             # ── Tier 2: SeleniumBase UC Driver (PRIMARY ⭐) ────────────────
             elif tier == 2 and not self._tier2:
                 if not getattr(config, "SELENIUMBASE_ENABLED", True):
-                    logger.warning("[HybridEngine] Tier 2 (SeleniumBase) is DISABLED in config. Skipping.")
+                    logger.warning(
+                        "[HybridEngine] Tier 2 (SeleniumBase) is DISABLED in config. Skipping."
+                    )
                     return False
                 from infra.browsers.seleniumbase_agent import SeleniumBaseAgent
+
                 self._tier2 = SeleniumBaseAgent(worker_id=self._worker_id)
                 await self._tier2.start()
-                logger.info(f"[HybridEngine] ✅ Tier 2 ⭐ (SeleniumBase UC) started for worker {self.worker_id}.")
+                logger.info(
+                    f"[HybridEngine] ✅ Tier 2 ⭐ (SeleniumBase UC) started for worker {self.worker_id}."
+                )
 
             # ── Tier 3: BotasaurusAgent (Anti-detect) ─────────────────────────
             elif tier == 3 and not self._tier3:
                 if not getattr(config, "BOTASAURUS_ENABLED", True):
-                    logger.warning("[HybridEngine] Tier 3 (Botasaurus) is DISABLED in config. Skipping.")
+                    logger.warning(
+                        "[HybridEngine] Tier 3 (Botasaurus) is DISABLED in config. Skipping."
+                    )
                     return False
                 from infra.browsers.botasaurus_agent import BotasaurusAgent
+
                 self._tier3 = BotasaurusAgent(worker_id=self._worker_id)
                 await self._tier3.start()
-                logger.info(f"[HybridEngine] ✅ Tier 3 🦖 (Botasaurus) started for worker {self.worker_id}.")
+                logger.info(
+                    f"[HybridEngine] ✅ Tier 3 🦖 (Botasaurus) started for worker {self.worker_id}."
+                )
 
             # ── Tier 4: CloakAgent (Supreme Stealth — C++ patched) ───────────
             elif tier == 4 and not self._tier4:
                 from infra.browsers.cloak_agent import CloakAgent
+
                 self._tier4 = CloakAgent(worker_id=self._worker_id)
                 await self._tier4.start()
-                logger.info(f"[HybridEngine] ✅ Tier 4 (CloakBrowser/Supreme) started for worker {self.worker_id}.")
+                logger.info(
+                    f"[HybridEngine] ✅ Tier 4 (CloakBrowser/Supreme) started for worker {self.worker_id}."
+                )
 
             # ── Tier 5: NodriverAgent (Chrome CDP — no chromedriver) ──────
             elif tier == 5 and not self._tier5:
                 from infra.browsers.nodriver_agent import NodriverAgent
+
                 self._tier5 = NodriverAgent(worker_id=self._worker_id)
                 await self._tier5.start()
-                logger.info(f"[HybridEngine] ✅ Tier 5 (Nodriver/Chrome CDP) started for worker {self.worker_id}.")
+                logger.info(
+                    f"[HybridEngine] ✅ Tier 5 (Nodriver/Chrome CDP) started for worker {self.worker_id}."
+                )
 
             # ── Tier 6: Crawl4AIAgent (Chrome managed) ────────────────────
             elif tier == 6 and not self._tier6:
                 from infra.browsers.crawl4ai_agent import Crawl4AIAgent
+
                 self._tier6 = Crawl4AIAgent(worker_id=self._worker_id)
                 await self._tier6.start()
-                logger.info(f"[HybridEngine] ✅ Tier 6 (Crawl4AI/Chrome) started for worker {self.worker_id}.")
+                logger.info(
+                    f"[HybridEngine] ✅ Tier 6 (Crawl4AI/Chrome) started for worker {self.worker_id}."
+                )
 
             # ── Tier 7: CamoufoxAgent (Firefox anti-detect — last resort) ─
             elif tier == 7 and not self._tier7:
                 if not config.CAMOUFOX_ENABLED:
-                    logger.warning("[HybridEngine] Tier 7 (Camoufox) is DISABLED in config. Skipping.")
+                    logger.warning(
+                        "[HybridEngine] Tier 7 (Camoufox) is DISABLED in config. Skipping."
+                    )
                     return False
                 async with self._tier4_global_lock:
                     from infra.browsers.camoufox_agent import CamoufoxAgent
+
                     self._tier7 = CamoufoxAgent(worker_id=self._worker_id)
                     await self._tier7.start()
                     logger.info(
@@ -282,12 +398,17 @@ class HybridAutomationEngine:
             # ── Tier 8: FirecrawlAgent (Premium managed) ───────────────────
             elif tier == 8 and not self._tier8:
                 if not config.FIRECRAWL_ENABLED:
-                    logger.warning("[HybridEngine] Tier 8 (Firecrawl) is DISABLED in config. Skipping.")
+                    logger.warning(
+                        "[HybridEngine] Tier 8 (Firecrawl) is DISABLED in config. Skipping."
+                    )
                     return False
                 from infra.browsers.firecrawl_agent import FirecrawlAgent
+
                 self._tier8 = FirecrawlAgent(worker_id=self._worker_id)
                 await self._tier8.start()
-                logger.info(f"[HybridEngine] ✅ Tier 8 (Firecrawl) started for worker {self.worker_id}.")
+                logger.info(
+                    f"[HybridEngine] ✅ Tier 8 (Firecrawl) started for worker {self.worker_id}."
+                )
 
             # ── Tier 9: JinaAgent (High-speed Markdown Reader) ────────────
             elif tier == 9 and not self._tier9:
@@ -295,24 +416,34 @@ class HybridAutomationEngine:
                     logger.warning("[HybridEngine] Tier 9 (Jina) is DISABLED in config. Skipping.")
                     return False
                 from infra.browsers.jina_agent import JinaAgent
+
                 self._tier9 = JinaAgent(worker_id=self._worker_id)
                 await self._tier9.start()
-                logger.info(f"[HybridEngine] ✅ Tier 9 (Jina Reader) started for worker {self.worker_id}.")
+                logger.info(
+                    f"[HybridEngine] ✅ Tier 9 (Jina Reader) started for worker {self.worker_id}."
+                )
 
             # ── Tier 10: CrawleeAgent (Industrial Crawler) ─────────────────
             elif tier == 10 and not self._tier10:
                 if not config.CRAWLEE_ENABLED:
-                    logger.warning("[HybridEngine] Tier 10 (Crawlee) is DISABLED in config. Skipping.")
+                    logger.warning(
+                        "[HybridEngine] Tier 10 (Crawlee) is DISABLED in config. Skipping."
+                    )
                     return False
                 from infra.browsers.crawlee_agent import CrawleeAgent
+
                 self._tier10 = CrawleeAgent(worker_id=self._worker_id)
                 await self._tier10.start()
-                logger.info(f"[HybridEngine] ✅ Tier 10 (Crawlee) started for worker {self.worker_id}.")
+                logger.info(
+                    f"[HybridEngine] ✅ Tier 10 (Crawlee) started for worker {self.worker_id}."
+                )
 
             return True
         except ImportError as ie:
-            logger.warning(f"  ⏭️ [HybridEngine] Tier {tier} is NOT INSTALLED or DISABLED! Skip to next available tier.")
-            pkg_name = getattr(ie, 'name', None) or "required dependencies"
+            logger.warning(
+                f"  ⏭️ [HybridEngine] Tier {tier} is NOT INSTALLED or DISABLED! Skip to next available tier."
+            )
+            pkg_name = getattr(ie, "name", None) or "required dependencies"
             logger.warning(f"     Run: pip install {pkg_name}")
             return False
         except Exception as exc:
@@ -322,9 +453,16 @@ class HybridAutomationEngine:
     async def stop_tier(self, tier: int) -> None:
         """Explicitly close a specific tier to free resources before escalation."""
         agent_map = {
-            0: self._tier0, 2: self._tier2,
-            3: self._tier3, 4: self._tier4, 5: self._tier5, 
-            6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
+            0: self._tier0,
+            2: self._tier2,
+            3: self._tier3,
+            4: self._tier4,
+            5: self._tier5,
+            6: self._tier6,
+            7: self._tier7,
+            8: self._tier8,
+            9: self._tier9,
+            10: self._tier10,
         }
         agent = agent_map.get(tier)
         if agent:
@@ -334,22 +472,34 @@ class HybridAutomationEngine:
             except Exception as exc:
                 logger.warning(f"[HybridEngine] Tier {tier} close error: {exc}")
 
-        if tier == 0:   self._tier0 = None
-        elif tier == 2: self._tier2 = None
-        elif tier == 3: self._tier3 = None
-        elif tier == 4: self._tier4 = None
-        elif tier == 5: self._tier5 = None
-        elif tier == 6: self._tier6 = None
-        elif tier == 7: self._tier7 = None
-        elif tier == 8: self._tier8 = None
-        elif tier == 9: self._tier9 = None
-        elif tier == 10: self._tier10 = None
+        if tier == 0:
+            self._tier0 = None
+        elif tier == 2:
+            self._tier2 = None
+        elif tier == 3:
+            self._tier3 = None
+        elif tier == 4:
+            self._tier4 = None
+        elif tier == 5:
+            self._tier5 = None
+        elif tier == 6:
+            self._tier6 = None
+        elif tier == 7:
+            self._tier7 = None
+        elif tier == 8:
+            self._tier8 = None
+        elif tier == 9:
+            self._tier9 = None
+        elif tier == 10:
+            self._tier10 = None
 
         # 🧹 PROACTIVE CLEANUP
         try:
             from common.disk_cleanup import check_and_cleanup
+
             check_and_cleanup(threshold_pct=90)
-        except: pass
+        except:
+            pass
 
     async def stop_all(self) -> None:
         for tier in [0, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
@@ -361,9 +511,16 @@ class HybridAutomationEngine:
     async def rotate_proxy(self):
         """Forward proxy rotation to the currently active agent."""
         agent_map = {
-            0: self._tier0, 2: self._tier2, 
-            3: self._tier3, 4: self._tier4, 5: self._tier5,
-            6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
+            0: self._tier0,
+            2: self._tier2,
+            3: self._tier3,
+            4: self._tier4,
+            5: self._tier5,
+            6: self._tier6,
+            7: self._tier7,
+            8: self._tier8,
+            9: self._tier9,
+            10: self._tier10,
         }
         agent = agent_map.get(self._current_tier)
         if agent and hasattr(agent, "rotate_proxy"):
@@ -400,13 +557,17 @@ class HybridAutomationEngine:
         for _attr in [k for k in self.__dict__ if k.startswith("_soft_retry_")]:
             delattr(self, _attr)
 
+        # Strip internal parameters that should not propagate to tier methods
+        kwargs.pop("row", None)
+
         # ── 0.1 DISK SPACE GUARD (Bug #5 — proactive auto-cleanup) ──────────
         try:
             from common.disk_cleanup import check_and_cleanup
+
             check_and_cleanup(threshold_pct=85)
         except Exception:
             pass  # Disk cleanup is best-effort — never block execution
-            
+
         # ── 0.5 PROMPT VALIDATION ─────────────────────────────────────────────
         if "search" in method_name:
             prompt_val = args[0] if len(args) > 0 else kwargs.get("prompt", "")
@@ -436,26 +597,41 @@ class HybridAutomationEngine:
         # ── 2. SMART TIER SELECTION ───────────────────────────────────────────
         # If we have a 'last_successful_tier' that is still alive, try it FIRST.
         # This is CRITICAL for search -> extraction continuity.
-        
+
         # PERFORMANCE_MODE escalation caps
         p_mode = getattr(config, "PERFORMANCE_MODE", "full")
-        
+
+        # ── 2.1 NETWORK SPEED PROBE (adaptive timeout guard) ───────────────────
+        # Run a lightweight probe before each batch to calibrate timeout multiplier.
+        # Bad networks cause aggressive timeouts which amplify ban risk.
+        net_score, net_latency = await NetworkSpeedProbe.probe()
+        if net_score == "bad":
+            logger.warning(
+                f"[HybridEngine] 🌐 Slow network detected (latency={net_latency:.0f}ms) — "
+                f"extending all timeouts x{NetworkSpeedProbe.get_timeout_multiplier():.1f}"
+            )
+            # Extra backoff before starting: let the connection settle
+            await asyncio.sleep(2)
+
         # Browser waterfall: starts at Tier 2 (SeleniumBase).
         # Scrapy is NOT in this sequence — it fires as a bonus inside search_google_ai_mode.
         if p_mode == "simple":
-            tier_sequence = [2, 3]        # SeleniumBase + Botasaurus
+            tier_sequence = [2, 3]  # SeleniumBase + Botasaurus
         elif p_mode == "stealth":
-            tier_sequence = [2, 5]        # SeleniumBase + Nodriver
+            tier_sequence = [2, 5]  # SeleniumBase + Nodriver
         elif p_mode == "balanced":
-            tier_sequence = [2, 3, 4]     # SeleniumBase + Botasaurus + CloakBrowser
+            tier_sequence = [2, 3, 4]  # SeleniumBase + Botasaurus + CloakBrowser
         else:
             # "full" mode or custom Golden Path sequence
             tier_sequence = [2, 5, 4, 6]
-            
+
             # Additional tiers if explicitly configured to run beyond the Golden Path
-            if config.CAMOUFOX_ENABLED: tier_sequence.append(7)
-            if config.FIRECRAWL_ENABLED: tier_sequence.append(8)
-            if config.CRAWLEE_ENABLED: tier_sequence.append(10)
+            if config.CAMOUFOX_ENABLED:
+                tier_sequence.append(7)
+            if config.FIRECRAWL_ENABLED:
+                tier_sequence.append(8)
+            if config.CRAWLEE_ENABLED:
+                tier_sequence.append(10)
 
         # Apply strict global cap from config
         tier_sequence = [t for t in tier_sequence if t <= config.MAX_WATERFALL_TIER]
@@ -481,6 +657,9 @@ class HybridAutomationEngine:
         )
 
         for tier in tier_sequence:
+            # Always reset per-tier failure accumulation to avoid runaway loops
+            # across tiers/rows.
+            self._last_failure_reason = None
             self._current_tier = tier
             started = await self.start_tier(tier)
             if not started:
@@ -490,23 +669,34 @@ class HybridAutomationEngine:
                 continue
 
             agent_map = {
-                0: self._tier0, 2: self._tier2,
-                3: self._tier3, 4: self._tier4, 5: self._tier5, 
-                6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
+                0: self._tier0,
+                2: self._tier2,
+                3: self._tier3,
+                4: self._tier4,
+                5: self._tier5,
+                6: self._tier6,
+                7: self._tier7,
+                8: self._tier8,
+                9: self._tier9,
+                10: self._tier10,
             }
             agent = agent_map[tier]
 
             # ── 2.1 RE-NAVIGATION CATCH-UP ───────────────────────────────────
-            # If we just started a NEW tier (not Tier 1 or the sticky one), 
-            # and we have a last_target_url, we must navigate to it before 
+            # If we just started a NEW tier (not Tier 1 or the sticky one),
+            # and we have a last_target_url, we must navigate to it before
             # calling an extraction method.
             if tier != tier_sequence[0] and self._last_target_url and method_name != "goto_url":
                 if "search" not in method_name and method_name == "extract_universal_data":
                     if hasattr(agent, "goto_url"):
-                        logger.info(f"[HybridEngine] 🌐 Catching up Tier {tier} to URL: {self._last_target_url}")
+                        logger.info(
+                            f"[HybridEngine] 🌐 Catching up Tier {tier} to URL: {self._last_target_url}"
+                        )
                         await getattr(agent, "goto_url")(self._last_target_url)
                     else:
-                        logger.debug(f"[HybridEngine] Tier {tier} lacks goto_url; skipping catch-up.")
+                        logger.debug(
+                            f"[HybridEngine] Tier {tier} lacks goto_url; skipping catch-up."
+                        )
 
             method = getattr(agent, method_name, None)
 
@@ -529,17 +719,19 @@ class HybridAutomationEngine:
                 # A flat 15s timeout kills valid results and wastes tier escalations.
                 # Method-specific budgets prevent hung browsers from blocking.
                 _TIMEOUT_MAP = {
-                    "search_google_ai_mode":        90.0,  # AI Overview streams slowly
-                    "search_google_ai":             90.0,  # Legacy AI search alias
+                    "search_google_ai_mode": 90.0,  # AI Overview streams slowly
+                    "search_google_ai": 90.0,  # Legacy AI search alias
                     "search_google_ai_interactive": 90.0,  # Human-interactive flow
-                    "search_gemini_ai":             60.0,  # Gemini chat response
-                    "crawl_website":                45.0,  # Deep-crawl a single page
-                    "submit_google_search":         30.0,  # Type + Enter + wait
-                    "goto_url":                     20.0,  # Simple navigation
-                    "extract_universal_data":       15.0,  # Fast DOM extraction
-                    "get_page_source":              10.0,  # Instant snapshot
+                    "search_gemini_ai": 60.0,  # Gemini chat response
+                    "crawl_website": 45.0,  # Deep-crawl a single page
+                    "submit_google_search": 30.0,  # Type + Enter + wait
+                    "goto_url": 20.0,  # Simple navigation
+                    "extract_universal_data": 15.0,  # Fast DOM extraction
+                    "get_page_source": 10.0,  # Instant snapshot
                 }
-                _timeout = _TIMEOUT_MAP.get(method_name, 30.0) * getattr(config, "NETWORK_SPEED_MULTIPLIER", 1.0)
+                _timeout = _TIMEOUT_MAP.get(method_name, 30.0) * getattr(
+                    config, "NETWORK_SPEED_MULTIPLIER", 1.0
+                ) * NetworkSpeedProbe.get_timeout_multiplier()
                 try:
                     result = await asyncio.wait_for(method(*args, **kwargs), timeout=_timeout)
                 except asyncio.TimeoutError:
@@ -549,7 +741,7 @@ class HybridAutomationEngine:
                     )
                     await self.stop_tier(tier)  # Kill hung browser immediately
                     continue
-                
+
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms
 
@@ -557,16 +749,16 @@ class HybridAutomationEngine:
                     self._stats[tier]["successes"] += 1
                     self._consecutive_failures = 0
                     self.last_successful_tier_used = tier
-                    
+
                     # 📈 Persistent Telemetry: SUCCESS
                     get_telemetry().record(
                         engine_name=TIER_NAMES.get(tier, f"Tier {tier}"),
                         row_index=self.current_row_index,
                         status="SUCCESS",
                         latency_sec=elapsed_ms / 1000.0,
-                        method_name=method_name
+                        method_name=method_name,
                     )
-                    get_telemetry().save() # Persist real-time metrics
+                    get_telemetry().save()  # Persist real-time metrics
 
                     # Track last URL logic...
                     if method_name in ["goto_url", "submit_google_search", "search_google_ai_mode"]:
@@ -579,15 +771,20 @@ class HybridAutomationEngine:
                             # Tiers 2, 3, 5 use Playwright-style page
                             elif tier in [2, 3, 5] and hasattr(agent, "page") and agent.page:
                                 self._last_target_url = agent.page.url
-                        except: pass
-                    
+                        except:
+                            pass
+
                     # 📈 Prometheus Metric: SUCCESS
-                    SCRAPING_RESULTS.labels(tier=str(tier), scrap_method=method_name, status="SUCCESS").inc()
-                    
+                    SCRAPING_RESULTS.labels(
+                        tier=str(tier), scrap_method=method_name, status="SUCCESS"
+                    ).inc()
+
                     return result
 
                 # 📈 Prometheus Metric: EMPTY
-                SCRAPING_RESULTS.labels(tier=str(tier), scrap_method=method_name, status="EMPTY").inc()
+                SCRAPING_RESULTS.labels(
+                    tier=str(tier), scrap_method=method_name, status="EMPTY"
+                ).inc()
 
                 # ── SOFT-RETRY (Issue #3 fix) ─────────────────────────────────
                 # On a clean empty result (no exception, no block signal), do ONE
@@ -625,7 +822,7 @@ class HybridAutomationEngine:
                     row_index=self.current_row_index,
                     status="EMPTY",
                     latency_sec=elapsed_ms / 1000.0,
-                    method_name=method_name
+                    method_name=method_name,
                 )
                 get_telemetry().save()  # Persist real-time metrics
             except Exception as exc:
@@ -638,6 +835,7 @@ class HybridAutomationEngine:
                     agent_mod = type(agent).__module__ if agent is not None else ""
                     method_obj = getattr(agent, method_name, None) if agent is not None else None
                     import inspect
+
                     sig = None
                     if method_obj is not None:
                         try:
@@ -652,13 +850,20 @@ class HybridAutomationEngine:
                 except Exception:
                     pass
 
-
                 # ── FIX #4: Triage exceptions — code bugs vs network failures ──
                 # Code-level errors (NameError, ImportError, TypeError, AttributeError)
-                # indicate a BUG in the tier code, or a VALIDATION error, NOT an IP ban. 
-                # They must NOT increment _consecutive_failures or trigger the circuit 
+                # indicate a BUG in the tier code, or a VALIDATION error, NOT an IP ban.
+                # They must NOT increment _consecutive_failures or trigger the circuit
                 # breaker, which would cause a 300s dead-sleep on every single row.
-                _CODE_LEVEL_ERRORS = (NameError, ImportError, TypeError, AttributeError, SyntaxError, ValueError, AssertionError)
+                _CODE_LEVEL_ERRORS = (
+                    NameError,
+                    ImportError,
+                    TypeError,
+                    AttributeError,
+                    SyntaxError,
+                    ValueError,
+                    AssertionError,
+                )
                 _is_code_error = isinstance(exc, _CODE_LEVEL_ERRORS)
 
                 exc_str = str(exc).lower()
@@ -680,10 +885,14 @@ class HybridAutomationEngine:
                     )
                 elif "captcha" in exc_str or "waf" in exc_str:
                     reason = "captcha_waf"
-                    logger.error(f"[HybridEngine] Tier {tier} CAPTCHA/WAF in '{method_name}': {exc}")
+                    logger.error(
+                        f"[HybridEngine] Tier {tier} CAPTCHA/WAF in '{method_name}': {exc}"
+                    )
                 elif _is_network_error:
                     reason = "network"
-                    logger.error(f"[HybridEngine] Tier {tier} NETWORK error in '{method_name}': {exc}")
+                    logger.error(
+                        f"[HybridEngine] Tier {tier} NETWORK error in '{method_name}': {exc}"
+                    )
                 else:
                     reason = "exception"
                     logger.error(f"[HybridEngine] Tier {tier} exception in '{method_name}': {exc}")
@@ -691,7 +900,9 @@ class HybridAutomationEngine:
                 self._last_failure_reason = reason
 
                 # 📈 Prometheus Metric: FAILURE
-                SCRAPING_RESULTS.labels(tier=str(tier), scrap_method=method_name, status="FAILURE").inc()
+                SCRAPING_RESULTS.labels(
+                    tier=str(tier), scrap_method=method_name, status="FAILURE"
+                ).inc()
 
                 # 📈 Persistent Telemetry: FAILURE
                 get_telemetry().record(
@@ -700,26 +911,36 @@ class HybridAutomationEngine:
                     status="FAILURE",
                     latency_sec=elapsed_ms / 1000.0,
                     interruption_reason=reason,
-                    method_name=method_name
+                    method_name=method_name,
                 )
                 get_telemetry().save()  # Persist real-time metrics
 
                 # Code bugs: fast escalate — no cool-down, no CB penalty
                 if _is_code_error:
-                    await self.stop_tier(tier)
+                    try:
+                        await self.stop_tier(tier)
+                    except Exception as stop_exc:
+                        logger.warning(f"[HybridEngine] stop_tier({tier}) failed: {stop_exc}")
                     continue  # Skip the 8s cool-down below, escalate immediately
 
             # Waterfall Escalate - KILL CURRENT TIER FIRST
-            await self.stop_tier(tier)
+            try:
+                await self.stop_tier(tier)
+            except Exception as stop_exc:
+                logger.warning(f"[HybridEngine] stop_tier({tier}) escalated cleanup failed: {stop_exc}")
 
             # ── Smart cool-down: only pause for genuine network/WAF failures ──
             # Empty results or code bugs do NOT need a WAF cooldown period.
             _last_reason = getattr(self, "_last_failure_reason", None)
             if _last_reason in ("network", "captcha_waf"):
-                logger.info("[HybridEngine] 🕒 Network/WAF failure — cooling down 8s before next tier...")
+                logger.info(
+                    "[HybridEngine] 🕒 Network/WAF failure — cooling down 8s before next tier..."
+                )
                 await asyncio.sleep(3)
             else:
-                logger.debug(f"[HybridEngine] ⚡ Escalating immediately (reason={_last_reason or 'empty'}).")
+                logger.debug(
+                    f"[HybridEngine] ⚡ Escalating immediately (reason={_last_reason or 'empty'})."
+                )
 
             self._current_tier = min(tier + 1, max_tier)
 
@@ -746,6 +967,9 @@ class HybridAutomationEngine:
 
         # Open circuit breaker if failure threshold reached
         if self._consecutive_failures >= self._CB_THRESHOLD:
+            # Reset per-row retry state so recursion/retry storms do not
+            # cascade into the next row.
+            self._last_failure_reason = None
             self._circuit_breaker_open = True
             self._circuit_breaker_until = time.time() + self._CB_PAUSE_SEC
             alert(
@@ -760,7 +984,9 @@ class HybridAutomationEngine:
             # Attempt proxy rotation if available
             try:
                 await self.rotate_proxy()
-                logger.info("[HybridEngine] ♻️ Proxy rotation requested after circuit breaker opened.")
+                logger.info(
+                    "[HybridEngine] ♻️ Proxy rotation requested after circuit breaker opened."
+                )
             except Exception as proxy_err:
                 logger.warning(f"[HybridEngine] Proxy rotation failed: {proxy_err}")
 
@@ -768,12 +994,14 @@ class HybridAutomationEngine:
 
     # ── Delegated Browser Methods ───────────────────────────────────────────
     # These act as drop-in replacements for PatchrightAgent methods.
-    
-    async def search_google_ai_mode(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+
+    async def search_google_ai_mode(
+        self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None
+    ) -> Optional[str]:
         """
         AI Mode search via browser waterfall.
-        
-        Implements a dynamic engine-toggle strategy and an optional 
+
+        Implements a dynamic engine-toggle strategy and an optional
         interactive human-like flow.
         """
         # ── 0. Validation & Pre-flight ─────────────────────────────────────────
@@ -789,13 +1017,10 @@ class HybridAutomationEngine:
             logger.info("[HybridEngine] 🎭 Forcing Interactive (Human-Like) search flow.")
             return await self.search_google_ai_interactive(prompt, ai_mode_url=None, row=row)
 
-        primary_url   = config.GOOGLE_AI_MODE_URL
-        provider      = "Google"
+        primary_url = config.GOOGLE_AI_MODE_URL
+        provider = "Google"
 
-        logger.info(
-            f"[HybridEngine] 🔄 Search provider: {provider} "
-            f"(row={self.current_row_index})"
-        )
+        logger.info(f"[HybridEngine] 🔄 Search provider: {provider} (row={self.current_row_index})")
 
         # ── Primary attempt ───────────────────────────────────────────────────
         result = await self._execute_with_waterfall(
@@ -814,14 +1039,21 @@ class HybridAutomationEngine:
         Silently no-ops if no suitable agent is available.
         """
         agent_map = {
-            0: self._tier0, 2: self._tier2,
-            3: self._tier3, 4: self._tier4, 5: self._tier5,
-            6: self._tier6, 7: self._tier7, 8: self._tier8, 9: self._tier9, 10: self._tier10,
+            0: self._tier0,
+            2: self._tier2,
+            3: self._tier3,
+            4: self._tier4,
+            5: self._tier5,
+            6: self._tier6,
+            7: self._tier7,
+            8: self._tier8,
+            9: self._tier9,
+            10: self._tier10,
         }
         # Prefer the current tier; walk backwards to find the closest live agent
         for tier in [self._current_tier] + list(reversed(sorted(agent_map.keys()))):
             agent = agent_map.get(tier)
-            if agent and hasattr(agent, 'generate_human_noise'):
+            if agent and hasattr(agent, "generate_human_noise"):
                 logger.info(
                     f"[HybridEngine] 🎭 Human Noise → Tier {tier} "
                     f"(worker={self._worker_id}, row={self.current_row_index})"
@@ -835,22 +1067,28 @@ class HybridAutomationEngine:
 
     async def submit_google_search(self, prompt: str) -> bool:
         return await self._execute_with_waterfall("submit_google_search", prompt)
-        
+
     async def extract_universal_data(self, use_browser: bool = False) -> dict:
         return await self._execute_with_waterfall("extract_universal_data", use_browser=use_browser)
 
-
-
-    async def search_google_ai(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai(
+        self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None
+    ) -> Optional[str]:
         """Legacy AI search fallback."""
-        return await self._execute_with_waterfall("search_google_ai", prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self._execute_with_waterfall(
+            "search_google_ai", prompt, ai_mode_url=ai_mode_url, row=row
+        )
 
-    async def search_google_ai_interactive(self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None) -> Optional[str]:
+    async def search_google_ai_interactive(
+        self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None
+    ) -> Optional[str]:
         """
         Interactive high-stealth search flow (Human-Like).
         Navigates to Google, types query, Enter, then clicks AI Mode.
         """
-        return await self._execute_with_waterfall("search_google_ai_interactive", prompt, ai_mode_url=ai_mode_url, row=row)
+        return await self._execute_with_waterfall(
+            "search_google_ai_interactive", prompt, ai_mode_url=ai_mode_url, row=row
+        )
 
     async def search_gemini_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """
@@ -871,11 +1109,11 @@ class HybridAutomationEngine:
         for tier, data in self._stats.items():
             att = data["attempts"]
             suc = data["successes"]
-            ms  = data["total_ms"]
+            ms = data["total_ms"]
             result[tier] = {
-                "attempts":     att,
-                "successes":    suc,
-                "avg_ms":       round(ms / att) if att else 0,
+                "attempts": att,
+                "successes": suc,
+                "avg_ms": round(ms / att) if att else 0,
                 "success_rate": round(suc / att * 100, 1) if att else 0.0,
             }
         return result
@@ -909,6 +1147,8 @@ class HybridAutomationEngine:
                 f"avg {data['avg_ms']:>5}ms"
             )
         cb_status = "OPEN 🔴" if self._circuit_breaker_open else "CLOSED 🟢"
-        print(f"  Circuit Breaker: {cb_status} | "
-              f"Consecutive failures: {self._consecutive_failures}/{self._CB_THRESHOLD}")
+        print(
+            f"  Circuit Breaker: {cb_status} | "
+            f"Consecutive failures: {self._consecutive_failures}/{self._CB_THRESHOLD}"
+        )
         print("═" * 68 + "\n")

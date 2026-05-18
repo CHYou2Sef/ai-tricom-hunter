@@ -348,6 +348,11 @@ class Crawl4AIAgent(BaseBrowserAgent):
                     return None
                 except Exception as inner_exc:
                     logger.error(f"[Crawl4AI] Minimal arun() failed: {inner_exc}")
+                    # Re-raise so HybridEngine treats it as a code-level error (not silent None)
+                    exc_str = str(inner_exc).lower()
+                    if "maximum recursion" in exc_str or "recursion" in exc_str:
+                        raise
+                    # For ImportError/TypeError fallbacks, return None silently to escalate tiers
                     return None
             raise
 
