@@ -7,24 +7,26 @@ from __future__ import annotations
 ║  Central routing brain — selects the right scraping tier based on      ║
 ║  the target URL's protection level, then escalates on failure.         ║
 ║                                                                        ║
-║  Decision matrix (5-Tier Waterfall — docs/Gemini.md blueprint):        ║
-║  ┌──────────────────────────────────────┬──────────────────────────┐  ║
-║  │ Target Type                          │ Agent                    │  ║
-║  ├──────────────────────────────────────┼──────────────────────────┤  ║
-║  │ Default / standard sites             │ Tier 1: SeleniumBase UC  │  ║
-║  │ Internal / no protection             │ Tier 2: PatchrightAgent  │  ║
-║  │ Cloudflare / LinkedIn / Facebook     │ Tier 3: NodriverAgent    │  ║
-║  │ Amazon / Fnac / hardened e-commerce  │ Tier 4: Crawl4AIAgent    │  ║
-║  │ ALL Chrome tiers exhausted           │ Tier 5: CamoufoxAgent 🦊 │  ║
-║  └──────────────────────────────────────┴──────────────────────────┘  ║
+║  Decision matrix (10-Tier Waterfall — docs/AGENTS.md blueprint):       ║
+║  ┌──────┬───────────────────────────────────────────────────────────┐  ║
+║  │ Tier │ Agent                                                     │  ║
+║  ├──────┼───────────────────────────────────────────────────────────┤  ║
+║  │ 2    │ SeleniumBase UC (Primary, Turnstile bypass)               │  ║
+║  │ 3    │ Botasaurus (Profile rotation)                             │  ║
+║  │ 4    │ CloakBrowser (Supreme Stealth, C++ level patches)         │  ║
+║  │ 5    │ Nodriver (CDP Direct, Hard WAFs)                          │  ║
+║  │ 6    │ Crawl4AI (E-commerce managed JS rendering)                │  ║
+║  │ 7    │ Camoufox 🦊 (Firefox anti-detect, Chrome last resort)     │  ║
+║  │ 8    │ Firecrawl (Premium Managed API)                           │  ║
+║  │ 9    │ Jina Reader (High-speed Markdown conversion)              │  ║
+║  │ 10   │ Crawlee (Industrial Playwright crawling)                  │  ║
+║  │ 0    │ Legacy Selenium (Benchmark only)                          │  ║
+║  └──────┴───────────────────────────────────────────────────────────┘  ║
 ║                                                                        ║
-║  Escalation waterfall (DEFAULT_TIER=1):                                ║
-║    Tier 1 (SeleniumBase UC) fails                                      ║
-║      → Tier 2 (Patchright/Chrome stealth) fails                       ║
-║        → Tier 3 (Nodriver/Chrome CDP) fails                           ║
-║          → Tier 4 (Crawl4AI/Chrome managed) fails                     ║
-║            → Tier 5 (Camoufox/Firefox) — last resort                  ║
-║              → ALL FAIL: Circuit Breaker OPEN → pause 300s            ║
+║  Escalation waterfall:                                                 ║
+║    Tier 2 → Tier 3 → Tier 4 → Tier 5 → Tier 6 → Tier 7                 ║
+║      → Tier 8 → Tier 9 → Tier 10                                       ║
+║        → ALL FAIL: Circuit Breaker OPEN → pause 300s                   ║
 ╚════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -41,83 +43,7 @@ from common.metrics import get_telemetry
 logger = get_logger(__name__)
 
 
-# ��────────────────────────────────────────────────────────────────────────────
-# NETWORK SPEED PROBE
-# ─────────────────────────────────────────────────────────────────────────────
-
-class NetworkSpeedProbe:
-    """
-    Lightweight network quality probe to adapt timeouts based on connection quality.
-    Measures TCP connect latency and small-asset download speed.
-    """
-
-    _last_check_time = 0.0
-    _last_score = "medium"  # "good" | "medium" | "bad"
-    _last_latency_ms = 100.0
-    _probe_interval_sec = 30.0  # Re-probe every 30s to avoid overhead
-
-    @classmethod
-    async def probe(cls) -> tuple[str, float]:
-        """
-        Run a quick network quality check.
-
-        Returns:
-            tuple of (score, latency_ms)
-            score: "good" (< 100ms), "medium" (100-300ms), "bad" (> 300ms)
-        """
-        now = time.time()
-        if now - cls._last_check_time < cls._probe_interval_sec:
-            return cls._last_score, cls._last_latency_ms
-
-        cls._last_check_time = now
-        latency_ms = await cls._measure_latency()
-        cls._last_latency_ms = latency_ms
-
-        if latency_ms < 100:
-            cls._last_score = "good"
-        elif latency_ms < 300:
-            cls._last_score = "medium"
-        else:
-            cls._last_score = "bad"
-
-        logger.debug(
-            f"[NetworkProbe] score={cls._last_score} latency={latency_ms:.0f}ms"
-        )
-        return cls._last_score, cls._last_latency_ms
-
-    @staticmethod
-    async def _measure_latency() -> float:
-        """Measure TCP connect latency to a known host."""
-        import socket
-
-        test_host = "www.google.com"
-        test_port = 443
-        delays = []
-
-        for _ in range(3):
-            try:
-                t0 = time.perf_counter()
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(5.0)
-                sock.connect((test_host, test_port))
-                sock.close()
-                delays.append((time.perf_counter() - t0) * 1000)
-            except Exception:
-                delays.append(500.0)  # Fallback for connection failures
-
-        return sum(delays) / len(delays) if delays else 500.0
-
-    @classmethod
-    def get_timeout_multiplier(cls) -> float:
-        """Return a timeout multiplier based on current network score."""
-        if cls._last_score == "good":
-            return 1.0
-        elif cls._last_score == "medium":
-            return 1.5
-        else:
-            return 2.5
-
-
+from infra.browsers.network_probe import NetworkSpeedProbe
 # ─────────────────────────────────────────────────────────────────────────────
 # URL TIER CLASSIFIER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -498,7 +424,7 @@ class HybridAutomationEngine:
             from common.disk_cleanup import check_and_cleanup
 
             check_and_cleanup(threshold_pct=90)
-        except:
+        except Exception:
             pass
 
     async def stop_all(self) -> None:
@@ -771,7 +697,7 @@ class HybridAutomationEngine:
                             # Tiers 2, 3, 5 use Playwright-style page
                             elif tier in [2, 3, 5] and hasattr(agent, "page") and agent.page:
                                 self._last_target_url = agent.page.url
-                        except:
+                        except Exception:
                             pass
 
                     # 📈 Prometheus Metric: SUCCESS

@@ -1,119 +1,168 @@
 """
-╔══════════════════════════════════════════════════════════════════════════╗
-║  common/progress_tracker.py                                              ║
-║                                                                          ║
-║  Per-File Crash Recovery System                                          ║
-║                                                                          ║
-║  ROLE:                                                                   ║
-║    Saves row-by-row processing results to a JSON sidecar file.           ║
-║    If the agent crashes, it resumes from the exact row it left off.      ║
-║                                                                          ║
-║  HOW IT WORKS:                                                           ║
-║    Checkpoint file: WORK/CHECKPOINTS/{filename}.json                     ║
-║    Each row stores: phone, agent_phone, status, enriched_fields          ║
-║    On restart: sync_with_previous_results() reads checkpoints first      ║
-║    After completion: checkpoint is archived to CHECKPOINTS/archived/     ║
-╚══════════════════════════════════════════════════════════════════════════╝
+common/progress_tracker.py - Per-File Crash Recovery + GLOBAL_PHONE_SET
+
+ROLE:
+  Saves row-by-row processing results to JSON for crash recovery.
+  GLOBAL_PHONE_SET prevents duplicate phone collection across runs
+  (container crash, PC reboot, IP ban restart scenarios).
 """
 
 import json
 import os
+import re
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Set
 
 from core import config
 from core.logger import get_logger
 
 logger = get_logger(__name__)
 
+
 class FileProgressTracker:
     """
-    Persistent state tracker for a SPECIFIC file.
-    Saves results row-by-row into a JSON file for crash recovery.
+    Persistent state tracker for crash recovery + global phone dedup.
     """
+    GLOBAL_PHONE_SET_FILE = "GLOBAL_PHONE_SET.json"
 
     def __init__(self, original_filepath: str):
         self.original_path = Path(original_filepath)
-        # Checkpoint name: File_Name.xlsx -> File_Name.xlsx.json
         self.checkpoint_path = config.CHECKPOINTS_DIR / f"{self.original_path.name}.json"
-        self.data: Dict[str, Any] = {} # row_index (str) -> {phone, agent_phone, status, etc}
+        self.data: Dict[str, Any] = {}
+        self._global_phones: Set[str] = set()
+        self._global_set_path = config.CHECKPOINTS_DIR / self.GLOBAL_PHONE_SET_FILE
         self.load()
+        self._sync_global_from_checkpoints()
 
     def load(self):
-        """Load the checkpoint if it exists, with fuzzy fallback for renamed files."""
+        """Load checkpoint + global PHONE_SET."""
         target = self.checkpoint_path
 
-        # 1. Direct match
         if not target.exists():
-            # 2. Check archived folder
             archived = config.ARCHIVED_CHECKPOINTS_DIR / target.name
             if archived.exists():
                 target = archived
                 logger.info(f"[Progress] Using ARCHIVED checkpoint: {target.name}")
             else:
-                # 3. Fuzzy match (in case of _DONE or _part1 suffixes)
-                # Look for any JSON that contains the core filename stem
-                stem = self.original_path.stem  # e.g. "my_file"
+                stem = self.original_path.stem
                 matches = list(config.CHECKPOINTS_DIR.glob(f"*{stem}*.json"))
                 if matches:
                     target = matches[0]
-                    logger.info(f"[Progress] Fuzzy match found: {target.name} for {self.original_path.name}")
+                    logger.info(f"[Progress] Fuzzy match: {target.name}")
+
+        # Load global PHONE_SET first
+        self._load_global_phone_set()
 
         if target.exists():
             try:
                 with open(target, 'r', encoding='utf-8') as f:
                     self.data = json.load(f)
-                logger.info(f"[Progress] Loaded {len(self.data)} rows from {target.name}")
+                logger.info(f"[Progress] Loaded {len(self.data)} rows")
             except Exception as e:
-                logger.warning(f"[Progress] Failed to load {target.name}: {e}")
+                logger.warning(f"[Progress] Load failed: {e}")
                 self.data = {}
         else:
             self.data = {}
 
+    def _load_global_phone_set(self):
+        """Load the global PHONE_SET from shared checkpoint file."""
+        if self._global_set_path.exists():
+            try:
+                with open(self._global_set_path, 'r', encoding='utf-8') as f:
+                    self._global_phones = set(json.load(f))
+                logger.info(f"[Progress] Global PHONE_SET: {len(self._global_phones)} phones")
+            except Exception as e:
+                logger.warning(f"[Progress] Failed to load global PHONE_SET: {e}")
+
+    def _sync_global_from_checkpoints(self):
+        """Sync all phones from current checkpoint into global set."""
+        for idx, entry in self.data.items():
+            if idx.startswith("__"):
+                continue
+            for phone_field in ("phone", "agent_phone"):
+                phone = entry.get(phone_field)
+                if phone:
+                    self._global_phones.add(self._normalize_phone(phone))
+
+    @staticmethod
+    def _normalize_phone(phone: str) -> str:
+        """
+        Normalize phone to last 9 digits for French mobile dedup.
+        Handles: +33, spaces, dashes, country codes.
+        """
+        if not phone:
+            return ""
+        digits = re.sub(r"[^\d]", "", str(phone))
+        # Strip leading 33/0033
+        if digits.startswith("33") and len(digits) == 11:
+            digits = "0" + digits[2:]
+        elif digits.startswith("0033") and len(digits) == 12:
+            digits = "0" + digits[4:]
+        return digits[-9:] if len(digits) >= 9 else digits
+
+    def is_phone_duplicated(self, phone: str) -> bool:
+        """
+        Check if this phone was already collected in ANY previous run.
+        Prevents duplicates from container crash, PC reboot, IP ban restart.
+        """
+        if not phone:
+            return False
+        return self._normalize_phone(phone) in self._global_phones
+
+    def register_phone(self, phone: str) -> None:
+        """Add a phone to the global dedup set."""
+        if phone:
+            self._global_phones.add(self._normalize_phone(phone))
+
     def save(self):
-        """Save current state to JSON."""
+        """Save checkpoint + global PHONE_SET."""
         try:
             with open(self.checkpoint_path, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[Progress] Failed to save checkpoint: {e}")
+        try:
+            with open(self._global_set_path, 'w', encoding='utf-8') as f:
+                json.dump(list(self._global_phones), f, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[Progress] Failed to save global PHONE_SET: {e}")
 
     def mark_row_done(self, row_index: int, phone: Optional[str], agent_phone: Optional[str], status: str, extra: dict = None):
-        """Record the full result for a row."""
-        entry = {
-            "phone": phone,
-            "agent_phone": agent_phone,
-            "status": status,
-        }
+        """Record row result with auto-registration to global dedup."""
+        entry = {"phone": phone, "agent_phone": agent_phone, "status": status}
         if extra:
             entry.update(extra)
-        
         self.data[str(row_index)] = entry
+        if phone:
+            self.register_phone(phone)
+        if agent_phone:
+            self.register_phone(agent_phone)
         self.save()
 
     def get_row_data(self, row_index: int) -> Optional[dict]:
-        """Retrieve cached data for a row."""
         return self.data.get(str(row_index))
 
     def is_row_done(self, row_index: int) -> bool:
-        """Check if a row is already recorded in checkpoint."""
         return str(row_index) in self.data
 
     def delete(self):
-        """Remove the checkpoint file (cleanup after final export)."""
         if self.checkpoint_path.exists():
             try:
                 os.remove(self.checkpoint_path)
             except Exception as e:
-                logger.error(f"[Progress] Cleanup failed for {self.checkpoint_path.name}: {e}")
+                logger.error(f"[Progress] Cleanup failed: {e}")
 
     def archive(self):
-        """Move the checkpoint to the archived_json folder."""
-        if not self.checkpoint_path.exists(): return
+        """Archive checkpoint, preserve global PHONE_SET."""
+        if not self.checkpoint_path.exists():
+            return
         try:
             import shutil
             target = config.ARCHIVED_CHECKPOINTS_DIR / self.checkpoint_path.name
             shutil.move(str(self.checkpoint_path), str(target))
-            logger.info(f"[Progress] 📦 Archived checkpoint to: {target.name}")
+            logger.info(f"[Progress] Archived: {target.name}")
         except Exception as e:
-            logger.error(f"[Progress] Archiving failed: {e}")
+            logger.error(f"[Progress] Archive failed: {e}")
+
+    def get_global_phone_count(self) -> int:
+        return len(self._global_phones)

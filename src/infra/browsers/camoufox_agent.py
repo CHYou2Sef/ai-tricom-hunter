@@ -33,6 +33,7 @@ from typing import Optional, List, Any, Dict
 
 from core import config
 from common.anti_bot import action_delay_async, is_captcha_page
+from infra.browsers.selectors import GENERIC_CHAT_INPUT_SELECTORS, GOOGLE_COOKIE_ACCEPT_SELECTORS
 from core.logger import get_logger, alert
 from common.captcha_solver import detect_captcha_type, solve_captcha_async
 
@@ -207,7 +208,7 @@ class CamoufoxAgent(BaseBrowserAgent):
                 return False
             try:
                 logger.info(f"[Camoufox] → {url}")
-                await self._page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                await self._page.goto(url, wait_until="domcontentloaded", timeout=self.get_adaptive_timeout_ms(20000))
                 await action_delay_async("navigate")
                 await self._handle_captcha_if_present_locked()
                 
@@ -259,7 +260,7 @@ class CamoufoxAgent(BaseBrowserAgent):
                     url = generate_google_ai_url(prompt)
 
                 logger.info(f"[Camoufox] 🔍 Google AI Mode (Firefox): {prompt}")
-                await self._page.goto(url, wait_until="load", timeout=30000)
+                await self._page.goto(url, wait_until="load", timeout=self.get_adaptive_timeout_ms(30000))
                 await action_delay_async("read_wait")
 
                 # Detect immediate block
@@ -306,7 +307,7 @@ class CamoufoxAgent(BaseBrowserAgent):
                 import urllib.parse
                 url = f"https://www.google.com/search?q={urllib.parse.quote_plus(prompt)}"
                 logger.info(f"[Camoufox] 🔍 Google Search (Firefox): {prompt}")
-                await self._page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                await self._page.goto(url, wait_until="domcontentloaded", timeout=self.get_adaptive_timeout_ms(20000))
                 await action_delay_async("navigate")
                 await self._handle_google_cookies_locked()
                 await self._handle_captcha_if_present_locked()
@@ -361,7 +362,7 @@ class CamoufoxAgent(BaseBrowserAgent):
                 if not self._page: return None
                 
                 # Find input
-                selectors = ["div[role='combobox']", ".ql-editor", "textarea"]
+                selectors = GENERIC_CHAT_INPUT_SELECTORS
                 chat_input = None
                 for s in selectors:
                     if not self._page: return None
@@ -369,7 +370,7 @@ class CamoufoxAgent(BaseBrowserAgent):
                         if await self._page.locator(s).count() > 0:
                             chat_input = self._page.locator(s).first
                             break
-                    except: continue
+                    except Exception: continue
                 
                 if not chat_input:
                     logger.warning("[Camoufox/Gemini] Could not find input.")
@@ -394,7 +395,7 @@ class CamoufoxAgent(BaseBrowserAgent):
                             if await self._page.locator(rs).count() > 0:
                                 current = await self._page.locator(rs).first.text_content()
                                 break
-                        except: continue
+                        except Exception: continue
                     
                     if current and current == last_text:
                         stable_count += 1
@@ -456,12 +457,7 @@ class CamoufoxAgent(BaseBrowserAgent):
         if not self._page:
             return
         try:
-            selectors = [
-                "button:has-text('Accept all')",
-                "button:has-text('Accepter tout')",
-                "button:has-text('I agree')",
-                "#L2AGLb",
-            ]
+            selectors = GOOGLE_COOKIE_ACCEPT_SELECTORS
             for s in selectors:
                 if not self._page: return
                 try:
@@ -471,6 +467,6 @@ class CamoufoxAgent(BaseBrowserAgent):
                         logger.info("[Camoufox] Cookie consent accepted.")
                         await asyncio.sleep(1)
                         break
-                except: continue
+                except Exception: continue
         except Exception:
             pass

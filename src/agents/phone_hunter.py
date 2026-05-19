@@ -401,9 +401,17 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
             l2_social["linkedin"] = [row.linkedin]
 
         if l2_social:
-            from agents.layer2 import run_layer2_graph
+            from agents.fast_pipeline import social_fallback_pipeline
             logger.info(f"🔗 [Layer2] Activating in parallel for row #{row.row_index} — sources: {list(l2_social.keys())}")
-            l2_task = asyncio.create_task(run_layer2_graph(row, l2_social, agent))
+            l2_task = asyncio.create_task(social_fallback_pipeline(
+        row_index=row.row_index,
+        company_name=row.get_search_name(),
+        company_address=row.adresse or "",
+        siren=row.siren or "",
+        discovered_urls=l2_social,
+        enabled_sources=config.LAYER2_ENABLED_SOURCES.split(","),
+        timeout=config.LAYER2_TIMEOUT_SEC,
+    ))
 
     # 1.5 DEEP DISCOVERY (Official Site & Social Media "About")
     if not any(h['score'] >= 90 for h in harvested) and last_meta:
@@ -479,7 +487,7 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
     if l2_task:
         try:
             l2_result = await l2_task
-            if l2_result and l2_result.get("num"):
+            if l2_result and l2_result.get("status") == "FOUND" and l2_result.get("num"):
                 l2_num = l2_result["num"]
                 # Cross-validation: did Layer 1 already find this number?
                 match_found = False
@@ -493,7 +501,7 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
                 
                 if not match_found:
                     logger.info(f"🔗 [Layer2] Added unique phone {l2_num} to candidates.")
-                    add_unique(l2_num, l2_result["score"], l2_result.get("source", "layer2"))
+                    add_unique(l2_num, l2_result["score"], l2_result.get("source", "fast_pipeline"))
         except Exception as e:
             logger.error(f"[Layer2] Parallel task error: {e}", exc_info=True)
 

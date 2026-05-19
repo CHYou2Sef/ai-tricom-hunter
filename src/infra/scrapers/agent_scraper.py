@@ -29,6 +29,7 @@ from typing import Any, Generator, Optional
 # twisted.internet.reactor AFTER this point will use the one crochet
 # already installed, preventing "reactor mismatch" errors.
 import crochet
+
 crochet.setup()
 
 # ── Scrapy imports (AFTER crochet.setup) ─────────────────────────────────────
@@ -65,12 +66,21 @@ FALLBACK_SELECTORS = {
 class GenericSpider(scrapy.Spider):
     name = "generic_spider"
 
-    def __init__(self, url: Optional[str] = None, extraction_rules: Optional[str] = None, *args: Any, **kwargs: Any):
+    def __init__(
+        self,
+        url: Optional[str] = None,
+        extraction_rules: Optional[str] = None,
+        *args: Any,
+        **kwargs: Any,
+    ):
         super().__init__(*args, **kwargs)
         self.start_urls: list[str] = [url] if url else []
-        self.extraction_rules: dict[str, str] = json.loads(extraction_rules) if extraction_rules else {}
+        self.extraction_rules: dict[str, str] = (
+            json.loads(extraction_rules) if extraction_rules else {}
+        )
         self.results: list[dict[str, Any]] = []
 
+    # what this error mean ?
     def parse(self, response: Response, **kwargs: Any) -> Generator[dict[str, Any], None, None]:
         item = {}
 
@@ -98,7 +108,9 @@ class GenericSpider(scrapy.Spider):
 
 
 @crochet.wait_for(timeout=30.0)
-def _run_spider_crochet(url: str, extraction_rules: dict[str, str], results_list: list[dict[str, Any]]) -> Any:
+def _run_spider_crochet(
+    url: str, extraction_rules: dict[str, str], results_list: list[dict[str, Any]]
+) -> Any:
     """
     Run the Scrapy spider via crochet's blocking bridge.
 
@@ -109,6 +121,7 @@ def _run_spider_crochet(url: str, extraction_rules: dict[str, str], results_list
     function on every call to prevent signal handler accumulation across
     multiple invocations (which would cause duplicate items in results_list).
     """
+
     def _on_item_scraped(item: dict[str, Any], response: Response, spider: scrapy.Spider) -> None:
         results_list.append(dict(item))
 

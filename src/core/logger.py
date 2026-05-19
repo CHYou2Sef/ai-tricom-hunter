@@ -14,7 +14,7 @@
 ║    automatically save to files.                                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
-from typing import Optional
+from typing import Optional, Dict, Any, cast
 
 import logging
 import os
@@ -222,7 +222,12 @@ def _setup_root_logger() -> None:
     _configured = True
 
 
-def get_logger(name: str) -> logging.Logger:
+class AgentLogger(logging.Logger):
+    def trace(self, msg: str, *args, **kwargs) -> None: ...
+    def fatal(self, msg: str, *args, **kwargs) -> None: ...
+
+
+def get_logger(name: str) -> AgentLogger:
     """
     Return a named logger augmented with TRACE (5) and FATAL (60) shorthands.
 
@@ -230,7 +235,7 @@ def get_logger(name: str) -> logging.Logger:
         name : Usually __name__ — becomes the logger namespace.
 
     Returns:
-        logging.Logger with extra .trace() and .fatal() methods.
+        AgentLogger with extra .trace() and .fatal() methods.
     """
     _setup_root_logger()
     logger = logging.getLogger(name)
@@ -240,9 +245,9 @@ def get_logger(name: str) -> logging.Logger:
     if not hasattr(logger, 'trace'):
         logger.trace = lambda msg, *args, **kwargs: logger.log(TRACE, msg, *args, **kwargs)
     if not hasattr(logger, 'fatal'):
-        logger.fatal = lambda msg, *args, **kwargs: logger.log(FATAL, msg, *args, **kwargs)
+        logger.fatal = lambda msg, *args, **kwargs: logger.log(FATAL, msg, *args, **kwargs)  # type: ignore
         
-    return logger
+    return cast(AgentLogger, logger)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -280,7 +285,7 @@ _WARN_BORDER     = "⚠️  " + "─" * 56
 _CRITICAL_BORDER = "🚨  " + "═" * 56
 
 
-def alert(level: str, message: str, context: dict = None) -> None:
+def alert(level: str, message: str, context: Optional[Dict[str, Any]] = None) -> None:
     """
     Fire a structured alert at the given level.
 

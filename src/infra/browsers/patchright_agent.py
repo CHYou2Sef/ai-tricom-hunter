@@ -45,13 +45,20 @@ from core.logger import get_logger, alert
 
 logger = get_logger(__name__)
 
+from infra.browsers.selectors import (
+    GENERIC_CHAT_INPUT_SELECTORS,
+    GOOGLE_AI_MODE_TAB_SELECTORS,
+    GOOGLE_AI_RESPONSE_SELECTORS,
+    GOOGLE_COOKIE_ACCEPT_SELECTORS,
+)
+
 # ── Google Knowledge Panel / Instant Answer selectors ──────────────────────
 # These CSS selectors target common locations where Google displays phone numbers
 # directly on the search results page (no AI Overview needed).
 GOOGLE_SEARCH_INPUT = 'textarea[name="q"], input[name="q"], textarea[title="Search"], input[title="Search"], textarea[title="Rechercher"], input[title="Rechercher"], [aria-label="Search"]'
 
 # ── Gemini selectors (kept for SIREN/Name enrichment only, NOT phone) ──────
-GEMINI_INPUT_SELECTORS   = ["div[role='combobox']", ".ql-editor", "textarea"]
+GEMINI_INPUT_SELECTORS   = GENERIC_CHAT_INPUT_SELECTORS
 GEMINI_RESPONSE_SELECTORS = [
     ".model-response-text",
     "message-content",
@@ -158,7 +165,7 @@ class PatchrightAgent(BaseBrowserAgent):
             if not self._page: return False
             try:
                 # Playwright heartbeat
-                await self._page.evaluate("1+1", timeout=2000)
+                await self._page.evaluate("1+1", timeout=self.get_adaptive_timeout_ms(2000))
                 return True
             except Exception:
                 return False
@@ -183,7 +190,7 @@ class PatchrightAgent(BaseBrowserAgent):
 
         try:
             # Heartbeat: simple JS eval
-            await self._page.evaluate("1+1", timeout=5000)
+            await self._page.evaluate("1+1", timeout=self.get_adaptive_timeout_ms(5000))
             self._last_health_check = now
             return True
         except Exception as e:
@@ -230,7 +237,7 @@ class PatchrightAgent(BaseBrowserAgent):
         
         try:
             logger.info(f"[Patchright] 🔍 Google Search: {prompt}")
-            await page.goto(config.GOOGLE_URL, wait_until="load", timeout=30000)
+            await page.goto(config.GOOGLE_URL, wait_until="load", timeout=self.get_adaptive_timeout_ms(30000))
             await self._handle_google_cookies_locked(page)
             await self._handle_captcha_if_present_locked(page)
             
@@ -281,18 +288,18 @@ class PatchrightAgent(BaseBrowserAgent):
     async def _click_ai_mode_tab_locked(self, page: Page) -> bool:
         """Internal lock-free click AI tab."""
         if not page: return False
-        tab_selectors = ["a:has-text('Mode IA')", "a:has-text('IA')", "a:has-text('AI Mode')", "a:has-text('AI')"]
+        tab_selectors = GOOGLE_AI_MODE_TAB_SELECTORS
         for selector in tab_selectors:
             try:
                 # Use locator only if page is valid
                 if not self._page: break
                 tab = self._page.locator(selector).first
-                if await tab.count() > 0 and await tab.is_visible(timeout=1500):
+                if await tab.count() > 0 and await tab.is_visible(timeout=self.get_adaptive_timeout_ms(1500)):
                     await tab.click()
                     logger.info(f"🤖 [AI Mode Tab] Clicked: '{selector}'")
                     await asyncio.sleep(2.5)
                     return True
-            except: continue
+            except Exception: continue
         return False
 
 
@@ -308,7 +315,7 @@ class PatchrightAgent(BaseBrowserAgent):
         page = self._page
         if not page: return False
         try:
-            await self._page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            await self._page.goto(url, wait_until="domcontentloaded", timeout=self.get_adaptive_timeout_ms(15000))
             
             # Post-navigation health check (detect immediate blocks)
             content = await self._page.content()
@@ -359,7 +366,7 @@ class PatchrightAgent(BaseBrowserAgent):
                         elif full_url and full_url.startswith("/"):
                             from urllib.parse import urljoin
                             found_sublinks.append(urljoin(url, full_url))
-                except: continue
+                except Exception: continue
                 
                 if len(found_sublinks) >= 2: break 
 
@@ -368,11 +375,11 @@ class PatchrightAgent(BaseBrowserAgent):
                 try:
                     if not self._page: break
                     logger.info(f"   ∟ Visiting subpage: {sub}")
-                    await page.goto(sub, wait_until="domcontentloaded", timeout=10000)
+                    await page.goto(sub, wait_until="domcontentloaded", timeout=self.get_adaptive_timeout_ms(10000))
                     await asyncio.sleep(1)
                     if self._page:
                         all_text.append(f"\n--- PAGE: {sub} ---\n" + await page.inner_text("body"))
-                except:
+                except Exception:
                     continue
             
             return "\n".join(all_text)
@@ -400,7 +407,7 @@ class PatchrightAgent(BaseBrowserAgent):
                     url = generate_google_ai_url(prompt)
                 
                 logger.info(f"🤖 [AI Mode] Navigating: {url}")
-                await page.goto(url, wait_until="load", timeout=30000)
+                await page.goto(url, wait_until="load", timeout=self.get_adaptive_timeout_ms(30000))
                 
                 # Detect immediate block
                 page_content = await page.content()
@@ -417,7 +424,7 @@ class PatchrightAgent(BaseBrowserAgent):
                 if not page: return None
 
                 logger.info("⏳ [AI Mode] Waiting for response...")
-                return await self._wait_for_ai_mode_response_locked(page, timeout_sec=25)
+                return await self._wait_for_ai_mode_response_locked(page, timeout_sec=self.get_adaptive_timeout_sec(25))
             except Exception as e:
                 logger.error(f"[AI Mode] Error: {e}")
                 if self.is_block_response(e):
@@ -426,7 +433,7 @@ class PatchrightAgent(BaseBrowserAgent):
 
     async def _wait_for_ai_mode_response_locked(self, page: Page, timeout_sec: int = 25) -> Optional[str]:
         """Internal lock-free wait."""
-        ai_response_selectors = ["code", ".kp-wholepage-osrp-ent", "div.mod", ".xpdopen .c2xzTb", "[data-attrid='wa:/description']", "div[jsname='yEVEwb']"]
+        ai_response_selectors = GOOGLE_AI_RESPONSE_SELECTORS
         deadline = asyncio.get_event_loop().time() + timeout_sec
         prev_text = ""
         stable_count = 0
@@ -445,7 +452,7 @@ class PatchrightAgent(BaseBrowserAgent):
                             prev_text = combined
                             stable_count = 0
                         break
-                except: continue
+                except Exception: continue
         return prev_text if prev_text else None
 
     @staticmethod
@@ -461,14 +468,14 @@ class PatchrightAgent(BaseBrowserAgent):
     async def _handle_google_cookies_locked(self, page: Page) -> None:
         """Internal lock-free cookie handler."""
         try:
-            selectors = ["button:has-text('Accept all')", "button:has-text('Accepter tout')", "#L2AGLb"]
+            selectors = GOOGLE_COOKIE_ACCEPT_SELECTORS
             for s in selectors:
                 btn = page.locator(s)
                 if await btn.count() > 0 and await btn.is_visible():
                     await btn.click()
                     await asyncio.sleep(1)
                     break
-        except: pass
+        except Exception: pass
 
     async def _handle_captcha_if_present_locked(self, page: Page) -> bool:
         """Internal lock-free CAPTCHA handler."""
@@ -533,7 +540,7 @@ class PatchrightAgent(BaseBrowserAgent):
             await page.wait_for_selector(selector, timeout=timeout_ms)
             if not self._page: return None
             return page.locator(selector).first
-        except: return None
+        except Exception: return None
 
     async def _human_type_locked(self, page: Page, text: str) -> None:
         if not page: return
@@ -542,7 +549,7 @@ class PatchrightAgent(BaseBrowserAgent):
                 if not self._page: break
                 await page.keyboard.type(char)
                 await asyncio.sleep(random.uniform(0.04, 0.12))
-            except: break
+            except Exception: break
 
     async def _wait_for_streaming_response_locked(self, page: Page, selectors: list) -> Optional[str]:
         start = asyncio.get_event_loop().time()
@@ -564,9 +571,9 @@ class PatchrightAgent(BaseBrowserAgent):
         for s in selectors:
             try:
                 if not self._page: break
-                text = await page.locator(s).first.text_content(timeout=2000)
+                text = await page.locator(s).first.text_content(timeout=self.get_adaptive_timeout_ms(2000))
                 if text and text.strip(): return text.strip()
-            except: continue
+            except Exception: continue
         return None
 
     async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:

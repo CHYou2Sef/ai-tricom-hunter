@@ -9,7 +9,7 @@
 
 import json
 import os
-from typing import Iterator, Dict, Any, List, Optional
+from typing import Iterator, Dict, Any, List, Optional, cast
 from pathlib import Path
 from core.logger import get_logger
 
@@ -67,5 +67,5 @@ def convert_excel_to_jsonl(excel_path: str, jsonl_path: str):
     writer = JSONLWriter(jsonl_path)
     # Convert to dicts and write
     rows = df.to_dict(orient="records")
-    writer.write_batch(rows)
+    writer.write_batch(cast(List[Dict[str, Any]], rows))
     logger.info(f"✅ [JSONL] Conversion complete: {len(rows)} rows.")

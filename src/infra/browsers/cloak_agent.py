@@ -33,11 +33,17 @@ from core.logger import get_logger, alert
 
 logger = get_logger(__name__)
 
+from infra.browsers.selectors import (
+    GENERIC_CHAT_INPUT_SELECTORS,
+    GOOGLE_AI_RESPONSE_SELECTORS,
+    GOOGLE_COOKIE_ACCEPT_SELECTORS,
+)
+
 # ── Google Knowledge Panel / Instant Answer selectors ──────────────────────
 GOOGLE_SEARCH_INPUT = 'textarea[name="q"], input[name="q"], textarea[title="Search"], input[title="Search"], textarea[title="Rechercher"], input[title="Rechercher"], [aria-label="Search"]'
 
 # ── Gemini selectors ──────────────────────────────────────────────────────
-GEMINI_INPUT_SELECTORS   = ["div[role='combobox']", ".ql-editor", "textarea"]
+GEMINI_INPUT_SELECTORS   = GENERIC_CHAT_INPUT_SELECTORS
 GEMINI_RESPONSE_SELECTORS = [
     ".model-response-text",
     "message-content",
@@ -198,7 +204,7 @@ class CloakAgent(BaseBrowserAgent):
         try:
             if not self.page:
                 return False
-            await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await self.page.goto(url, wait_until="domcontentloaded", timeout=self.get_adaptive_timeout_ms(30000))
             
             # Post-navigation health check (detect immediate blocks)
             page_content = await self.page.content()
@@ -252,7 +258,7 @@ class CloakAgent(BaseBrowserAgent):
             if not await self._ensure_page_locked(): return None
             if not self.page:
                 return None
-            await self.page.goto(url, wait_until="load", timeout=45000)
+            await self.page.goto(url, wait_until="load", timeout=self.get_adaptive_timeout_ms(45000))
             await asyncio.sleep(2)
             
             # Post-navigation health check (detect immediate blocks)
@@ -270,7 +276,7 @@ class CloakAgent(BaseBrowserAgent):
             
             # Wait for AI response to stream
             logger.info("⏳ [Cloak] Waiting for AI response to stream...")
-            return await self._wait_for_ai_response_locked(timeout_sec=25)
+            return await self._wait_for_ai_response_locked(timeout_sec=self.get_adaptive_timeout_sec(25))
             
         except Exception as e:
             if self.is_block_response(str(e)):
@@ -284,7 +290,7 @@ class CloakAgent(BaseBrowserAgent):
         if not self.page:
             return None
         
-        ai_selectors = ["code", "div[jsname='yEVEwb']", "div.mod"]
+        ai_selectors = GOOGLE_AI_RESPONSE_SELECTORS
         deadline = asyncio.get_event_loop().time() + timeout_sec
         prev_text = ""
         
@@ -310,7 +316,7 @@ class CloakAgent(BaseBrowserAgent):
                                     txt = await el.inner_text()
                                     if txt:
                                         current_texts.append(txt)
-                    except: continue
+                    except Exception: continue
                 
                 if current_texts:
                     combined = "\n".join(current_texts)
@@ -377,7 +383,7 @@ class CloakAgent(BaseBrowserAgent):
                             return False
                             
                         return True
-            except: pass
+            except Exception: pass
             return False
         except Exception as e:
             if self.is_block_response(str(e)):
@@ -390,7 +396,7 @@ class CloakAgent(BaseBrowserAgent):
         """Dismiss Google cookies. Internal locked."""
         if not self.page: return
         try:
-            selectors = ["button:has-text('Accept all')", "button:has-text('Accepter tout')", "#L2AGLb"]
+            selectors = GOOGLE_COOKIE_ACCEPT_SELECTORS
             for s in selectors:
                 if not self.page: break
                 try:
@@ -399,7 +405,7 @@ class CloakAgent(BaseBrowserAgent):
                         await btn_locator.click()
                         await asyncio.sleep(1)
                         break
-                except: continue
+                except Exception: continue
         except Exception:
             pass
 
@@ -417,7 +423,7 @@ class CloakAgent(BaseBrowserAgent):
             logger.info(f"🕸️ [Cloak] DeepCrawl: {url}")
             if not self.page:
                 return ""
-            await self.page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            await self.page.goto(url, wait_until="domcontentloaded", timeout=self.get_adaptive_timeout_ms(20000))
             await asyncio.sleep(2)
             
             if not self.page:
@@ -475,7 +481,7 @@ class CloakAgent(BaseBrowserAgent):
 
             chat_input = None
             for s in GEMINI_INPUT_SELECTORS:
-                chat_input = await self._find_input_locked(s, timeout_ms=5000)
+                chat_input = await self._find_input_locked(s, timeout_ms=self.get_adaptive_timeout_ms(5000))
                 if chat_input:
                     break
 
@@ -539,7 +545,7 @@ class CloakAgent(BaseBrowserAgent):
         stable_count = 0
         while asyncio.get_event_loop().time() - start < 60:
             if not self.page: return last_text or None
-            current = await self._extract_first_available_locked(selectors, timeout_ms=3000) or ""
+            current = await self._extract_first_available_locked(selectors, timeout_ms=self.get_adaptive_timeout_ms(3000)) or ""
             if current and current == last_text:
                 stable_count += 1
                 if stable_count >= stable_wait_sec:
@@ -581,7 +587,7 @@ class CloakAgent(BaseBrowserAgent):
             noise_page = await self.context.new_page()
             if not noise_page: return
             
-            await noise_page.goto(site, wait_until="domcontentloaded", timeout=20000)
+            await noise_page.goto(site, wait_until="domcontentloaded", timeout=self.get_adaptive_timeout_ms(20000))
             await asyncio.sleep(random.uniform(5, 12))
             
             for _ in range(random.randint(2, 5)):

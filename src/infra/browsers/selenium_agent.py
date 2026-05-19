@@ -32,7 +32,12 @@ from core.logger import get_logger, alert
 
 logger = get_logger(__name__)
 
-# ── Google selectors mirrored from patchright_agent.py ────────────────────
+from infra.browsers.selectors import (
+    GENERIC_CHAT_INPUT_SELECTORS,
+    GOOGLE_COOKIE_ACCEPT_SELECTORS,
+)
+
+# ── Google selectors ────────────────────
 GOOGLE_SEARCH_INPUT = 'textarea[name="q"], input[name="q"], textarea[title="Search"], input[title="Search"], textarea[title="Rechercher"], input[title="Rechercher"], [aria-label="Search"]'
 GOOGLE_PHONE_SELECTORS = [
     "[data-attrid='kc:/local:phone'] span",
@@ -219,7 +224,7 @@ class SeleniumAgent(BaseBrowserAgent):
                 msg = f"Neither undetected-chromedriver nor selenium could start: {exc}. Run: pip install selenium undetected-chromedriver"
                 raise ImportError(msg) from exc
 
-        self._driver.set_page_load_timeout(30)
+        self._driver.set_page_load_timeout(self.get_adaptive_timeout_sec(30))
         self._driver.implicitly_wait(5)
         self._session_start_ts = time.monotonic()
     async def is_alive(self) -> bool:
@@ -462,7 +467,7 @@ class SeleniumAgent(BaseBrowserAgent):
                     return None
 
                 # Wait for AI response to stabilise
-                text = await self._wait_for_stable_response(timeout_sec=20)
+                text = await self._wait_for_stable_response(timeout_sec=self.get_adaptive_timeout_sec(20))
                 if text:
                     logger.info(f"✨ [Selenium-AI-Mode] Got response ({len(text)} chars)")
                     if self.is_block_response(text):
@@ -527,7 +532,7 @@ class SeleniumAgent(BaseBrowserAgent):
             await asyncio.to_thread(self._driver.get, config.GEMINI_URL)
             await asyncio.sleep(3)
 
-            input_sel = "div[role='combobox'], .ql-editor, textarea"
+            input_sel = ", ".join(GENERIC_CHAT_INPUT_SELECTORS)
             box = await self._find_element_by_css(input_sel)
             if not box:
                 return None
@@ -603,7 +608,7 @@ class SeleniumAgent(BaseBrowserAgent):
         """Dismiss Google cookie consent if present."""
         try:
             from selenium.webdriver.common.by import By
-            selectors = ["button#L2AGLb", "button#W0wltc"]
+            selectors = GOOGLE_COOKIE_ACCEPT_SELECTORS
             for sel in selectors:
                 elements = await asyncio.to_thread(
                     self._driver.find_elements, By.CSS_SELECTOR, sel

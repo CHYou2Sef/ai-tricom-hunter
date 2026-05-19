@@ -50,12 +50,14 @@ logger = get_logger(__name__)
 
 # ── Google selectors — identical to all other agents ─────────────────────────
 GOOGLE_SEARCH_INPUT = 'textarea[name="q"], input[name="q"], textarea[title="Search"], input[title="Search"], textarea[title="Rechercher"], input[title="Rechercher"], [aria-label="Search"]'
+from infra.browsers.selectors import (
+    GENERIC_CHAT_INPUT_SELECTORS,
+    GOOGLE_AI_RESPONSE_SELECTORS,
+    GOOGLE_COOKIE_ACCEPT_SELECTORS,
+)
+
 # ── Gemini selectors ──────────────────────────────────────────────────────────
-GEMINI_INPUT_SELECTORS = [
-    "div[role='combobox']",
-    ".ql-editor",
-    "textarea",
-]
+GEMINI_INPUT_SELECTORS = GENERIC_CHAT_INPUT_SELECTORS
 GEMINI_RESPONSE_SELECTORS = [
     ".model-response-text",
     "message-content",
@@ -64,16 +66,11 @@ GEMINI_RESPONSE_SELECTORS = [
 ]
 
 # ── AI Mode response containers (same as patchright_agent) ───────────────────
-AI_RESPONSE_SELECTORS = [
-    "code",
+# Merged list of AI overview / SGE specific selectors + standard ones
+AI_RESPONSE_SELECTORS = GOOGLE_AI_RESPONSE_SELECTORS + [
     "div.XpoqFe",           # SGE main container
     "div.iv_7C",            # SGE alternate
-    "div[data-attrid='wa:/description']",
-    ".kp-wholepage-osrp-ent",
-    "div.mod",
-    ".xpdopen .c2xzTb",
     "div[role='main'] div.VwiC3b",
-    "div[jsname='yEVEwb']",
     "div[class*='osrp']",
 ]
 class SeleniumBaseAgent(BaseBrowserAgent):
@@ -182,7 +179,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             f"[SeleniumBase] 🚀 Starting UC Driver "
             f"(worker={self.worker_id}, proxy={self.current_proxy or 'direct'})..."
         )
-        _timeout = getattr(config, "BROWSER_STARTUP_TIMEOUT_SEC", 90.0)
+        _timeout = self.get_adaptive_timeout_sec(int(getattr(config, "BROWSER_STARTUP_TIMEOUT_SEC", 90.0)))
         try:
             await asyncio.wait_for(
                 asyncio.to_thread(self._sync_start),
@@ -307,7 +304,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         except Exception:
             pass
 
-        self._driver.set_page_load_timeout(50)
+        self._driver.set_page_load_timeout(self.get_adaptive_timeout_sec(50))
         self._session_start_ts = time.monotonic()
 
         logger.info(
@@ -414,7 +411,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         """Synchronous navigate + wait for page ready."""
         driver.get(url)
         try:
-            driver.wait_for_ready_state_complete(timeout=20)
+            driver.wait_for_ready_state_complete(timeout=self.get_adaptive_timeout_sec(20))
         except Exception:
             pass 
 
@@ -471,7 +468,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             self.last_metadata = UniversalExtractor.extract_all(source)
 
             # Wait for AI response to fully render
-            text = await self._wait_for_stable_response_locked(timeout_sec=25)
+            text = await self._wait_for_stable_response_locked(timeout_sec=self.get_adaptive_timeout_sec(25))
             if text:
                 logger.info(f"✨ [SeleniumBase-{provider_label}] Got response ({len(text)} chars)")
                 # Final block check on text
@@ -522,7 +519,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         try:
             logger.info(f"⌨️ [Human-Like] Typing query: {query}")
             for sel in [GOOGLE_SEARCH_INPUT]:
-                await asyncio.to_thread(self._driver.wait_for_element_visible, sel, timeout=5)
+                await asyncio.to_thread(self._driver.wait_for_element_visible, sel, timeout=self.get_adaptive_timeout_sec(5))
                 await asyncio.to_thread(self._sync_human_type_locked, self._driver, sel, query)
                 await asyncio.to_thread(self._driver.send_keys, sel, "\n")
                 break
@@ -551,7 +548,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         for btn in ai_buttons:
             if not self._driver: break
             try:
-                await asyncio.to_thread(self._driver.click, btn, timeout=3)
+                await asyncio.to_thread(self._driver.click, btn, timeout=self.get_adaptive_timeout_sec(3))
                 logger.info(f"✅ [Human-Like] Clicked AI button: {btn}")
                 break
             except Exception: continue
@@ -562,14 +559,14 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         # ── 6. Type Prompt (if follow-up input exists) ─────────────────────
         follow_up_input = "textarea[placeholder*='follow-up'], textarea[placeholder*='Préciser']"
         try:
-            await asyncio.to_thread(self._driver.wait_for_element_visible, follow_up_input, timeout=5)
+            await asyncio.to_thread(self._driver.wait_for_element_visible, follow_up_input, timeout=self.get_adaptive_timeout_sec(5))
             await asyncio.to_thread(self._sync_human_type_locked, self._driver, follow_up_input, prompt)
             await asyncio.to_thread(self._driver.send_keys, follow_up_input, "\n")
             logger.info("🤖 [Human-Like] Prompt typed in AI follow-up.")
         except Exception: pass
 
         # ── 7. Wait for stable response ────────────────────────────────────
-        return await self._wait_for_stable_response_locked(timeout_sec=30)
+        return await self._wait_for_stable_response_locked(timeout_sec=self.get_adaptive_timeout_sec(30))
 
     async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Alias maintaining full HybridEngine / benchmark compatibility."""
@@ -599,7 +596,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
             for sel in ["textarea[name='q']", "input[name='q']"]:
                 try:
-                    await asyncio.to_thread(self._driver.wait_for_element_visible, sel, timeout=5)
+                    await asyncio.to_thread(self._driver.wait_for_element_visible, sel, timeout=self.get_adaptive_timeout_sec(5))
                     await asyncio.to_thread(self._sync_human_type_locked, self._driver, sel, prompt)
                     await asyncio.to_thread(self._driver.send_keys, sel, "\n")
                     await asyncio.sleep(2)
@@ -635,7 +632,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             input_sel = None
             for sel in GEMINI_INPUT_SELECTORS:
                 try:
-                    await asyncio.to_thread(self._driver.wait_for_element_visible, sel, timeout=4)
+                    await asyncio.to_thread(self._driver.wait_for_element_visible, sel, timeout=self.get_adaptive_timeout_sec(4))
                     input_sel = sel
                     break
                 except Exception: continue
@@ -648,7 +645,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             await asyncio.to_thread(self._driver.send_keys, input_sel, "\n")
             await asyncio.sleep(1)
 
-            return await self._wait_for_stable_element_text_locked(GEMINI_RESPONSE_SELECTORS, timeout_sec=60)
+            return await self._wait_for_stable_element_text_locked(GEMINI_RESPONSE_SELECTORS, timeout_sec=self.get_adaptive_timeout_sec(60))
         except Exception as exc:
             logger.error(f"[SeleniumBase] _search_gemini_ai_locked error: {exc}")
             if self.is_block_response(exc):
@@ -751,7 +748,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         """Accept Google cookie consent banners if present (locked)."""
         if not self._driver: return
         try:
-            selectors = ["button:has-text('Accept all')", "button:has-text('Accepter tout')", "#L2AGLb"]
+            selectors = GOOGLE_COOKIE_ACCEPT_SELECTORS
             for s in selectors:
                 if not self._driver: break
                 try:
@@ -868,4 +865,4 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                     await asyncio.to_thread(self._driver.close)
                 if self._driver:
                     await asyncio.to_thread(self._driver.switch_to.window, self._driver.window_handles[0])
-            except: pass
+            except Exception: pass

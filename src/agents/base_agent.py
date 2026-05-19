@@ -34,6 +34,18 @@ class BaseBrowserAgent:
         self._browser = None
         self._last_content: str = ""
 
+    def get_adaptive_timeout_ms(self, base_ms: int) -> int:
+        """Returns an adaptive timeout in milliseconds based on network speed."""
+        from infra.browsers.network_probe import NetworkSpeedProbe
+        from core import config
+        multiplier = getattr(config, "NETWORK_SPEED_MULTIPLIER", 1.0) * NetworkSpeedProbe.get_timeout_multiplier()
+        return int(base_ms * multiplier)
+
+    def get_adaptive_timeout_sec(self, base_sec: int) -> int:
+        """Returns an adaptive timeout in seconds based on network speed."""
+        return int(self.get_adaptive_timeout_ms(base_sec * 1000) / 1000)
+
+
     async def _handle_captcha_if_present(self) -> bool:
         """Shared CAPTCHA detection logic."""
         if not self._page: 
