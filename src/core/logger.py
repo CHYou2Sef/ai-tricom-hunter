@@ -14,6 +14,7 @@
 ║    automatically save to files.                                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
+
 from typing import Optional, Dict, Any, cast
 
 import logging
@@ -29,6 +30,7 @@ import time
 
 # Ensure the log directory exists
 from common.fs import safe_mkdir as _safe_mkdir
+
 _safe_mkdir(config.LOG_DIR)
 
 
@@ -62,18 +64,18 @@ logging.addLevelName(TRACE, "TRACE")
 logging.addLevelName(FATAL, "FATAL")
 
 COLORS = {
-    "TRACE":    "\033[90m",   # Gray
-    "DEBUG":    "\033[94m",   # Blue
-    "INFO":     "\033[92m",   # Green
-    "WARNING":  "\033[93m",   # Yellow
-    "ERROR":    "\033[91m",   # Red
-    "CRITICAL": "\033[95m",   # Magenta
-    "FATAL":    "\033[41m\033[97m", # White on Red background
-    "RESET":    "\033[0m",    # Reset to default
+    "TRACE": "\033[90m",  # Gray
+    "DEBUG": "\033[94m",  # Blue
+    "INFO": "\033[92m",  # Green
+    "WARNING": "\033[93m",  # Yellow
+    "ERROR": "\033[91m",  # Red
+    "CRITICAL": "\033[95m",  # Magenta
+    "FATAL": "\033[41m\033[97m",  # White on Red background
+    "RESET": "\033[0m",  # Reset to default
 }
 
-LOG_FORMAT    = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
-DATE_FORMAT   = "%Y-%m-%d %H:%M:%S"
+LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 class ColorFormatter(logging.Formatter):
@@ -94,9 +96,11 @@ class ColorFormatter(logging.Formatter):
 # LOG ROTATION HELPERS (Compression)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _log_namer(name: str) -> str:
     """Append .gz to the rotated log file name."""
     return name + ".gz"
+
 
 def _log_rotator(source: str, dest: str) -> None:
     """Compress the log file using gzip after rotation."""
@@ -105,24 +109,26 @@ def _log_rotator(source: str, dest: str) -> None:
             shutil.copyfileobj(f_in, f_out)
     os.remove(source)
 
+
 class BatchArchivingRotatingFileHandler(RotatingFileHandler):
     """
     Custom RotatingFileHandler with batch gzip archiving.
-    
+
     Standard RotatingFileHandler renames logs to .1, .2, etc.
     When backupCount is hit, this subclass concatenates ALL backlog
     files into one timestamped .gz archive instead of leaving many
     small files on disk.  Keeps the log directory clean on long runs.
     """
+
     def doRollover(self):
         # Check if the oldest backup file exists (meaning we hit the backupCount limit)
         oldest_backup = self.rotation_filename("%s.%d" % (self.baseFilename, self.backupCount))
-        
+
         if os.path.exists(oldest_backup):
             # We have reached the limit! Time to batch archive them into ONE .gz file
             timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
             archive_name = f"{self.baseFilename}.archive_{timestamp}.gz"
-            
+
             # Concatenate all backups (from oldest .5 to newest .1) into the single .gz
             with gzip.open(archive_name, "wt", encoding="utf-8") as f_out:
                 for i in range(self.backupCount, 0, -1):
@@ -136,11 +142,10 @@ class BatchArchivingRotatingFileHandler(RotatingFileHandler):
                         except Exception as e:
                             # Failsafe: if we can't read a file, skip it but don't crash logger
                             pass
-                            
-        # Now execute the standard rollover. Since .1 to .5 are deleted, 
+
+        # Now execute the standard rollover. Since .1 to .5 are deleted,
         # it will simply rename the current active log to .1
         super().doRollover()
-
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -168,32 +173,30 @@ def _setup_root_logger() -> None:
     # ── Anti-Root Permission Guard (Execute BEFORE opening handlers) ──
     error_file = os.path.join(config.LOG_DIR, "agent.log")
     archive_file = os.path.join(config.LOG_DIR, "debug_archive.log")
-    
+
     for f in [config.LOG_DIR, error_file, archive_file]:
         if os.path.exists(f):
-            try: os.chmod(f, 0o755)
-            except: pass
+            try:
+                os.chmod(f, 0o755)
+            except:
+                pass
 
     # ── 1. Console handler ──
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(
-        ColorFormatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT)
-    )
+    console_handler.setFormatter(ColorFormatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT))
 
     # ── 2. "Clean" error log file (Only ERRORS and CRITICAL) ──
     # This prevents disk fill-up with trivial infologs
     error_handler = BatchArchivingRotatingFileHandler(
         error_file,
         maxBytes=10 * 1024 * 1024,  # 10 MB
-        backupCount=5,              # Archive when we hit 5 uncompressed files
-        encoding="utf-8"
+        backupCount=5,  # Archive when we hit 5 uncompressed files
+        encoding="utf-8",
     )
     # We no longer need namer/rotator because BatchArchivingRotatingFileHandler handles gzip natively
     error_handler.setLevel(logging.ERROR)
-    error_handler.setFormatter(
-        logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT)
-    )
+    error_handler.setFormatter(logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT))
 
     # ── 3. High-Res Rotation log (Persistent history for monitoring) ──
     # Rotates at 10MB, archives every 5 files.
@@ -201,13 +204,11 @@ def _setup_root_logger() -> None:
     archive_handler = BatchArchivingRotatingFileHandler(
         archive_file,
         maxBytes=10 * 1024 * 1024,  # 10 MB
-        backupCount=5,              # Archive when we hit 5 uncompressed files
-        encoding="utf-8"
+        backupCount=5,  # Archive when we hit 5 uncompressed files
+        encoding="utf-8",
     )
-    archive_handler.setLevel(logging.INFO)     # Preserve full execution history (rotated & compressed)
-    archive_handler.setFormatter(
-        logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT)
-    )
+    archive_handler.setLevel(logging.INFO)  # Preserve full execution history (rotated & compressed)
+    archive_handler.setFormatter(logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT))
 
     # ── 4. Silence noisy third-party libraries ──
     logging.getLogger("nodriver").setLevel(logging.WARNING)
@@ -239,14 +240,14 @@ def get_logger(name: str) -> AgentLogger:
     """
     _setup_root_logger()
     logger = logging.getLogger(name)
-    
+
     # Monkey-patch custom level helpers so callers can do logger.trace('msg')
     # instead of the verbose logger.log(TRACE, 'msg')
-    if not hasattr(logger, 'trace'):
-        logger.trace = lambda msg, *args, **kwargs: logger.log(TRACE, msg, *args, **kwargs)
-    if not hasattr(logger, 'fatal'):
+    if not hasattr(logger, "trace"):
+        logger.trace = lambda msg, *args, **kwargs: logger.log(TRACE, msg, *args, **kwargs)  # type: ignore
+    if not hasattr(logger, "fatal"):
         logger.fatal = lambda msg, *args, **kwargs: logger.log(FATAL, msg, *args, **kwargs)  # type: ignore
-        
+
     return cast(AgentLogger, logger)
 
 
@@ -281,7 +282,7 @@ def _get_alert_logger() -> logging.Logger:
 
 
 # Console banner templates
-_WARN_BORDER     = "⚠️  " + "─" * 56
+_WARN_BORDER = "⚠️  " + "─" * 56
 _CRITICAL_BORDER = "🚨  " + "═" * 56
 
 
@@ -315,7 +316,7 @@ def alert(level: str, message: str, context: Optional[Dict[str, Any]] = None) ->
     └──────────┴──────────────────────────────────────────────────────┘
     """
     alogger = _get_alert_logger()
-    ctx_str  = f" | ctx={context}" if context else ""
+    ctx_str = f" | ctx={context}" if context else ""
     full_msg = f"{message}{ctx_str}"
 
     level_upper = level.upper()

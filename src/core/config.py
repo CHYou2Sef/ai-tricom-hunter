@@ -170,6 +170,27 @@ DECOMPOSITION_CHUNK_SIZE = int(os.getenv("DECOMPOSITION_CHUNK_SIZE", "500"))
 # ── Recovery & Second Chance ──
 REPROCESS_FAILED_ROWS = os.getenv("REPROCESS_FAILED_ROWS", "true").lower() == "true"
 
+# ── CHECKPOINT RESUME — Fault-Tolerant Restart ──────────────────────────────
+# When True, on ANY restart (crash, power cut, Ctrl+C, container kill) the
+# agent resumes EXACTLY from the last unprocessed row in the checkpoint file.
+#
+# Terminal states — NEVER re-processed regardless of REPROCESS_FAILED_ROWS:
+#   • DONE     → Phone found and validated. Final answer.
+#   • NO TEL   → Full 10-tier waterfall exhausted. No phone exists. Final answer.
+#   • LOW_CONF → SIREN mismatch detected. Kept for human review.
+#   • SKIP     → Row explicitly excluded by pre-processor.
+#
+# Non-terminal states — re-tried on next run:
+#   • ERROR    → Agent crashed mid-row. Safe to retry.
+#   • PENDING  → Row was in queue when the process died.
+#
+# Set to False ONLY if you want to wipe progress and restart from row 1.
+RESUME_FROM_CHECKPOINT = os.getenv("RESUME_FROM_CHECKPOINT", "true").lower() == "true"
+
+# The canonical set of statuses that are 100% terminal.
+# Used by the orchestrator to build the "rows_to_process" list.
+TERMINAL_STATUSES: frozenset = frozenset({"DONE", "NO TEL", "NO_TEL", "LOW_CONF", "SKIP"})
+
 # ── Proxy Rotation (Anti-Ban) ──
 PROXY_ENABLED                  = os.getenv("PROXY_ENABLED", "true").lower() == "true"   # ON by default to solve CAPTCHA problems immediately
 PROXY_ROTATE_EVERY_N           = 5      # Rotate every 5 rows to stay fresh

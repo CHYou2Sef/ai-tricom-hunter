@@ -197,9 +197,30 @@ async def _execute_agent_task(ctx: WorkerContext, agent) -> None:
     """
     if not ctx.row.phone:
         await process_row(ctx.row, agent)
+
+    # ── Global dedup guard ────────────────────────────────────────────────────
+    # A phone collected in a PREVIOUS run (other file, previous crash restart)
+    # may already be in GLOBAL_PHONE_SET.  If so, clear it — we DO NOT want
+    # duplicate numbers appearing in the output, not even across sessions.
+    if ctx.row.phone:
+        if ctx.progress.is_phone_duplicated(ctx.row.phone):
+            logger.warning(
+                f"[Orchestrator] 🔁 Row {ctx.row.row_index}: phone "
+                f"{ctx.row.phone!r} already in GLOBAL_SET — marked NO TEL (duplicate)."
+            )
+            ctx.row.phone = None
+            ctx.row.agent_phone = None
+            ctx.row.status = "NO TEL"
+        else:
+            # Officially register the new phone so sibling workers can't steal it
+            ctx.progress.register_phone(ctx.row.phone)
+
+    if ctx.row.agent_phone and not ctx.progress.is_phone_duplicated(ctx.row.agent_phone):
+        ctx.progress.register_phone(ctx.row.agent_phone)
+
     if ctx.row.phone and getattr(config, 'ENRICH_ENABLED', False):
         await enrich_row(ctx.row, agent)
-    
+
     # Final safety check: ensure DONE status actually has a phone number
     if ctx.row.status == "DONE" and not ctx.row.phone and not ctx.row.agent_phone:
         ctx.row.status = "NO TEL"
@@ -282,13 +303,33 @@ async def process_file_async(filepath: str) -> None:
     tracker.start_file_processing()
     await asyncio.to_thread(sync_with_previous_results, rows, filepath, progress)
     
-    # Decide which rows still need work
-    # LOW_CONF = SIREN mismatch — terminal state, no re-processing
-    terminal = ("DONE", "NO TEL", "SKIP", "LOW_CONF")
-    rows_to_process = (
-        [r for r in rows if r.status != "DONE"] if config.REPROCESS_FAILED_ROWS
-        else [r for r in rows if r.status not in terminal]
-    )
+    # ── Decide which rows still need work ────────────────────────────────────
+    # RESUME_FROM_CHECKPOINT=True (default) → smart resume:
+    #   • DONE / NO TEL / LOW_CONF / SKIP are 100%% TERMINAL — never retried.
+    #   • ERROR / PENDING are non-terminal — retried on next run.
+    # RESUME_FROM_CHECKPOINT=False → legacy REPROCESS_FAILED_ROWS behaviour.
+    if config.RESUME_FROM_CHECKPOINT:
+        terminal_indices = progress.get_terminal_row_indices()
+        rows_to_process = [
+            r for r in rows
+            if r.row_index not in terminal_indices          # not terminal in checkpoint
+            and r.status not in config.TERMINAL_STATUSES   # not set terminal by sync
+        ]
+        resume_idx = progress.get_resume_index()
+        n_skipped = len(rows) - len(rows_to_process)
+        if resume_idx is not None:
+            logger.info(
+                f"[Agent] 📍 RESUME — last checkpoint row #{resume_idx} — "
+                f"{n_skipped} rows skipped (DONE/NO TEL) — "
+                f"{len(rows_to_process)} remaining."
+            )
+    else:
+        # Legacy: REPROCESS_FAILED_ROWS controls whether NO TEL gets retried
+        legacy_terminal = config.TERMINAL_STATUSES
+        rows_to_process = (
+            [r for r in rows if r.status != "DONE"] if config.REPROCESS_FAILED_ROWS
+            else [r for r in rows if r.status not in legacy_terminal]
+        )
     total = len(rows_to_process)
     
     if total == 0:

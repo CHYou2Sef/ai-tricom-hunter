@@ -15,6 +15,7 @@ from core import config
 from core.logger import get_logger, alert
 
 import os
+
 os.environ["CRAWL4_AI_BASE_DIRECTORY"] = os.path.join(config.WORK_DIR, ".crawl4ai")
 
 logger = get_logger(__name__)
@@ -47,36 +48,32 @@ class Crawl4AIAgent(BaseBrowserAgent):
         """Start Crawl4AI crawler with RecursionError mitigation."""
         try:
             from crawl4ai import BrowserConfig, AsyncWebCrawler
-            
+
             # CRITICAL FIX: Increase recursion limit for Docker/Crawl4AI
             old_limit = sys.getrecursionlimit()
             sys.setrecursionlimit(max(old_limit, 3000))
-            
+
             logger.info("[Crawl4AI] Starting crawler...")
-            
+
             browser_args = []
             if os.getuid() == 0:
                 browser_args = ["--no-sandbox", "--disable-setuid-sandbox"]
-            
+
             _proxy = {"server": self.current_proxy} if self.current_proxy else None
-            browser_cfg = BrowserConfig(
-                headless=True,
-                extra_args=browser_args,
-                proxy_config=_proxy
-            )
-            
+            browser_cfg = BrowserConfig(headless=True, extra_args=browser_args, proxy_config=_proxy)
+
             self._crawler = AsyncWebCrawler(config=browser_cfg)
             await self._crawler.__aenter__()
             alert("INFO", "Crawl4AI session started", {"proxy": self.current_proxy or "direct"})
             logger.info("[Crawl4AI] Ready.")
             return True
-            
+
         except Exception as e:
             logger.error(f"[Crawl4AI] Failed to start: {e}")
             self._crawler = None
             return False
         finally:
-            sys.setrecursionlimit(old_limit if 'old_limit' in dir() else 1000)
+            sys.setrecursionlimit(1000)
 
     async def close(self) -> None:
         async with self._lock:
@@ -106,7 +103,7 @@ class Crawl4AIAgent(BaseBrowserAgent):
 
         old_limit = sys.getrecursionlimit()
         sys.setrecursionlimit(max(old_limit, 3000))
-        
+
         try:
             result = await self._crawler.arun(
                 url=url,
@@ -114,14 +111,14 @@ class Crawl4AIAgent(BaseBrowserAgent):
                 remove_overlay_elements=True,
                 bypass_cache=True,
             )
-            
+
             if result.success and result.markdown:
                 content = result.markdown.strip()
                 if content and not self.is_block_response(content):
                     self._last_content = content
                     return content
             return None
-            
+
         except RecursionError as e:
             logger.error(f"[Crawl4AI] RecursionError - restarting crawler: {e}")
             await self._restart_crawler()
@@ -162,28 +159,28 @@ class Crawl4AIAgent(BaseBrowserAgent):
         """
         if not ai_mode_url:
             return None
-        
+
         old_limit = sys.getrecursionlimit()
         sys.setrecursionlimit(max(old_limit, 3000))
-        
+
         try:
             async with self._lock:
                 if not await self._ensure_crawler_alive_locked():
                     return None
-                
+
                 result = await self._crawler.arun(
                     url=ai_mode_url,
                     word_count_threshold=10,
                     remove_overlay_elements=True,
                     bypass_cache=True,
                 )
-                
+
                 if result.success and result.markdown:
                     content = result.markdown.strip()
                     self._last_content = content
                     return content
                 return None
-                
+
         except RecursionError as e:
             logger.error(f"[Crawl4AI] RecursionError in search_google_ai_mode: {e}")
             await self._restart_crawler()
@@ -203,9 +200,15 @@ class Crawl4AIAgent(BaseBrowserAgent):
         if not content:
             return True
         block_patterns = [
-            "access denied", "blocked", "forbidden", "captcha",
-            "rate limit", "too many requests", "403 forbidden",
-            "denied access", "unusual traffic"
+            "access denied",
+            "blocked",
+            "forbidden",
+            "captcha",
+            "rate limit",
+            "too many requests",
+            "403 forbidden",
+            "denied access",
+            "unusual traffic",
         ]
         lower = content.lower()
         return sum(1 for p in block_patterns if p in lower) >= 3
