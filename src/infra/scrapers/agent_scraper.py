@@ -21,7 +21,7 @@
 import asyncio
 import json
 import logging
-from typing import Any, Generator, Optional
+from typing import Any
 
 # ── FIX: Initialize crochet FIRST — before any Scrapy/Twisted imports ────────
 # crochet.setup() installs the Twisted reactor in a dedicated background
@@ -34,11 +34,11 @@ crochet.setup()
 
 # ── Scrapy imports (AFTER crochet.setup) ─────────────────────────────────────
 # DO NOT import `from twisted.internet import reactor` — crochet owns it.
-import scrapy
-from scrapy.crawler import CrawlerRunner
-from scrapy.signalmanager import dispatcher
-from scrapy import signals
-from scrapy.http import Response
+import scrapy  # noqa: E402
+from scrapy import signals  # noqa: E402
+from scrapy.crawler import CrawlerRunner  # noqa: E402
+from scrapy.http import Response  # noqa: E402
+from scrapy.signalmanager import dispatcher  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +68,8 @@ class GenericSpider(scrapy.Spider):
 
     def __init__(
         self,
-        url: Optional[str] = None,
-        extraction_rules: Optional[str] = None,
+        url: str | None = None,
+        extraction_rules: str | None = None,
         *args: Any,
         **kwargs: Any,
     ):
@@ -80,8 +80,8 @@ class GenericSpider(scrapy.Spider):
         )
         self.results: list[dict[str, Any]] = []
 
-    # what this error mean ?
-    def parse(self, response: Response, **kwargs: Any) -> Generator[dict[str, Any], None, None]:
+    # Scrapy expects `parse` to return `Any` (Iterable/Generator of Item/Request)
+    def parse(self, response: Response, **kwargs: Any) -> Any:  # type: ignore[override]
         item = {}
 
         # 1. Try LLM-generated dynamic rules first

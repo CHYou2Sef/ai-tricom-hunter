@@ -418,16 +418,16 @@ async def process_row(row: ExcelRow, agent, idx: Optional[int] = None, total: Op
         discovery_links = last_meta.get("social_links", {})
         # Target: Top Website + Facebook About + LinkedIn About
         targets = []
-        if discovery_links.get("website"): targets.append((discovery_links["website"][0], "discovery_web"))
-        if discovery_links.get("facebook"): targets.append((discovery_links["facebook"][0].rstrip("/") + "/about", "discovery_fb"))
-        if discovery_links.get("linkedin"): targets.append((discovery_links["linkedin"][0].rstrip("/") + "/about/", "discovery_li"))
+        if discovery_links.get("website") and discovery_links["website"][0]: targets.append((discovery_links["website"][0], "discovery_web"))
+        if discovery_links.get("facebook") and discovery_links["facebook"][0]: targets.append((discovery_links["facebook"][0].rstrip("/") + "/about", "discovery_fb"))
+        if discovery_links.get("linkedin") and discovery_links["linkedin"][0]: targets.append((discovery_links["linkedin"][0].rstrip("/") + "/about/", "discovery_li"))
         
         for url, source_tag in targets[:3]: # Cap at 3 discovery visits
             if any(h['score'] >= 90 for h in harvested): break
             platform_name = "Website"
-            if "facebook" in url.lower() or "fb" in source_tag: platform_name = "Facebook"
-            elif "linkedin" in url.lower() or "li" in source_tag: platform_name = "LinkedIn"
-            elif "instagram" in url.lower() or "ig" in source_tag: platform_name = "Instagram"
+            if url and ("facebook" in str(url).lower() or "fb" in source_tag): platform_name = "Facebook"
+            elif url and ("linkedin" in str(url).lower() or "li" in source_tag): platform_name = "LinkedIn"
+            elif url and ("instagram" in str(url).lower() or "ig" in source_tag): platform_name = "Instagram"
             logger.info(f"🔎 [Layer 1] DeepDiscovery ({platform_name}) | Opening: {url}")
             if await agent.goto_url(url):
                 source = await agent.get_page_source()

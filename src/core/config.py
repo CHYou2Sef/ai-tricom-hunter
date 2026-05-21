@@ -73,6 +73,12 @@ OUTPUT_ROOT    = WORK_DIR / "ARCHIVE"
 ARCHIVE_BACKUP_DIR = OUTPUT_ROOT / "BACKUP"
 OUTPUT_SUCCEED_DIR = OUTPUT_ROOT / "SUCCEED"
 OUTPUT_FAILED_DIR  = OUTPUT_ROOT / "FAILED"
+
+# ── DAILY FUSION ── (safe isolated folder, NEVER inside input queues) ──
+# Daily per-folder fusion files (e.g. STD_2026-05-20.xlsx) go here.
+# CRITICAL: must NOT point to WORK/STD or WORK/SIREN — those are watched
+# input queues and the watchdog would re-ingest fusion files as new inputs.
+DAILY_FUSION_DIR   = OUTPUT_ROOT / "DAILY_FUSION"
 CHECKPOINTS_DIR    = WORK_DIR / "CHECKPOINTS"
 ARCHIVED_CHECKPOINTS_DIR = CHECKPOINTS_DIR / "archived_json"
 
@@ -84,6 +90,10 @@ from common.fs import safe_mkdir as _safe_mkdir_cfg
 _safe_mkdir_cfg(CHECKPOINTS_DIR)
 _safe_mkdir_cfg(ARCHIVED_CHECKPOINTS_DIR)
 _safe_mkdir_cfg(READY_DIR)
+_safe_mkdir_cfg(DAILY_FUSION_DIR)   # Safe fusion output — never inside input queues
+_safe_mkdir_cfg(OUTPUT_SUCCEED_DIR)
+_safe_mkdir_cfg(OUTPUT_FAILED_DIR)
+_safe_mkdir_cfg(ARCHIVE_BACKUP_DIR)
 
 # Compatibility aliases
 ARCHIVE_DIR        = ARCHIVE_BACKUP_DIR
@@ -100,9 +110,19 @@ _safe_mkdir_cfg(LOG_DIR)
 STATUS_COLUMN_NAME = os.getenv("STATUS_COLUMN_NAME", "Etat_IA")
 
 def get_output_dir(input_folder_name: str) -> Path:
-    """Returns {WORK_DIR}/{input_folder_name}"""
+    """
+    Returns the daily fusion output directory for *input_folder_name*.
+
+    ⚠️  CRITICAL: This must NOT return the input folder itself (WORK/STD,
+    WORK/SIREN …) because the file-watchdog monitors those directories.
+    Any file written there would be re-ingested as a new input file,
+    creating an infinite processing loop and polluting SUCCEED/ with
+    date-stamped names like STD_2026-05-20.xlsx.
+
+    Safe location: WORK/ARCHIVE/DAILY_FUSION/{input_folder_name}/
+    """
     from common.fs import safe_mkdir
-    path = WORK_DIR / input_folder_name
+    path = DAILY_FUSION_DIR / input_folder_name
     safe_mkdir(path)
     return path
 

@@ -269,6 +269,16 @@ async def _worker_process_row(ctx: WorkerContext):
         except Exception as e:
             logger.error(f"[Agent] Error on row {ctx.row.row_index}: {e}")
             ctx.row.status = "ERROR"
+            # ── CRITICAL: persist ERROR to checkpoint ──────────────────────────
+            # Without this call, the checkpoint has NO entry for this row.
+            # On restart, the system sees it as "unprocessed" and always re-starts
+            # from the first errored row index, ignoring all rows that came after.
+            # With this call, ERROR rows are recorded (non-terminal) so they CAN
+            # be retried, but get_resume_index() correctly advances past them.
+            try:
+                ctx.progress.mark_row_done(ctx.row.row_index, None, None, "ERROR")
+            except Exception as save_err:
+                logger.warning(f"[Agent] Failed to save ERROR checkpoint for row {ctx.row.row_index}: {save_err}")
         finally:
             if agent:
                 # Recycle healthy agents; dead ones are left for GC

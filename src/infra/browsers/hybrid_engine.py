@@ -485,6 +485,8 @@ class HybridAutomationEngine:
 
         # Strip internal parameters that should not propagate to tier methods
         kwargs.pop("row", None)
+        
+        has_network_failure = False
 
         # ── 0.1 DISK SPACE GUARD (Bug #5 — proactive auto-cleanup) ──────────
         try:
@@ -789,6 +791,7 @@ class HybridAutomationEngine:
                     SyntaxError,
                     ValueError,
                     AssertionError,
+                    NotImplementedError,
                 )
                 _is_code_error = isinstance(exc, _CODE_LEVEL_ERRORS)
 
@@ -811,11 +814,13 @@ class HybridAutomationEngine:
                     )
                 elif "captcha" in exc_str or "waf" in exc_str:
                     reason = "captcha_waf"
+                    has_network_failure = True
                     logger.error(
                         f"[HybridEngine] Tier {tier} CAPTCHA/WAF in '{method_name}': {exc}"
                     )
                 elif _is_network_error:
                     reason = "network"
+                    has_network_failure = True
                     logger.error(
                         f"[HybridEngine] Tier {tier} NETWORK error in '{method_name}': {exc}"
                     )
@@ -882,7 +887,7 @@ class HybridAutomationEngine:
         # Conservative approach: increment CB counter only for network-type runs.
         # (Code-bug tiers `continue` before reaching this point, so reaching
         # here means at least one genuine network-level attempt was made.)
-        if getattr(self, "_last_failure_reason", None) in ("network", "captcha_waf"):
+        if has_network_failure or getattr(self, "_last_failure_reason", None) in ("network", "captcha_waf"):
             self._consecutive_failures += 1
 
         alert(

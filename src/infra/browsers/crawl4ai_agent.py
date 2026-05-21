@@ -1,44 +1,55 @@
 """
-browser/crawl4ai_agent.py - Tier 6: Managed Async Scraper (Fixed)
+browser/crawl4ai_agent.py - Tier 6: Managed Async Scraper
 
 Fixes applied:
-1. RecursionError mitigation: increase sys.setrecursionlimit before crawl4ai calls
-2. Added try-except wrapper for graceful escalation
+1. RecursionError mitigation: sys.setrecursionlimit raised before crawl4ai calls
+2. `search_google_ai_mode` signature aligned with BaseBrowserAgent (**kwargs)
+3. Null-guard added before `self._crawler.arun()` — Pyright NoneType dereference
+4. Type annotations modernised: `Optional[X]` → `X | None` (PEP 604)
+5. Import ordering corrected (isort)
 """
 
 from __future__ import annotations
+
 import asyncio
+import os
 import sys
-from typing import Optional, Any
+from typing import Any
 
 from core import config
-from core.logger import get_logger, alert
-
-import os
+from core.logger import alert, get_logger
 
 os.environ["CRAWL4_AI_BASE_DIRECTORY"] = os.path.join(config.WORK_DIR, ".crawl4ai")
 
-logger = get_logger(__name__)
+from agents.base_agent import BaseBrowserAgent  # noqa: E402
 
-from agents.base_agent import BaseBrowserAgent
+logger = get_logger(__name__)
 
 
 class Crawl4AIAgent(BaseBrowserAgent):
     """
-    Tier 6 scraper built on Crawl4AI. Fixed for Docker root + RecursionError.
+    Tier 6 scraper built on Crawl4AI.
+    Fixed for Docker root + RecursionError + correct BaseBrowserAgent contract.
     """
 
-    def __init__(self, worker_id: int = 0):
+    def __init__(self, worker_id: int = 0) -> None:
         super().__init__(worker_id)
         self._crawler = None
-        self.current_proxy: Optional[str] = None
+        self.current_proxy: str | None = None
         self._lock = asyncio.Lock()
         self._last_content: str = ""
+
+    # ── Internal crawler lifecycle ─────────────────────────────────────────
+
+    async def start(self) -> bool:
+        """Start the crawler explicitly (HybridEngine lifecycle requirement)."""
+        async with self._lock:
+            return await self._ensure_crawler_alive_locked()
 
     async def _ensure_crawler_alive_locked(self) -> bool:
         """
         Check if Crawl4AI crawler is ready.
-        CRITICAL FIX: No health scrape - Crawl4AI manages own browser lifecycle.
+        CRITICAL FIX: No health scrape — Crawl4AI manages its own browser lifecycle.
         """
         if self._crawler is not None:
             return True
@@ -47,7 +58,7 @@ class Crawl4AIAgent(BaseBrowserAgent):
     async def _start_crawler(self) -> bool:
         """Start Crawl4AI crawler with RecursionError mitigation."""
         try:
-            from crawl4ai import BrowserConfig, AsyncWebCrawler
+            from crawl4ai import AsyncWebCrawler, BrowserConfig
 
             # CRITICAL FIX: Increase recursion limit for Docker/Crawl4AI
             old_limit = sys.getrecursionlimit()
@@ -55,12 +66,16 @@ class Crawl4AIAgent(BaseBrowserAgent):
 
             logger.info("[Crawl4AI] Starting crawler...")
 
-            browser_args = []
+            browser_args: list[str] = []
             if os.getuid() == 0:
                 browser_args = ["--no-sandbox", "--disable-setuid-sandbox"]
 
             _proxy = {"server": self.current_proxy} if self.current_proxy else None
-            browser_cfg = BrowserConfig(headless=True, extra_args=browser_args, proxy_config=_proxy)
+            browser_cfg = BrowserConfig(
+                headless=True,
+                extra_args=browser_args,
+                proxy_config=_proxy,
+            )
 
             self._crawler = AsyncWebCrawler(config=browser_cfg)
             await self._crawler.__aenter__()
@@ -90,14 +105,17 @@ class Crawl4AIAgent(BaseBrowserAgent):
         async with self._lock:
             return self._crawler is not None
 
-    async def scrape(self, url: str) -> Optional[str]:
+    # ── Scraping ───────────────────────────────────────────────────────────
+
+    async def scrape(self, url: str) -> str | None:
         async with self._lock:
             if not await self._ensure_crawler_alive_locked():
                 return None
             return await self._scrape_locked(url)
 
-    async def _scrape_locked(self, url: str) -> Optional[str]:
+    async def _scrape_locked(self, url: str) -> str | None:
         """Internal scrape with RecursionError handling."""
+        # FIX 3: explicit null-guard before calling arun — Pyright NoneType dereference
         if not self._crawler:
             return None
 
@@ -120,7 +138,7 @@ class Crawl4AIAgent(BaseBrowserAgent):
             return None
 
         except RecursionError as e:
-            logger.error(f"[Crawl4AI] RecursionError - restarting crawler: {e}")
+            logger.error(f"[Crawl4AI] RecursionError — restarting crawler: {e}")
             await self._restart_crawler()
             raise  # Let HybridEngine escalate
         except Exception as e:
@@ -129,7 +147,7 @@ class Crawl4AIAgent(BaseBrowserAgent):
         finally:
             sys.setrecursionlimit(old_limit)
 
-    async def _restart_crawler(self):
+    async def _restart_crawler(self) -> None:
         """Restart crawler after RecursionError."""
         if self._crawler:
             try:
@@ -140,21 +158,27 @@ class Crawl4AIAgent(BaseBrowserAgent):
         await asyncio.sleep(2)  # Cool-down before restart
         await self._start_crawler()
 
-    # ── SEARCH METHODS (required by HybridEngine) ──
+    # ── Search / AI-mode methods ───────────────────────────────────────────
 
     async def submit_google_search(self, query: str) -> bool:
         """Not supported in Crawl4AI standalone."""
         return False
 
-    async def extract_universal_data(self, use_browser: bool = False) -> dict:
+    async def extract_universal_data(self, use_browser: bool = False) -> dict:  # type: ignore[override]
         """Not supported in Crawl4AI standalone."""
         return {}
 
     async def search_google_ai_mode(
-        self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None
-    ) -> Optional[str]:
-        """
-        Use Crawl4AI to fetch content from an AI Mode URL.
+        self,
+        prompt: str,
+        ai_mode_url: str | None = None,
+        row: Any | None = None,
+        **kwargs: Any,
+    ) -> str | None:
+        """Use Crawl4AI to fetch content from an AI Mode URL.
+
+        FIX 2: signature now includes **kwargs to match BaseBrowserAgent contract.
+        FIX 3: null-guard on self._crawler before arun() call.
         RecursionError-safe implementation.
         """
         if not ai_mode_url:
@@ -166,6 +190,10 @@ class Crawl4AIAgent(BaseBrowserAgent):
         try:
             async with self._lock:
                 if not await self._ensure_crawler_alive_locked():
+                    return None
+
+                # FIX 3: explicit null-guard — Pyright cannot infer state after async call
+                if not self._crawler:
                     return None
 
                 result = await self._crawler.arun(
@@ -191,24 +219,9 @@ class Crawl4AIAgent(BaseBrowserAgent):
         finally:
             sys.setrecursionlimit(old_limit)
 
+    # ── Content helpers ────────────────────────────────────────────────────
+
     async def get_page_source(self) -> str:
         """Return cached content from last scrape."""
         return self._last_content
 
-    def is_block_response(self, content: str) -> bool:
-        """Detect blocking/WAF responses."""
-        if not content:
-            return True
-        block_patterns = [
-            "access denied",
-            "blocked",
-            "forbidden",
-            "captcha",
-            "rate limit",
-            "too many requests",
-            "403 forbidden",
-            "denied access",
-            "unusual traffic",
-        ]
-        lower = content.lower()
-        return sum(1 for p in block_patterns if p in lower) >= 3
