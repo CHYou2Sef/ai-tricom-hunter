@@ -82,11 +82,18 @@ class ParallelSocialScraper:
     async def _scrape_facebook(self, urls: list[str]) -> ScraperResult:
         """Scrape Facebook pages for phone numbers."""
         try:
-            # Lazy import to avoid startup overhead
-            from agents.layer2.tools.facebook_tool import scrape_facebook_pages
-
-            text = await scrape_facebook_pages(urls, self.company_name)
-            return self._extract_phone(text, "facebook", 85)
+            from agents.layer2.tools.facebook_tool import FacebookPhoneTool
+            tool = FacebookPhoneTool()
+            for url in urls:
+                result = await tool._arun(url)
+                if result.get("phone"):
+                    return ScraperResult(
+                        phone=result["phone"],
+                        score=85,
+                        source="facebook",
+                        raw_data=result
+                    )
+            return ScraperResult(source="facebook", score=0)
         except Exception as e:
             logger.debug(f"[FB] Error: {e}")
             return ScraperResult(source="facebook", score=0)
@@ -94,10 +101,18 @@ class ParallelSocialScraper:
     async def _scrape_linkedin(self, urls: list[str]) -> ScraperResult:
         """Scrape LinkedIn pages for phone numbers."""
         try:
-            from agents.layer2.tools.linkedin_tool import scrape_linkedin_pages
-
-            text = await scrape_linkedin_pages(urls, self.company_name)
-            return self._extract_phone(text, "linkedin", 88)
+            from agents.layer2.tools.linkedin_tool import LinkedInPhoneTool
+            tool = LinkedInPhoneTool()
+            for url in urls:
+                result = await tool._arun(url)
+                if result.get("phone"):
+                    return ScraperResult(
+                        phone=result["phone"],
+                        score=88,
+                        source="linkedin",
+                        raw_data=result
+                    )
+            return ScraperResult(source="linkedin", score=0)
         except Exception as e:
             logger.debug(f"[LI] Error: {e}")
             return ScraperResult(source="linkedin", score=0)
@@ -105,10 +120,18 @@ class ParallelSocialScraper:
     async def _scrape_website(self, urls: list[str]) -> ScraperResult:
         """Scrape company websites for phone numbers."""
         try:
-            from agents.layer2.tools.website_tool import scrape_website_pages
-
-            text = await scrape_website_pages(urls, self.company_name)
-            return self._extract_phone(text, "website", 92)
+            from agents.layer2.tools.website_tool import WebsitePhoneTool
+            tool = WebsitePhoneTool()
+            for url in urls:
+                result = await tool._arun(url)
+                if result.get("phone"):
+                    return ScraperResult(
+                        phone=result["phone"],
+                        score=92,
+                        source="website",
+                        raw_data=result
+                    )
+            return ScraperResult(source="website", score=0)
         except Exception as e:
             logger.debug(f"[WEB] Error: {e}")
             return ScraperResult(source="website", score=0)

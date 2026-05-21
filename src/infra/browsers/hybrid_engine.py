@@ -802,7 +802,10 @@ class HybridAutomationEngine:
                 if agent is None or not hasattr(agent, "is_block_response"):
                     _is_network_error = False
                 else:
-                    _is_network_error = agent.is_block_response(exc)
+                    # FIX: pass str(exc) — some subclasses call content.lower() directly
+                    # without a str() cast; passing the raw exception would raise
+                    # AttributeError: 'XxxError' object has no attribute 'lower'.
+                    _is_network_error = agent.is_block_response(str(exc))
 
                 # Determine interruption reason for telemetry
                 if _is_code_error:
@@ -1005,10 +1008,17 @@ class HybridAutomationEngine:
     async def search_google_ai(
         self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None
     ) -> Optional[str]:
-        """Legacy AI search fallback."""
-        return await self._execute_with_waterfall(
-            "search_google_ai", prompt, ai_mode_url=ai_mode_url, row=row
-        )
+        """Legacy entry point — now delegates to search_google_ai_mode.
+
+        Previously this dispatched _execute_with_waterfall("search_google_ai", ...)
+        which caused a guaranteed NotImplementedError on EVERY tier agent (none of
+        them implement the bare 'search_google_ai' method).  The waterfall would
+        then fast-exhaust all 10 tiers, wasting time and logging misleading errors.
+
+        FIX: Route directly to search_google_ai_mode, which is the canonically
+        implemented method across all tier agents.
+        """
+        return await self.search_google_ai_mode(prompt, ai_mode_url=ai_mode_url, row=row)
 
     async def search_google_ai_interactive(
         self, prompt: str, ai_mode_url: Optional[str] = None, row: Optional[Any] = None

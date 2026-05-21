@@ -2,7 +2,7 @@
 """
 scripts/consolidate_results.py
 
-Collects all _AUDIT.json files from output/ and combines them 
+Collects all _AUDIT.json files from output/ and combines them
 into a single Master_Results.xlsx file.
 Useful for finalizing a big batch processing.
 """
@@ -23,25 +23,26 @@ from utils.logger import get_logger
 
 logger = get_logger("Consolidator")
 
+
 def consolidate():
-    output_dir = config.WORK_DIR.glob("**/output") # Find all outputs under WORK
+    output_dir = config.WORK_DIR.glob("**/output")  # Find all outputs under WORK
     # More specifically, we check ARCHIVE and output folders
     search_dirs = [config.OUTPUT_ROOT, config.WORK_DIR / "ARCHIVE"]
-    
+
     json_files = []
     for d in search_dirs:
         if d.exists():
             json_files.extend(glob.glob(str(d / "**" / "*.json"), recursive=True))
-    
+
     if not json_files:
         logger.warning(f"No .json files found in {config.WORK_DIR}.")
         return
 
     logger.info(f"🔍 Found {len(json_files)} audit files. Merging...")
-    
+
     all_rows = []
-    seen_identifiers = set() # Store SIREN or (NOM+ADR) to deduplicate
-    
+    seen_identifiers = set()  # Store SIREN or (NOM+ADR) to deduplicate
+
     for jf in json_files:
         try:
             with open(jf, "r", encoding="utf-8") as f:
@@ -50,25 +51,31 @@ def consolidate():
                     # We only care about DONE records for the final master
                     if record.get("status") != "DONE" and not record.get("phones", {}).get("main"):
                         continue
-                    
+
                     # --- Deduplication Logic ---
                     raw = record.get("original_data", {})
-                    siren = raw.get("siren") or raw.get("siret") or record.get("enriched_data", {}).get("siren", {}).get("value")
+                    siren = (
+                        raw.get("siren")
+                        or raw.get("siret")
+                        or record.get("enriched_data", {}).get("siren", {}).get("value")
+                    )
                     nom = raw.get("raison_sociale") or raw.get("nom")
                     adr = raw.get("adresse")
-                    
+
                     identifier = None
                     if siren:
                         identifier = str(siren).strip().replace(" ", "")
                     elif nom:
-                        identifier = f"{str(nom).strip().lower()}_{str(adr).strip().lower() if adr else ''}"
-                    
+                        identifier = (
+                            f"{str(nom).strip().lower()}_{str(adr).strip().lower() if adr else ''}"
+                        )
+
                     if identifier:
                         if identifier in seen_identifiers:
-                            continue # Skip duplicate
+                            continue  # Skip duplicate
                         seen_identifiers.add(identifier)
                     # ---------------------------
-                        
+
                     # Reconstruct an ExcelRow-like object for the writer
                     class MockRow:
                         def __init__(self, rec):
@@ -78,7 +85,7 @@ def consolidate():
                             self.status = rec.get("status")
                             self.enriched_fields = rec.get("enriched_data", {})
                             self.row_index = rec.get("row_index", 0)
-                            
+
                     all_rows.append(MockRow(record))
         except Exception as e:
             logger.error(f"Failed to read {jf}: {e}")
@@ -88,12 +95,13 @@ def consolidate():
         return
 
     logger.info(f"✅ Collected {len(all_rows)} successful leads.")
-    
+
     master_path = config.OUTPUT_ROOT / f"MASTER_CONSOLIDATED_{len(all_rows)}_LEADS.xlsx"
     save_subset_to_excel(all_rows, master_path)
-    
+
     logger.info(f"🏆 Master Consolidated Excel created: {master_path}")
     print(f"\n✨ Success! Master file generated: {master_path}")
+
 
 if __name__ == "__main__":
     consolidate()

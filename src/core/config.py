@@ -6,10 +6,12 @@
 ║  for basic setup.                                                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
+
 from typing import Any, Optional
 
 import os
 from pathlib import Path
+
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -25,6 +27,7 @@ except ImportError:
                     k, v = line.strip().split("=", 1)
                     os.environ.setdefault(k, v)
         return True
+
 
 # Load environment variables from .env file (if it exists)
 load_dotenv()
@@ -60,26 +63,26 @@ os.environ["XDG_DATA_HOME"] = str(XDG_DATA_HOME)
 INCOMING_DIR = Path(os.getenv("INCOMING_DIR", str(WORK_DIR / "INCOMING")))
 
 # The internal processing folders. The agent watches these buckets.
-INPUT_DIR       = WORK_DIR
-INPUT_STD_DIR   = WORK_DIR / "STD"
-INPUT_SIR_DIR   = WORK_DIR / "SIREN"
-INPUT_RS_DIR    = WORK_DIR / "RS"
+INPUT_DIR = WORK_DIR
+INPUT_STD_DIR = WORK_DIR / "STD"
+INPUT_SIR_DIR = WORK_DIR / "SIREN"
+INPUT_RS_DIR = WORK_DIR / "RS"
 INPUT_OTHER_DIR = WORK_DIR / "OTHERS"
 
 # ── LIVE OUTPUTS ───────────────────────────────────────────────
-OUTPUT_ROOT    = WORK_DIR / "ARCHIVE"
+OUTPUT_ROOT = WORK_DIR / "ARCHIVE"
 
 # ── FINAL ARCHIVES ─────────────────────────────────────────────
 ARCHIVE_BACKUP_DIR = OUTPUT_ROOT / "BACKUP"
 OUTPUT_SUCCEED_DIR = OUTPUT_ROOT / "SUCCEED"
-OUTPUT_FAILED_DIR  = OUTPUT_ROOT / "FAILED"
+OUTPUT_FAILED_DIR = OUTPUT_ROOT / "FAILED"
 
 # ── DAILY FUSION ── (safe isolated folder, NEVER inside input queues) ──
 # Daily per-folder fusion files (e.g. STD_2026-05-20.xlsx) go here.
 # CRITICAL: must NOT point to WORK/STD or WORK/SIREN — those are watched
 # input queues and the watchdog would re-ingest fusion files as new inputs.
-DAILY_FUSION_DIR   = OUTPUT_ROOT / "DAILY_FUSION"
-CHECKPOINTS_DIR    = WORK_DIR / "CHECKPOINTS"
+DAILY_FUSION_DIR = OUTPUT_ROOT / "DAILY_FUSION"
+CHECKPOINTS_DIR = WORK_DIR / "CHECKPOINTS"
 ARCHIVED_CHECKPOINTS_DIR = CHECKPOINTS_DIR / "archived_json"
 
 # ── READY queue — files moved here after pre-processing, before agent pickup ──
@@ -87,27 +90,30 @@ ARCHIVED_CHECKPOINTS_DIR = CHECKPOINTS_DIR / "archived_json"
 READY_DIR = WORK_DIR / "READY"
 
 from common.fs import safe_mkdir as _safe_mkdir_cfg
+
 _safe_mkdir_cfg(CHECKPOINTS_DIR)
 _safe_mkdir_cfg(ARCHIVED_CHECKPOINTS_DIR)
 _safe_mkdir_cfg(READY_DIR)
-_safe_mkdir_cfg(DAILY_FUSION_DIR)   # Safe fusion output — never inside input queues
+_safe_mkdir_cfg(DAILY_FUSION_DIR)  # Safe fusion output — never inside input queues
 _safe_mkdir_cfg(OUTPUT_SUCCEED_DIR)
 _safe_mkdir_cfg(OUTPUT_FAILED_DIR)
 _safe_mkdir_cfg(ARCHIVE_BACKUP_DIR)
 
 # Compatibility aliases
-ARCHIVE_DIR        = ARCHIVE_BACKUP_DIR
+ARCHIVE_DIR = ARCHIVE_BACKUP_DIR
 OUTPUT_ARCHIVE_DIR = OUTPUT_SUCCEED_DIR
 
 # Log files go here
 LOG_DIR = Path(os.getenv("LOG_DIR", str(BASE_DIR / "logs")))
 from common.fs import safe_mkdir as _safe_mkdir_cfg
+
 _safe_mkdir_cfg(LOG_DIR)
 
 # ── OUTPUT SETTINGS ──
 # The column name for the agent's processing result (Done, No Tel, etc.)
 # We use 'Etat_IA' to avoid confusion with original 'Statut' (Active/Inactive) columns.
 STATUS_COLUMN_NAME = os.getenv("STATUS_COLUMN_NAME", "Etat_IA")
+
 
 def get_output_dir(input_folder_name: str) -> Path:
     """
@@ -122,6 +128,7 @@ def get_output_dir(input_folder_name: str) -> Path:
     Safe location: WORK/ARCHIVE/DAILY_FUSION/{input_folder_name}/
     """
     from common.fs import safe_mkdir
+
     path = DAILY_FUSION_DIR / input_folder_name
     safe_mkdir(path)
     return path
@@ -130,7 +137,7 @@ def get_output_dir(input_folder_name: str) -> Path:
 # ── Parallelism & Professional Throttling ──
 # MAX_CONCURRENT_WORKERS = number of simultaneous browser windows
 MAX_CONCURRENT_WORKERS = int(os.getenv("MAX_CONCURRENT_WORKERS", "2"))
-BROWSER_USE_SANDBOX    = os.getenv("BROWSER_USE_SANDBOX", "true").lower() == "true"
+BROWSER_USE_SANDBOX = os.getenv("BROWSER_USE_SANDBOX", "true").lower() == "true"
 
 # ── HDD OPTIMIZATION ──
 # How often (in rows) the agent saves the Excel file back to disk.
@@ -159,23 +166,23 @@ FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
 # ── LAYER 0 — Ingest LangGraph ──────────────────────────────────────────
 # Controls the LangGraph ingest state machine (run/supervisor.py).
 # When False, supervisor falls back to a plain watchdog (like ingest.py).
-LAYER0_ENABLED              = os.getenv("LAYER0_ENABLED", "true").lower() == "true"
+LAYER0_ENABLED = os.getenv("LAYER0_ENABLED", "true").lower() == "true"
 
 # ── LAYER 2 — Social URL Fallback LangGraph ─────────────────────────────
 # Activates after Layer 1 waterfall is exhausted with no phone found.
 # Scrapes Facebook, LinkedIn, and company website using LangChain tools.
-LAYER2_ENABLED              = os.getenv("LAYER2_ENABLED", "true").lower() == "true"
+LAYER2_ENABLED = os.getenv("LAYER2_ENABLED", "true").lower() == "true"
 # Comma-separated list of source types Layer 2 is allowed to scrape.
-LAYER2_ENABLED_SOURCES      = os.getenv("LAYER2_ENABLED_SOURCES", "facebook,linkedin,website")
+LAYER2_ENABLED_SOURCES = os.getenv("LAYER2_ENABLED_SOURCES", "facebook,linkedin,website")
 # Maximum URLs to scrape per source type (bounds total Layer 2 time).
-LAYER2_MAX_URLS_PER_SOURCE  = int(os.getenv("LAYER2_MAX_URLS_PER_SOURCE", "2"))
+LAYER2_MAX_URLS_PER_SOURCE = int(os.getenv("LAYER2_MAX_URLS_PER_SOURCE", "2"))
 # Hard timeout (seconds) for the entire Layer 2 graph per row.
-LAYER2_TIMEOUT_SEC          = float(os.getenv("LAYER2_TIMEOUT_SEC", "30"))
+LAYER2_TIMEOUT_SEC = float(os.getenv("LAYER2_TIMEOUT_SEC", "30"))
 
 
 # Jina Reader (Tier 7 - Benchmark)
 JINA_ENABLED = os.getenv("JINA_ENABLED", "false").lower() == "true"
-JINA_API_KEY = os.getenv("JINA_API_KEY", "") # Optional for public API
+JINA_API_KEY = os.getenv("JINA_API_KEY", "")  # Optional for public API
 
 # Crawlee (Tier 8 - Benchmark)
 CRAWLEE_ENABLED = os.getenv("CRAWLEE_ENABLED", "false").lower() == "true"
@@ -212,16 +219,20 @@ RESUME_FROM_CHECKPOINT = os.getenv("RESUME_FROM_CHECKPOINT", "true").lower() == 
 TERMINAL_STATUSES: frozenset = frozenset({"DONE", "NO TEL", "NO_TEL", "LOW_CONF", "SKIP"})
 
 # ── Proxy Rotation (Anti-Ban) ──
-PROXY_ENABLED                  = os.getenv("PROXY_ENABLED", "true").lower() == "true"   # ON by default to solve CAPTCHA problems immediately
-PROXY_ROTATE_EVERY_N           = 5      # Rotate every 5 rows to stay fresh
-PROXY_PREEMPTIVE_ROTATE_ON_WARN  = True   # Rotate BEFORE the ban threshold is reached (at warn_threshold)
+PROXY_ENABLED = (
+    os.getenv("PROXY_ENABLED", "true").lower() == "true"
+)  # ON by default to solve CAPTCHA problems immediately
+PROXY_ROTATE_EVERY_N = 5  # Rotate every 5 rows to stay fresh
+PROXY_PREEMPTIVE_ROTATE_ON_WARN = (
+    True  # Rotate BEFORE the ban threshold is reached (at warn_threshold)
+)
 
 # ── Proxy State Machine Thresholds ──
 # State machine: HEALTHY → WARN → BAN → ROTATE
 # PROXY_PREEMPTIVE_ROTATE_ON_WARN (above) lets us rotate at WARN to avoid BAN.
-PROXY_WARN_THRESHOLD  = int(os.getenv("PROXY_WARN_THRESHOLD", "10"))   # errors before WARN state
-PROXY_BAN_THRESHOLD   = int(os.getenv("PROXY_BAN_THRESHOLD",  "13"))   # errors before BAN + rotate
-PROXY_BACKOFF_DELAYS  = [1, 2, 4, 8, 16, 32]                           # seconds (exponential backoff)
+PROXY_WARN_THRESHOLD = int(os.getenv("PROXY_WARN_THRESHOLD", "10"))  # errors before WARN state
+PROXY_BAN_THRESHOLD = int(os.getenv("PROXY_BAN_THRESHOLD", "13"))  # errors before BAN + rotate
+PROXY_BACKOFF_DELAYS = [1, 2, 4, 8, 16, 32]  # seconds (exponential backoff)
 
 # ═══════════════════════════════════════════════════════════════════
 # 🖐️  FINGERPRINT RANDOMISATION (CDP injection per session)
@@ -264,12 +275,12 @@ NAVIGATOR_PLATFORM_POOL = ["Win32", "MacIntel", "Linux x86_64"]
 # Each profile: {"mean": float, "std": float, "min": float, "max": float}
 # All values in SECONDS.
 ACTION_DELAY_PROFILES = {
-    "click":      {"mean": 0.40,  "std": 0.15, "min": 0.20, "max": 1.00},
-    "type_char":  {"mean": 0.08,  "std": 0.03, "min": 0.04, "max": 0.30},
-    "submit":     {"mean": 1.50,  "std": 0.50, "min": 0.80, "max": 3.00},
-    "navigate":   {"mean": 2.50,  "std": 0.80, "min": 1.00, "max": 6.00},
-    "scroll":     {"mean": 0.30,  "std": 0.10, "min": 0.10, "max": 0.80},
-    "read_wait":  {"mean": 4.00,  "std": 1.50, "min": 2.00, "max": 9.00},
+    "click": {"mean": 0.40, "std": 0.15, "min": 0.20, "max": 1.00},
+    "type_char": {"mean": 0.08, "std": 0.03, "min": 0.04, "max": 0.30},
+    "submit": {"mean": 1.50, "std": 0.50, "min": 0.80, "max": 3.00},
+    "navigate": {"mean": 2.50, "std": 0.80, "min": 1.00, "max": 6.00},
+    "scroll": {"mean": 0.30, "std": 0.10, "min": 0.10, "max": 0.80},
+    "read_wait": {"mean": 4.00, "std": 1.50, "min": 2.00, "max": 10.00},
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -278,14 +289,14 @@ ACTION_DELAY_PROFILES = {
 # How many times to attempt reconnection before giving up on a row.
 BROWSER_MAX_RECONNECT_ATTEMPTS = int(os.getenv("BROWSER_MAX_RECONNECT_ATTEMPTS", "3"))
 # Timeout in seconds to detect a stale (unresponsive) page
-BROWSER_STALE_TIMEOUT_SEC      = int(os.getenv("BROWSER_STALE_TIMEOUT_SEC", "15"))
+BROWSER_STALE_TIMEOUT_SEC = int(os.getenv("BROWSER_STALE_TIMEOUT_SEC", "15"))
 # Max seconds to wait for any browser tier to start (e.g. Driver() constructor).
 # If exceeded, the tier is skipped and the HybridEngine falls through to the next.
 # Set lower in docker-compose env to fail faster when Chrome 147 hangs on UC attach.
-BROWSER_STARTUP_TIMEOUT_SEC    = float(os.getenv("BROWSER_STARTUP_TIMEOUT_SEC", "90"))
+BROWSER_STARTUP_TIMEOUT_SEC = float(os.getenv("BROWSER_STARTUP_TIMEOUT_SEC", "90"))
 
 # Network speed multiplier for timeouts and delays (1.0 = normal, 2.0 = 2x slower internet, etc.)
-NETWORK_SPEED_MULTIPLIER       = float(os.getenv("NETWORK_SPEED_MULTIPLIER", "1.0"))
+NETWORK_SPEED_MULTIPLIER = float(os.getenv("NETWORK_SPEED_MULTIPLIER", "1.0"))
 
 # ═══════════════════════════════════════════════════════════════════
 # 🤖  CAPTCHA SOLVER  (optional — works without API keys)
@@ -297,8 +308,8 @@ NETWORK_SPEED_MULTIPLIER       = float(os.getenv("NETWORK_SPEED_MULTIPLIER", "1.
 #   CAPTCHA_SOLVER=2captcha          (or "capsolver")
 #   CAPTCHA_API_KEY=your_key_here
 #
-CAPTCHA_SOLVER  = os.getenv("CAPTCHA_SOLVER", "manual")   # "manual" | "2captcha" | "capsolver"
-CAPTCHA_API_KEY = os.getenv("CAPTCHA_API_KEY", "")        # Leave blank to use manual mode
+CAPTCHA_SOLVER = os.getenv("CAPTCHA_SOLVER", "manual")  # "manual" | "2captcha" | "capsolver"
+CAPTCHA_API_KEY = os.getenv("CAPTCHA_API_KEY", "")  # Leave blank to use manual mode
 
 # ══ Tier Classification (docs/Gemini.md blueprint) ───────────────────────────
 #   Tier 1 → (Reserved)
@@ -309,11 +320,18 @@ CAPTCHA_API_KEY = os.getenv("CAPTCHA_API_KEY", "")        # Leave blank to use m
 #   Tier 6 → Crawl4AIAgent      (managed JS rendering, e-commerce)
 #   Tier 7 → CamoufoxAgent      (Firefox anti-detect, last resort)
 HYBRID_TIER2_DOMAINS = [
-    "cloudflare", "linkedin.com", "facebook.com",
-    "instagram.com", "leboncoin.fr",
+    "cloudflare",
+    "linkedin.com",
+    "facebook.com",
+    "instagram.com",
+    "leboncoin.fr",
+    "pagejaune.fr",
 ]
 HYBRID_TIER3_DOMAINS = [
-    "amazon.", "zalando.", "fnac.com", "cdiscount.com",
+    "amazon.",
+    "zalando.",
+    "fnac.com",
+    "cdiscount.com",
 ]
 # Engine to use when no explicit decision is made (fallback default)
 # Tier 1 (SeleniumBase UC) is the new primary entry point per docs/Gemini.md
@@ -325,10 +343,10 @@ SELENIUM_ENABLED = os.getenv("SELENIUM_ENABLED", "false").lower() == "true"
 # ── Tier 1: SeleniumBase UC Driver ──────────────────────────────────────
 # Per docs/Gemini.md: "Use Driver(uc=True, headless=False)"
 # "Ne jamais utiliser headless=True avec le mode UC/CDP sur Linux"
-SELENIUMBASE_ENABLED         = os.getenv("SELENIUMBASE_ENABLED", "true").lower() == "true"
+SELENIUMBASE_ENABLED = os.getenv("SELENIUMBASE_ENABLED", "true").lower() == "true"
 
 # ── Tier 4: CloakBrowser (Supreme Stealth — C++ patched) ────────────────
-CLOAKBROWSER_ENABLED         = os.getenv("CLOAKBROWSER_ENABLED", "true").lower() == "true"
+CLOAKBROWSER_ENABLED = os.getenv("CLOAKBROWSER_ENABLED", "true").lower() == "true"
 
 # Reconnect-time (seconds) after a Turnstile/Cloudflare challenge.
 # Gemini.md §2: "Toujours inclure reconnect_time si un défi Turnstile est suspecte."
@@ -357,10 +375,9 @@ MAX_WATERFALL_TIER = int(os.getenv("MAX_WATERFALL_TIER", "10"))
 USE_FIRECRAWL_FALLBACK = os.getenv("USE_FIRECRAWL_FALLBACK", "false").lower() == "true"
 
 # ── Obsolete / Fail-safe (For backward compatibility) ──
-# This is no longer used by the Hybrid Waterfall engine but kept as a 
+# This is no longer used by the Hybrid Waterfall engine but kept as a
 # fail-safe to prevent AttributeError from old script references.
 BROWSER_ENGINE = "hybrid"
-
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -385,12 +402,14 @@ BROWSER_ENGINE = "hybrid"
 CHROMIUM_PROFILE_BASE = WORK_DIR / "browser_profiles"
 CHROMIUM_PROFILE_BASE.mkdir(parents=True, exist_ok=True)
 
+
 def get_worker_profile_path(worker_id: int, tier: str = "default") -> str:
     """Returns a unique, persistent profile path for a specific worker and tier."""
     name = f"worker_{worker_id}_{tier}"
     path = CHROMIUM_PROFILE_BASE / name
     path.mkdir(parents=True, exist_ok=True)
     return str(path.resolve())
+
 
 # ── Human Noise / Session Seasoning ──
 # Occasionally visiting "Trust Sites" (YouTube, Wikipedia) to build profile trust.
@@ -400,14 +419,16 @@ HUMAN_NOISE_INTERVAL = int(os.getenv("HUMAN_NOISE_INTERVAL", "500"))  # Every 50
 # ── AI Search Engine Toggle ──
 # Alternates between Google AI Mode and DuckDuckGo AI Chat every N rows to
 # distribute requests and preserve browser profile health.
-ENGINE_TOGGLE_INTERVAL = int(os.getenv("ENGINE_TOGGLE_INTERVAL", "100"))  # Switch provider every 100 rows
+ENGINE_TOGGLE_INTERVAL = int(
+    os.getenv("ENGINE_TOGGLE_INTERVAL", "100")
+)  # Switch provider every 100 rows
 FORCE_HUMAN_INTERACTIVE = os.getenv("FORCE_HUMAN_INTERACTIVE", "false").lower() == "true"
 HUMAN_NOISE_SITES = [
     "https://www.youtube.com",
     "https://www.wikipedia.org",
     "https://www.lemonde.fr",
     "https://www.interieur.gouv.fr",
-    "https://www.economie.gouv.fr"
+    "https://www.economie.gouv.fr",
 ]
 
 CHROMIUM_PROFILE_PATH = str(CHROMIUM_PROFILE_BASE)
@@ -417,6 +438,7 @@ CHROMIUM_PROFILE_PATH = str(CHROMIUM_PROFILE_BASE)
 CHROMIUM_PROFILE_NAME = os.getenv("CHROMIUM_PROFILE_NAME", "Default")
 # ── Tier 0: Selenium (Benchmark Arena) ──────────────────────────────
 SELENIUM_DISPLAY_MODE = "gui"  # "headless" or "gui"
+
 
 # ── Chrome Binary Resolution Strategy ───────────────────────────────
 # Chromium is required by Selenium, Playwright, and Crawl4AI tiers.
@@ -435,12 +457,12 @@ def find_chrome_executable() -> str:
         Absolute path string, or "" if not found (agents will fail-fast).
     """
     import platform
-    
+
     # 1. Explicit Override (Loaded from .env by python-dotenv)
     env_path = os.getenv("CHROMIUM_BINARY_PATH")
     if env_path and os.path.exists(env_path):
         return env_path
-        
+
     # 2. Docker Context
     if os.path.exists("/.dockerenv") or os.environ.get("DOCKER_ENV"):
         # We prioritize Patchright/Playwright Chromium (stock layout for SeleniumBase UC).
@@ -471,13 +493,26 @@ def find_chrome_executable() -> str:
     system = platform.system()
     if system == "Windows":
         paths = [
-            os.path.join(os.environ.get("PROGRAMFILES", "C:\\Program Files"), "Google\\Chrome\\Application\\chrome.exe"),
-            os.path.join(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"), "Google\\Chrome\\Application\\chrome.exe"),
-            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google\\Chrome\\Application\\chrome.exe"),
+            os.path.join(
+                os.environ.get("PROGRAMFILES", "C:\\Program Files"),
+                "Google\\Chrome\\Application\\chrome.exe",
+            ),
+            os.path.join(
+                os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"),
+                "Google\\Chrome\\Application\\chrome.exe",
+            ),
+            os.path.join(
+                os.environ.get("LOCALAPPDATA", ""), "Google\\Chrome\\Application\\chrome.exe"
+            ),
         ]
     elif system == "Linux":
-        paths = ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome-stable"]
-    elif system == "Darwin": # macOS
+        paths = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/google-chrome-stable",
+        ]
+    elif system == "Darwin":  # macOS
         paths = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
     else:
         paths = []
@@ -485,13 +520,14 @@ def find_chrome_executable() -> str:
     for p in paths:
         if os.path.exists(p):
             return p
-            
+
     # 4. Fallback: CloakBrowser Stealth Binary
     cloak_path = find_cloak_binary()
     if cloak_path:
         return cloak_path
 
     return ""
+
 
 def find_cloak_binary() -> str:
     """
@@ -501,7 +537,7 @@ def find_cloak_binary() -> str:
     import subprocess
     import sys
     import shutil
-    
+
     # 0. Check for explicit environment override (Highest priority)
     env_path = os.environ.get("CLOAKBROWSER_BINARY_PATH")
     if env_path and os.path.exists(env_path):
@@ -511,13 +547,17 @@ def find_cloak_binary() -> str:
     try:
         res = subprocess.run(
             [sys.executable, "-m", "cloakbrowser", "info"],
-            capture_output=True, text=True, timeout=2
+            capture_output=True,
+            text=True,
+            timeout=2,
         )
         for line in res.stdout.splitlines():
             if any(k in line for k in ["Binary:", "Path:", "Executable:"]):
-                p = line.split(":", 1)[1].strip().replace("'", "").replace("\"", "")
-                if os.path.exists(p): return p
-    except: pass
+                p = line.split(":", 1)[1].strip().replace("'", "").replace('"', "")
+                if os.path.exists(p):
+                    return p
+    except:
+        pass
 
     # 2. Try standalone CLI if in PATH
     cloak_cli = shutil.which("cloakbrowser")
@@ -527,21 +567,28 @@ def find_cloak_binary() -> str:
             for line in res.stdout.splitlines():
                 if "Binary:" in line or "Path:" in line:
                     p = line.split(":", 1)[1].strip()
-                    if os.path.exists(p): return p
-        except: pass
+                    if os.path.exists(p):
+                        return p
+        except:
+            pass
 
     # 3. Direct cache lookup (standard installation paths)
     import glob
+
     home = Path.home()
     candidates = [
         home / ".cloakbrowser" / "chrome-linux" / "chrome",
         home / ".cache" / "cloakbrowser" / "chrome-linux" / "chrome",
-        Path("/usr/local/bin/cloakbrowser-chromium"), # Heuristic for some custom builds
-        WORK_DIR / "cloakbrowser" / "chrome-linux" / "chrome", # Project-local writable cache
+        Path("/usr/local/bin/cloakbrowser-chromium"),  # Heuristic for some custom builds
+        WORK_DIR / "cloakbrowser" / "chrome-linux" / "chrome",  # Project-local writable cache
     ]
-    
+
     # Add glob candidates for versioned directories
-    for base_dir in [home / ".cloakbrowser", home / ".cache" / "cloakbrowser", WORK_DIR / "cloakbrowser"]:
+    for base_dir in [
+        home / ".cloakbrowser",
+        home / ".cache" / "cloakbrowser",
+        WORK_DIR / "cloakbrowser",
+    ]:
         if base_dir.exists():
             for match in glob.glob(str(base_dir / "chromium-*" / "chrome")):
                 candidates.append(Path(match))
@@ -550,19 +597,22 @@ def find_cloak_binary() -> str:
     custom_cache = os.environ.get("CLOAKBROWSER_CACHE_DIR")
     if custom_cache:
         c_path = Path(custom_cache) / "chrome-linux" / "chrome"
-        if c_path.exists(): return str(c_path.resolve())
+        if c_path.exists():
+            return str(c_path.resolve())
 
     for c in candidates:
         try:
-            if c.exists(): return str(c.resolve())
-        except: continue
+            if c.exists():
+                return str(c.resolve())
+        except:
+            continue
     return ""
+
 
 # Source of truth for all agents
 CLOAKBROWSER_BINARY_PATH = find_cloak_binary()
 
 CHROMIUM_BINARY_PATH = find_chrome_executable()
-
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -571,19 +621,19 @@ CHROMIUM_BINARY_PATH = find_chrome_executable()
 
 # Primary engine  →  Google AI bar (AI Overviews / SGE)
 # Fallback engine →  Google Gemini (Deep Search)
-PRIMARY_ENGINE  = "google"               # Google Search (SGE / Knowledge Graph)
-FALLBACK_ENGINE = "gemini"               # Google Gemini (Deep Search)
+PRIMARY_ENGINE = "google"  # Google Search (SGE / Knowledge Graph)
+FALLBACK_ENGINE = "gemini"  # Google Gemini (Deep Search)
 
-GOOGLE_URL        = "https://www.google.com"
-GEMINI_URL        = "https://gemini.google.com"
+GOOGLE_URL = "https://www.google.com"
+GEMINI_URL = "https://gemini.google.com"
 
 # ── LOCAL LLM (OLLAMA) ──
-OLLAMA_ENABLED  = os.getenv("OLLAMA_ENABLED", "false").lower() == "true"
-OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
+OLLAMA_ENABLED = os.getenv("OLLAMA_ENABLED", "false").lower() == "true"
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 # For Docker Desktop, the host is usually at host.docker.internal
-_ollama_def     = "http://host.docker.internal:11434" if DOCKER_ENV else "http://localhost:11434"
+_ollama_def = "http://host.docker.internal:11434" if DOCKER_ENV else "http://localhost:11434"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", _ollama_def)
-OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "60"))
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "60"))
 
 # ── AI Mode — direct URL that activates the 'AI Mode' tab in Google ──
 # The `aep=22` + `udm=50` parameters bypass standard results and go straight
@@ -591,12 +641,11 @@ OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "60"))
 GOOGLE_AI_MODE_URL = "https://www.google.com/search?udm=50&aep=22&nfpr=1&no_sw_cr=1&gl=fr&hl=fr&q="
 
 
-
 # The AI Mode search input element
 GOOGLE_AI_MODE_INPUT = "textarea[name='q'], div[contenteditable='true'], .nojsq"
 
 # Maximum seconds to wait for the AI answer to appear on screen
-AI_RESPONSE_TIMEOUT = 30   # seconds (Optimized for performance fail-fast)
+AI_RESPONSE_TIMEOUT = 30  # seconds (Optimized for performance fail-fast)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -606,12 +655,15 @@ AI_RESPONSE_TIMEOUT = 30   # seconds (Optimized for performance fail-fast)
 # PROMPT STYLE: 'caveman' (75% token saving) | 'verbose' (Standard)
 PROMPT_STYLE = os.getenv("PROMPT_STYLE", "caveman").lower()
 
+
 def _opt(prompt: str) -> str:
     """Helper to optimize if style is caveman."""
     if PROMPT_STYLE == "caveman":
         from infra.intelligence.prompt_optimizer import caveman_optimize
+
         return caveman_optimize(prompt)
     return prompt
+
 
 # {nom}     → replaced by company name (Raison Sociale) or SIREN
 # {adresse} → replaced by the company address
@@ -631,7 +683,9 @@ AGENT_PHONE_PROMPT_TEMPLATE = _opt(
 
 # ── SQO (Search Query Optimization) ──
 # Domains that satisfy EEAT (Expertise, Experience, Authoritativeness, Trustworthiness)
-SQO_TRUSTED_DOMAINS = "site:pappers.fr OR site:societe.com OR site:infogreffe.fr OR site:linkedin.com"
+SQO_TRUSTED_DOMAINS = (
+    "site:pappers.fr OR site:societe.com OR site:infogreffe.fr OR site:linkedin.com"
+)
 SQO_CONTACT_KEYWORDS = '("téléphone" OR "contact" OR "siège social")'
 
 # ══════════════════════════════════════════════════════════════════
@@ -750,26 +804,36 @@ MAX_DELAY_SECONDS = 20
 
 # How long (seconds) the agent PAUSES and waits for YOU to solve a CAPTCHA
 # manually in the browser window before moving on to the next row.
-CAPTCHA_WAIT_SECONDS = 180   # 3 minutes
+CAPTCHA_WAIT_SECONDS = 180  # 3 minutes
 
 # Rotate the browser's User-Agent string on each new browser session
 ROTATE_USER_AGENT = True
 
 # Type queries character by character (mimics human typing speed)
-HUMAN_TYPING          = True
-TYPING_MIN_DELAY_SEC  = 0.02   # min seconds per character
-TYPING_MAX_DELAY_SEC  = 0.08   # max seconds per character
+HUMAN_TYPING = True
+TYPING_MIN_DELAY_SEC = 0.02  # min seconds per character
+TYPING_MAX_DELAY_SEC = 0.08  # max seconds per character
 
 # Maximum consecutive CAPTCHA blocks before the agent pauses everything
 # and sends an alert to the log + console
 MAX_CONSECUTIVE_CAPTCHA = 8
 
 # ── Contact discovery keywords (Industrialized for French B2B) ──
-CONTACT_KEYWORDS = ["contact", "propos", "about", "mentions", "siège", "adresse", "téléphone", "equipe", "legal"]
+CONTACT_KEYWORDS = [
+    "contact",
+    "propos",
+    "about",
+    "mentions",
+    "siège",
+    "adresse",
+    "téléphone",
+    "equipe",
+    "legal",
+]
 SOCIAL_ABOUT_PATTERNS = {
     "facebook": "/about",
     "linkedin": "/about/",
-    "instagram": "/", # Bio is on main page
+    "instagram": "/",  # Bio is on main page
 }
 
 
@@ -778,9 +842,9 @@ SOCIAL_ABOUT_PATTERNS = {
 # ═══════════════════════════════════════════════════════════════════
 # Unified patterns for French phone numbers (Standard, Mobile, International)
 PHONE_PATTERNS = [
-    r'(?<!\d)\+33[\s\.\-]?[1-9](?:[\s\.\-]?\d{2}){4}(?!\d)',   # +33 X XX XX XX XX
-    r'(?<!\d)0[1-9](?:[\s\.\-]?\d{2}){4}(?!\d)',                # 0X XX XX XX XX
-    r'\b0[1-9]\d{8}\b',                                         # 10 digits starting with 0
+    r"(?<!\d)\+33[\s\.\-]?[1-9](?:[\s\.\-]?\d{2}){4}(?!\d)",  # +33 X XX XX XX XX
+    r"(?<!\d)0[1-9](?:[\s\.\-]?\d{2}){4}(?!\d)",  # 0X XX XX XX XX
+    r"\b0[1-9]\d{8}\b",  # 10 digits starting with 0
 ]
 
 # ═══════════════════════════════════════════════════════════════════
@@ -792,25 +856,24 @@ PHONE_PATTERNS = [
 # Add new offenders here; format: digits only, no spaces.
 FAKE_PHONE_BLOCKLIST: set = {
     # Numéros factices classiques (séquentiels ou répétitifs)
-    "0123456789",   # Classique numéro démo
-    "0000000000",   # Tous les zéros
-    "1111111111",   # Tous les uns
+    "0123456789",  # Classique numéro démo
+    "0000000000",  # Tous les zéros
+    "1111111111",  # Tous les uns
     "2222222222",
     "3333333333",
-    "0333333333",   # Variante avec préfixe 03
+    "0333333333",  # Variante avec préfixe 03
     "4444444444",
     "5555555555",
     "6666666666",
     "7777777777",
     "8888888888",
     "9999999999",
-    "0102030405",   # Séquence incrémentielle
-    "0605040302",   # Séquence décrémentielle
-    "0107142857",   # Numéro factice signalé par un utilisateur
-    "0333131113",   # Numéro factice signalé par un utilisateur
-
+    "0102030405",  # Séquence incrémentielle
+    "0605040302",  # Séquence décrémentielle
+    "0107142857",  # Numéro factice signalé par un utilisateur
+    "0333131113",  # Numéro factice signalé par un utilisateur
     # Placeholders génériques
-    "0600000000",   # Placeholder mobile
+    "0600000000",  # Placeholder mobile
     "0700000000",
     "0100000000",
     "0200000000",
@@ -818,24 +881,22 @@ FAKE_PHONE_BLOCKLIST: set = {
     "0400000000",
     "0500000000",
     "0900000000",
-
     # Numéros techniques ou récurrents signalés
-    "0917189833",   # Numéro technique/répertoire récurrent
-    "0742136299",   # Numéro parasitaire répertoire (Direct Service)
-    "0714285714",   # Numéro parasitaire répertoire (Direct Service)
-    "0612136299",   # Numéro parasitaire répertoire (Direct Service)
-    "0801150323",   # Numéro parasitaire répertoire (Direct Service)
-    "0569312693",   # Numéro parasitaire répertoire (Direct Service)
-    "0399332293",   # Numéro parasitaire répertoire (Direct Service)
-    "0157425531",   # Numéro parasitaire répertoire (Direct Service)
-    "0756338884",   # Numéro parasitaire répertoire (Direct Service)
-    "0811191928",   # Numéro parasitaire répertoire (Direct Service)
-    "0800000000",   # Placeholder générique
-    "0140000000",   # Generic switchboard
-
+    "0917189833",  # Numéro technique/répertoire récurrent
+    "0742136299",  # Numéro parasitaire répertoire (Direct Service)
+    "0714285714",  # Numéro parasitaire répertoire (Direct Service)
+    "0612136299",  # Numéro parasitaire répertoire (Direct Service)
+    "0801150323",  # Numéro parasitaire répertoire (Direct Service)
+    "0569312693",  # Numéro parasitaire répertoire (Direct Service)
+    "0399332293",  # Numéro parasitaire répertoire (Direct Service)
+    "0157425531",  # Numéro parasitaire répertoire (Direct Service)
+    "0756338884",  # Numéro parasitaire répertoire (Direct Service)
+    "0811191928",  # Numéro parasitaire répertoire (Direct Service)
+    "0800000000",  # Placeholder générique
+    "0140000000",  # Generic switchboard
     # Préfixes exclusivement réservés au démarchage téléphonique (à bloquer)
     # Source: Arcep, depuis le 1er janvier 2023
-    "0162",         # Préfixe de démarchage (France métropole)
+    "0162",  # Préfixe de démarchage (France métropole)
     "0163",
     "0270",
     "0271",
@@ -848,20 +909,19 @@ FAKE_PHONE_BLOCKLIST: set = {
     "0948",
     "0949",
     # Outre-mer
-    "09475",        # Guadeloupe, Saint-Martin, Saint-Barthélemy
-    "09476",        # Guyane
-    "09477",        # Martinique
-    "09478",        # La Réunion, Mayotte
-    "09479",        # La Réunion, Mayotte
-
+    "09475",  # Guadeloupe, Saint-Martin, Saint-Barthélemy
+    "09476",  # Guyane
+    "09477",  # Martinique
+    "09478",  # La Réunion, Mayotte
+    "09479",  # La Réunion, Mayotte
     # Préfixes pour services de revente (souvent utilisés pour des arnaques)
-    "064466",       # Numéros prépayés OnOff (signalés comme scam)
+    "064466",  # Numéros prépayés OnOff (signalés comme scam)
     "064467",
     "064468",
     "064469",
     "07568",
     "07569",
-}   
+}
 
 # ═══════════════════════════════════════════════════════════════════
 # 🚫  ANTI-HALLUCINATION: NULL VALUE STRINGS
@@ -869,16 +929,44 @@ FAKE_PHONE_BLOCKLIST: set = {
 # When the AI returns any of these strings for a field, treat it as
 # EMPTY and store nothing. Case-insensitive match applied at runtime.
 NULL_VALUE_STRINGS: set = {
-    "not_found", "not found", "none", "null", "n/a", "na",
-    "non disponible", "non spécifié", "non renseigné",
-    "indisponible", "inconnu", "inconnue",
-    "non communiqué", "pas de téléphone", "pas d'information",
-    "aucun", "aucune", "aucun numéro",
-    "data_not_found", "missing", "not identified", "non trouvé", "non-disponible",
-    "information non disponible publiquement", "non identifié", "non diffusé",
-    "numéro non communiqué", "information non disponible", "non renseigné", "non renseignée",
-    "pas d'information", "pas d'info", "aucune information",
-    "", ".", "-", "_",
+    "not_found",
+    "not found",
+    "none",
+    "null",
+    "nan",
+    "N/A",
+    "n/a",
+    "na",
+    "non disponible",
+    "non spécifié",
+    "non renseigné",
+    "indisponible",
+    "inconnu",
+    "inconnue",
+    "non communiqué",
+    "pas de téléphone",
+    "pas d'information",
+    "aucun",
+    "aucune",
+    "aucun numéro",
+    "data_not_found",
+    "missing",
+    "not identified",
+    "non trouvé",
+    "non-disponible",
+    "information non disponible publiquement",
+    "non identifié",
+    "non diffusé",
+    "numéro non communiqué",
+    "information non disponible",
+    "non renseigné",
+    "non renseignée",
+    "pas d'information",
+    "pas d'info",
+    "aucune information",
+    ".",
+    "-",
+    "_",
 }
 
 
@@ -899,8 +987,9 @@ FILE_SETTLE_DELAY = int(os.getenv("FILE_SETTLE_DELAY", "3"))
 
 # ── Geolocation (for search results accuracy) ──
 SET_GEOLOCATION = True
-DEFAULT_LAT     = 48.8566   # Paris
-DEFAULT_LON     = 2.3522
+DEFAULT_LAT = 48.8566  # Paris
+DEFAULT_LON = 2.3522
+
 
 # ═══════════════════════════════════════════════════════════════════
 # 🔒 SECRETS VALIDATION (Phase 3 Hardening)
@@ -911,7 +1000,7 @@ def validate_secrets():
     and required .env keys are present before starting.
     """
     import logging
-    
+
     # 1. Validate CAPTCHA API combination
     if CAPTCHA_SOLVER in ("2captcha", "capsolver") and not CAPTCHA_API_KEY:
         logging.warning(
@@ -919,5 +1008,6 @@ def validate_secrets():
             "but CAPTCHA_API_KEY is missing in .env! "
             "Will fallback to manual mode."
         )
+
 
 validate_secrets()

@@ -156,11 +156,13 @@ class BaseBrowserAgent:
         raise NotImplementedError
 
     async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
+        """Legacy AI search entry point.
+
+        Default implementation delegates to search_google_ai_mode so that any
+        tier that hasn't explicitly aliased it still resolves correctly.
+        Subclasses may override if their search logic genuinely differs.
         """
-        Legacy AI search fallback.
-        To be implemented by child classes.
-        """
-        raise NotImplementedError
+        return await self.search_google_ai_mode(prompt, **kwargs)
 
     async def search_gemini_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """

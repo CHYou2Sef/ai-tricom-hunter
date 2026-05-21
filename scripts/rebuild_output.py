@@ -1,4 +1,7 @@
+import os
 import sys
+from pathlib import Path
+
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -8,6 +11,7 @@ import config
 OUTPUT_ROOT = config.OUTPUT_ROOT
 OUTPUT_SUCCEED_DIR = config.OUTPUT_SUCCEED_DIR
 OUTPUT_FAILED_DIR = config.OUTPUT_FAILED_DIR
+
 
 def reconstruct_from_json(json_file_path: Path):
     """
@@ -39,9 +43,9 @@ def reconstruct_from_json(json_file_path: Path):
         original = row.get("original_data", {})
         phones = row.get("phones", {})
         enriched = row.get("enriched_data", {})
-        
+
         status = row.get("status", "NO TEL")
-        
+
         # Determine strict status
         if phones.get("main"):
             status = "Done"
@@ -51,20 +55,20 @@ def reconstruct_from_json(json_file_path: Path):
             status = "Skip"
         elif status == "DONE":
             status = "Done"
-            
+
         row_dict = {}
         # 1. Original Data
         for k, v in original.items():
             row_dict[k] = v
-            
+
         # 2. AI Phone Data
         row_dict["AI_Phone"] = phones.get("main", "")
         row_dict["AI_Agent_Phone"] = phones.get("agent", "")
-        
-        # 3. Handle Etat column gracefully 
+
+        # 3. Handle Etat column gracefully
         status_key = "Etat"
         row_dict[status_key] = status
-        
+
         # 4. Enriched Data
         for k in enriched_keys:
             row_dict[f"AI_{k.upper()}"] = enriched.get(k, {}).get("value", "")
@@ -76,38 +80,40 @@ def reconstruct_from_json(json_file_path: Path):
 
     import openpyxl
     from openpyxl import Workbook
-    
+
     base_name = json_file_path.stem.replace("_AUDIT", "")
     # Remove bad prefixes (RETRY, DONE)
     import re
-    clean_name = re.sub(r'^(RETRY_)+|(_DONE)+|(part\d+of\d+)+', '', base_name).strip("_")
+
+    clean_name = re.sub(r"^(RETRY_)+|(_DONE)+|(part\d+of\d+)+", "", base_name).strip("_")
 
     def save_rows(rows, target_dir, suffix):
-        if not rows: return
+        if not rows:
+            return
         target_dir.mkdir(parents=True, exist_ok=True)
         out_path = target_dir / f"{clean_name}{suffix}.xlsx"
-        
+
         # collect all keys dynamically
         headers = []
         for r in rows:
             for k in r.keys():
                 if k not in headers:
                     headers.append(k)
-        
+
         wb = Workbook()
         ws = wb.active
         ws.title = "Results"
         ws.append(headers)
-        
+
         for r in rows:
             ws.append([r.get(h, "") for h in headers])
-            
+
         wb.save(out_path)
         print(f"  ✅ Saved {len(rows)} rows to {out_path.parent.name}/{out_path.name}")
 
     if success_rows:
         save_rows(success_rows, OUTPUT_SUCCEED_DIR, "")
-        
+
     if failed_rows:
         save_rows(failed_rows, OUTPUT_FAILED_DIR, "_FAILED")
 
@@ -115,10 +121,11 @@ def reconstruct_from_json(json_file_path: Path):
     backup_dir = OUTPUT_ROOT / "_json_backup"
     backup_dir.mkdir(exist_ok=True)
     json_file_path.rename(backup_dir / json_file_path.name)
-    
+
+
 def main():
     print(f"🚀 Starting JSON to XLSX reconstruction in {config.WORK_DIR}")
-    
+
     found_any = False
     for root, dirs, files in os.walk(config.WORK_DIR):
         if "_json_backup" in root:
@@ -127,11 +134,12 @@ def main():
             if file.endswith("AUDIT.json") or file.endswith(".json"):
                 found_any = True
                 reconstruct_from_json(Path(root) / file)
-                
+
     if not found_any:
         print("🤷 No JSON files found to convert.")
     else:
         print("🎉 Reconstruction complete!")
+
 
 if __name__ == "__main__":
     main()

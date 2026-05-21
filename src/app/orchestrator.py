@@ -256,8 +256,18 @@ async def _worker_process_row(ctx: WorkerContext):
         try:
             agent = await _agent_pool.get()
             
-            # P0 Fix: Agents can die (Chrome crash, proxy hang).  Verify before use.
-            if hasattr(agent, 'is_alive') and not await agent.is_alive():
+            # P0 Fix: Agents can die (Chrome crash, proxy hang). Verify before use.
+            # Guard: is_alive() may raise NotImplementedError if an agent hasn't
+            # overridden the base-class stub — treat it as "alive" in that case
+            # to avoid crashing the row with a misleading AttributeError.
+            _agent_is_dead = False
+            if hasattr(agent, 'is_alive'):
+                try:
+                    _agent_is_dead = not await agent.is_alive()
+                except (NotImplementedError, AttributeError):
+                    pass  # Assume healthy; agent hasn't implemented the check
+
+            if _agent_is_dead:
                 logger.warning(f"[AgentPool] Worker dead, recreating...")
                 await agent.close()
                 from infra.browsers.hybrid_engine import HybridAutomationEngine

@@ -148,7 +148,10 @@ async def _search_and_extract_phone(row: ExcelRow, agent, query: str, source_tag
     """
     row.search_queries_used.append(query)
     logger.info(f"    ├─ [{source_tag.upper()}] Query: '{query}'")
-    content = await agent.search_google_ai(query)
+    # FIX: use search_google_ai_mode \u2014 the canonical, universally-implemented method.
+    # The legacy 'search_google_ai' name triggered NotImplementedError on every tier agent,
+    # exhausting the entire waterfall for nothing.
+    content = await agent.search_google_ai_mode(query)
     if content:
         row.raw_ai_responses.append({"text": content, "source": source_tag, "query": query})
     

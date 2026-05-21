@@ -8,13 +8,13 @@
 """
 
 import requests
-from typing import Optional, Dict, Any
+from typing import Any
 from core import config
 from core.logger import get_logger
 
 logger = get_logger(__name__)
 
-def verify_phone_neutrino(phone: str) -> Dict[str, Any]:
+def verify_phone_neutrino(phone: str) -> dict[str, Any]:
     """
     Validate a phone number using the Neutrino API.
     
