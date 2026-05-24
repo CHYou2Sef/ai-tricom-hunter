@@ -23,43 +23,59 @@ from core.logger import get_logger
 
 logger = get_logger(__name__)
 
+
 def _deep_strip(data: Any) -> Any:
     """Recursively strip all strings in a dictionary or list, including keys."""
     if isinstance(data, dict):
-        return {str(k).strip(' "\''): _deep_strip(v) for k, v in data.items()}
+        return {str(k).strip(" \"'"): _deep_strip(v) for k, v in data.items()}
     elif isinstance(data, list):
         return [_deep_strip(i) for i in data]
     elif isinstance(data, str):
         return data.strip()
     return data
 
-def parse_ai_mode_json(text: str) -> Optional[Dict[str, Any]]:
+
+def parse_ai_mode_json(text: Any) -> Optional[Dict[str, Any]]:
     """
     Extracts and parses a JSON object from a raw AI search response text.
     Handles markdown blocks and raw strings.
     """
-    if not text:
+    # Harden against upstream bugs where "text" may be None or an exception object.
+    # Returning None is safer than propagating non-string values further.
+    if text is None or not isinstance(text, str) or not text.strip():
         return None
 
     # Try to find JSON inside a code block ```json ... ```
-    json_match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL | re.IGNORECASE)
+    json_match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
     if not json_match:
-        # Try to find any JSON-like structure { ... }
-        json_match = re.search(r'(\{.*\})', text, re.DOTALL)
+        # Fallback: find any { ... } but reduce false-positives.
+        # Require that the candidate contains something that looks like a key/value pair.
+        candidate_match = re.search(r"(\{[\s\S]*?\})", text, re.DOTALL)
+        if candidate_match:
+            candidate = candidate_match.group(1)
+            has_key_like = bool(
+                re.search(r'"\s*[^\"]+\s*"\s*:', candidate)  # "key":
+                or re.search(r"'\s*[^']+\s*'\s*:", candidate)  # 'key':
+                or re.search(r"\b[a-zA-Z_][a-zA-Z0-9_]*\s*:", candidate)  # key:
+            )
+            json_match = candidate_match if has_key_like else None
 
     if json_match:
+        json_str = ""
         try:
             json_str = json_match.group(1).strip()
             # Basic cleanup for common AI formatting quirks
-            json_str = json_str.replace('\n', ' ').replace('\r', '')
+            json_str = json_str.replace("\n", " ").replace("\r", "")
             data = json.loads(json_str)
             return _deep_strip(data)
         except json.JSONDecodeError as e:
             logger.debug(f"[JSONParser] Raw JSON decode error: {e}")
             # Try a more aggressive cleanup if simple one fails
+            if not json_str:
+                return None
             try:
                 # Remove trailing commas and other common issues
-                cleaned = re.sub(r',\s*([\]}])', r'\1', json_str)
+                cleaned = re.sub(r",\s*([\]}])", r"\1", json_str)
                 data = json.loads(cleaned)
                 return _deep_strip(data)
             except Exception:

@@ -3,7 +3,7 @@
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-p no:pytest_html --disable-plugin-auto-load"
+addopts = "-p no:pytest_html -p no:seleniumbase"
 
 [tool.ruff]
 line-length = 100
