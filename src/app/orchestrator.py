@@ -169,8 +169,29 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: Fi
             p_real = is_real(valid_p)
             a_real = is_real(valid_a)
             has_phone = p_real or a_real
-            
-            is_terminal = status in ["NO TEL", "SKIP", "LOW_CONF"]
+
+            # ── Dedup-victim rescue ────────────────────────────────────────────
+            # If status==NO TEL but a phone_list exists in checkpoint (meaning
+            # the phone WAS found but blocked by GLOBAL_SET dedup), promote the
+            # best phone from phone_list so the row is rescued as DONE rather
+            # than being permanently frozen as NO TEL.
+            if not has_phone and status == "NO TEL":
+                cp_phone_list = cp_data.get("phone_list", [])
+                if cp_phone_list:
+                    # Sort by score descending, pick the best candidate
+                    best = max(cp_phone_list, key=lambda x: x.get("score", 0))
+                    candidate = normalize_phone(best.get("num", ""))
+                    if candidate and is_real(candidate):
+                        logger.info(
+                            f"[Sync] 🔓 Row {r.row_index}: rescuing dedup-victim phone "
+                            f"{candidate!r} from phone_list (score={best.get('score')})."
+                        )
+                        valid_p = candidate
+                        p_real = True
+                        has_phone = True
+                        status = "DONE"  # promote to DONE — phone genuinely found
+
+            is_terminal = status in ["NO TEL", "SKIP", "LOW_CONF", "DUPLICATE"]
             
             if has_phone or is_terminal:
                 # If we have an agent phone but no main phone, promote it
@@ -242,17 +263,24 @@ async def _execute_agent_task(ctx: WorkerContext, agent) -> None:
 
     # ── Global dedup guard ────────────────────────────────────────────────────
     # A phone collected in a PREVIOUS run (other file, previous crash restart)
-    # may already be in GLOBAL_PHONE_SET.  If so, clear it — we DO NOT want
-    # duplicate numbers appearing in the output, not even across sessions.
+    # may already be in GLOBAL_PHONE_SET.  If so, mark as DUPLICATE — distinct
+    # from genuine scrape exhaustion (NO TEL).  The phone is kept in phone_list
+    # for audit/reporting but cleared from the primary output column to avoid
+    # duplicate numbers in the final dataset.
     if ctx.row.phone:
         if ctx.progress.is_phone_duplicated(ctx.row.phone):
             logger.warning(
                 f"[Orchestrator] 🔁 Row {ctx.row.row_index}: phone "
-                f"{ctx.row.phone!r} already in GLOBAL_SET — marked NO TEL (duplicate)."
+                f"{ctx.row.phone!r} already in GLOBAL_SET — marked DUPLICATE."
             )
+            # Preserve the phone in phone_list for auditing
+            dup_entry = {"num": ctx.row.phone, "score": 99, "source": "dedup_victim"}
+            existing_list = ctx.row.enriched_fields.get("phone_list", [])
+            if not any(e.get("num") == ctx.row.phone for e in existing_list):
+                ctx.row.enriched_fields["phone_list"] = existing_list + [dup_entry]
             ctx.row.phone = None
             ctx.row.agent_phone = None
-            ctx.row.status = "NO TEL"
+            ctx.row.status = "DUPLICATE"
         else:
             # Officially register the new phone so sibling workers can't steal it
             ctx.progress.register_phone(ctx.row.phone)

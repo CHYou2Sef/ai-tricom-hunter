@@ -202,10 +202,13 @@ REPROCESS_FAILED_ROWS = os.getenv("REPROCESS_FAILED_ROWS", "true").lower() == "t
 # agent resumes EXACTLY from the last unprocessed row in the checkpoint file.
 #
 # Terminal states — NEVER re-processed regardless of REPROCESS_FAILED_ROWS:
-#   • DONE     → Phone found and validated. Final answer.
-#   • NO TEL   → Full 10-tier waterfall exhausted. No phone exists. Final answer.
-#   • LOW_CONF → SIREN mismatch detected. Kept for human review.
-#   • SKIP     → Row explicitly excluded by pre-processor.
+#   • DONE      → Phone found and validated. Final answer.
+#   • NO TEL    → Full 10-tier waterfall exhausted. No phone exists. Final answer.
+#   • LOW_CONF  → SIREN mismatch detected. Kept for human review.
+#   • SKIP      → Row explicitly excluded by pre-processor.
+#   • DUPLICATE → Phone WAS found but already exists in GLOBAL_PHONE_SET from
+#                  another file / run. Cannot appear in output. Auditable via
+#                  phone_list in the checkpoint JSON.
 #
 # Non-terminal states — re-tried on next run:
 #   • ERROR    → Agent crashed mid-row. Safe to retry.
@@ -216,7 +219,7 @@ RESUME_FROM_CHECKPOINT = os.getenv("RESUME_FROM_CHECKPOINT", "true").lower() == 
 
 # The canonical set of statuses that are 100% terminal.
 # Used by the orchestrator to build the "rows_to_process" list.
-TERMINAL_STATUSES: frozenset = frozenset({"DONE", "NO TEL", "NO_TEL", "LOW_CONF", "SKIP"})
+TERMINAL_STATUSES: frozenset = frozenset({"DONE", "NO TEL", "NO_TEL", "LOW_CONF", "SKIP", "DUPLICATE"})
 
 # ── Proxy Rotation (Anti-Ban) ──
 PROXY_ENABLED = (

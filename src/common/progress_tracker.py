@@ -241,14 +241,18 @@ class FileProgressTracker:
 
     def get_terminal_row_indices(self) -> Set[int]:
         """
-        Return the set of row indices that are in a 100%% terminal state.
+        Return the set of row indices that are in a 100% terminal state.
 
-        Terminal = DONE | NO TEL | LOW_CONF | SKIP.
+        Terminal = DONE | NO TEL | LOW_CONF | SKIP | DUPLICATE.
         These rows are NEVER re-processed on restart regardless of any config
         flag.  ERROR and PENDING are intentionally excluded so they get a
         second chance on the next run.
+
+        DUPLICATE: phone was found but already registered in GLOBAL_PHONE_SET
+        from another file or session. Cannot be placed in output; auditable via
+        phone_list in the checkpoint JSON.
         """
-        TERMINAL = {"DONE", "NO TEL", "NO_TEL", "LOW_CONF", "SKIP"}
+        TERMINAL = {"DONE", "NO TEL", "NO_TEL", "LOW_CONF", "SKIP", "DUPLICATE"}
         result: Set[int] = set()
         for key, entry in self.data.items():
             if key.startswith("__"):
