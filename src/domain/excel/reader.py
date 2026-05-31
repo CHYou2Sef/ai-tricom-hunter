@@ -327,6 +327,12 @@ def read_excel(filepath: str) -> Tuple[List[ExcelRow], dict]:
     if df.empty:
         return [], {}
 
+    # Drop "Unnamed" columns which often contain legacy state/polluted data
+    try:
+        df = df.loc[:, ~df.columns.astype(str).str.contains('^Unnamed', case=False, na=False)]
+    except Exception as e:
+        logger.warning(f"[Reader] Failed to drop Unnamed columns: {e}")
+
     # Clean headers: remove newlines, strip spaces, AND strip literal quotes
     df.columns = [str(c).replace('\n', ' ').strip(' "\'') for c in df.columns]
     headers = list(df.columns)
