@@ -31,6 +31,48 @@ from agents.enricher import enrich_row
 
 logger = get_logger(__name__)
 
+# ── Resource Guards ──────────────────────────────────────────────────────────
+# How many rows a single HybridAutomationEngine instance processes before
+# being force-recycled (closed + re-created).  Prevents Chromium memory
+# fragmentation from accumulating across hundreds of rows.
+# Override via env: WORKER_RECYCLE_EVERY=50
+WORKER_RECYCLE_EVERY: int = int(os.getenv("WORKER_RECYCLE_EVERY", "40"))
+
+# RAM high-water mark (%). If container RSS exceeds this, the next row
+# acquisition will pause until GC brings it below the threshold.
+# This prevents OOM-kills on 4 GB containers.
+RAM_HIGHWATER_PCT: float = float(os.getenv("RAM_HIGHWATER_PCT", "82"))
+
+# Timeout (seconds) for a single file processing run before the supervisor
+# cancels it and moves to the next file.
+FILE_PROCESSING_TIMEOUT_SEC: float = float(os.getenv("FILE_PROCESSING_TIMEOUT_SEC", "3600"))
+
+
+def _get_ram_pct() -> float:
+    """Return current container RSS as a % of total host RAM. Non-blocking."""
+    try:
+        import psutil
+        return psutil.virtual_memory().percent
+    except Exception:
+        return 0.0  # psutil unavailable — skip guard
+
+
+async def _wait_for_ram_headroom(threshold: float = RAM_HIGHWATER_PCT) -> None:
+    """
+    Block the calling coroutine until RAM drops below *threshold* %.
+    Called before each agent checkout so we shed load early instead of OOM.
+    """
+    ram = _get_ram_pct()
+    if ram < threshold:
+        return
+    logger.warning(
+        f"[AgentPool] 🔴 RAM at {ram:.1f}% (≥{threshold}%) — "
+        "pausing row dispatch until headroom recovers..."
+    )
+    while _get_ram_pct() >= threshold:
+        await asyncio.sleep(5)
+    logger.info(f"[AgentPool] 🟢 RAM recovered to {_get_ram_pct():.1f}% — resuming.")
+
 # ── Agent Pool ───────────────────────────────────────────────────────────
 # asyncio.Queue gives us a cheap semaphore-like pool of pre-warmed browsers.
 _agent_pool = asyncio.Queue()
@@ -245,21 +287,68 @@ async def _execute_agent_task(ctx: WorkerContext, agent) -> None:
             except Exception as e:
                 logger.debug(f"[Orchestrator] Noise generation failed: {e}")
 
+# ── Per-worker row counter (shared across pool) for forced recycling ─────────
+# Maps worker_id → number of rows processed by that agent instance.
+_worker_row_counts: Dict[int, int] = {}
+
+
+async def _get_recycled_agent(ctx: WorkerContext, stale_agent) -> Any:
+    """
+    Recycle (force-close + re-create) a HybridAutomationEngine.
+    Called when the agent has processed WORKER_RECYCLE_EVERY rows, ensuring
+    Chromium processes release fragmented heap memory back to the OS.
+    """
+    wid = getattr(stale_agent, 'worker_id', ctx.idx)
+    logger.info(
+        f"[AgentPool] ♻️  Worker #{wid} reached {WORKER_RECYCLE_EVERY}-row "
+        "recycle limit — force-closing browser and spawning fresh instance."
+    )
+    try:
+        await stale_agent.close()
+    except Exception as close_err:
+        logger.warning(f"[AgentPool] Recycle close error (worker #{wid}): {close_err}")
+
+    from infra.browsers.hybrid_engine import HybridAutomationEngine
+    fresh = HybridAutomationEngine(worker_id=wid)
+    try:
+        await fresh.start_tier(config.HYBRID_DEFAULT_TIER)
+    except Exception as start_err:
+        logger.warning(f"[AgentPool] Recycle start error (worker #{wid}): {start_err}")
+    _worker_row_counts[wid] = 0
+    logger.info(f"[AgentPool] ✅ Worker #{wid} recycled successfully.")
+    return fresh
+
+
 async def _worker_process_row(ctx: WorkerContext):
     """
     Coroutine executed by each pool worker.
-    Handles agent checkout → health check → task → checkin → save.
+    Handles:
+      • RAM high-water guard before checkout
+      • Agent health check + forced recycle every WORKER_RECYCLE_EVERY rows
+      • Task execution
+      • Atomic checkpoint persist (even on ERROR)
+      • Periodic Excel flush
     """
     async with ctx.sem:   # Limits concurrent browsers (RAM/CPU bound)
         row_start = time.perf_counter()
         agent = None
         try:
+            # ── RAM Guard: pause dispatch if memory is critically high ─────────
+            await _wait_for_ram_headroom()
+
             agent = await _agent_pool.get()
-            
-            # P0 Fix: Agents can die (Chrome crash, proxy hang). Verify before use.
+            wid = getattr(agent, 'worker_id', ctx.idx)
+
+            # ── Forced recycle: kill + re-create every N rows ─────────────────
+            _worker_row_counts.setdefault(wid, 0)
+            _worker_row_counts[wid] += 1
+            if _worker_row_counts[wid] >= WORKER_RECYCLE_EVERY:
+                agent = await _get_recycled_agent(ctx, agent)
+                wid = getattr(agent, 'worker_id', ctx.idx)
+
+            # ── Health check: verify agent is still responsive ────────────────
             # Guard: is_alive() may raise NotImplementedError if an agent hasn't
-            # overridden the base-class stub — treat it as "alive" in that case
-            # to avoid crashing the row with a misleading AttributeError.
+            # overridden the base-class stub — treat it as "alive" in that case.
             _agent_is_dead = False
             if hasattr(agent, 'is_alive'):
                 try:
@@ -268,35 +357,29 @@ async def _worker_process_row(ctx: WorkerContext):
                     pass  # Assume healthy; agent hasn't implemented the check
 
             if _agent_is_dead:
-                logger.warning(f"[AgentPool] Worker dead, recreating...")
-                await agent.close()
-                from infra.browsers.hybrid_engine import HybridAutomationEngine
-                agent = HybridAutomationEngine(worker_id=getattr(agent, 'worker_id', ctx.idx))
-                await agent.start_tier(config.HYBRID_DEFAULT_TIER)
-            
+                logger.warning(f"[AgentPool] Worker #{wid} unresponsive — force-recycling...")
+                agent = await _get_recycled_agent(ctx, agent)
+
             await _execute_agent_task(ctx, agent)
-            
+
         except Exception as e:
             logger.error(f"[Agent] Error on row {ctx.row.row_index}: {e}")
             ctx.row.status = "ERROR"
-            # ── CRITICAL: persist ERROR to checkpoint ──────────────────────────
-            # Without this call, the checkpoint has NO entry for this row.
-            # On restart, the system sees it as "unprocessed" and always re-starts
-            # from the first errored row index, ignoring all rows that came after.
-            # With this call, ERROR rows are recorded (non-terminal) so they CAN
-            # be retried, but get_resume_index() correctly advances past them.
+            # ── CRITICAL: persist ERROR to checkpoint so resume works ──────────
             try:
                 ctx.progress.mark_row_done(ctx.row.row_index, None, None, "ERROR")
             except Exception as save_err:
-                logger.warning(f"[Agent] Failed to save ERROR checkpoint for row {ctx.row.row_index}: {save_err}")
+                logger.warning(
+                    f"[Agent] Failed to save ERROR checkpoint for row "
+                    f"{ctx.row.row_index}: {save_err}"
+                )
         finally:
             if agent:
-                # Recycle healthy agents; dead ones are left for GC
                 await _agent_pool.put(agent)
-        
+
         elapsed = time.perf_counter() - row_start
         ctx.tracker.track_row(elapsed, ctx.row.status)
-        
+
         # Periodic disk flush (trade-off: safety vs I/O load on HDD)
         if ctx.idx % config.SAVE_INTERVAL == 0 or ctx.idx == ctx.total:
             async with ctx.save_lock:
@@ -351,22 +434,52 @@ async def process_file_async(filepath: str) -> None:
             else [r for r in rows if r.status not in legacy_terminal]
         )
     total = len(rows_to_process)
-    
+
     if total == 0:
         logger.info(f"[Agent] ⏭️  Skipping '{os.path.basename(filepath)}' — 0 rows to process.")
     else:
         logger.info(f"[Agent] 🔄 Processing {total} rows from '{os.path.basename(filepath)}'...")
-        save_lock = asyncio.Lock()                 # Serialises Excel writes
+        save_lock = asyncio.Lock()                   # Serialises Excel writes
         sem = asyncio.Semaphore(config.MAX_CONCURRENT_WORKERS)  # RAM/CPU guard
-        tasks = []
+
+        # ── Streaming task dispatcher ────────────────────────────────────────
+        # Problem: asyncio.gather(*[all tasks at once]) creates a coroutine
+        # object for EVERY row upfront, inflating the asyncio event-loop's
+        # internal task queue and holding references to all WorkerContext /
+        # ExcelRow objects simultaneously — exactly the "pending task objects"
+        # memory spike observed at 90% RAM after ~100 rows.
+        #
+        # Fix: dispatch rows in rolling windows of (MAX_CONCURRENT_WORKERS × 2).
+        # Only that many coroutines are live at any instant; completed ones are
+        # immediately garbage-collected.
+        window = max(config.MAX_CONCURRENT_WORKERS * 2, 4)
+        active: set = set()
+
         for i, r in enumerate(rows_to_process, 1):
             ctx = WorkerContext(
-                row=r, sem=sem, save_lock=save_lock, all_rows=rows, 
+                row=r, sem=sem, save_lock=save_lock, all_rows=rows,
                 filepath=filepath, tracker=tracker, idx=i, total=total, progress=progress
             )
-            tasks.append(asyncio.create_task(_worker_process_row(ctx)))
-        await asyncio.gather(*tasks)
-    
+            task = asyncio.create_task(_worker_process_row(ctx))
+            active.add(task)
+            task.add_done_callback(active.discard)  # auto-remove on completion
+
+            # Drain the window: wait until at least one slot is free
+            if len(active) >= window:
+                _done, active = await asyncio.wait(
+                    active, return_when=asyncio.FIRST_COMPLETED
+                )
+                # Propagate any unhandled exceptions from completed tasks
+                for _t in _done:
+                    if not _t.cancelled() and _t.exception():
+                        logger.error(
+                            f"[Orchestrator] Task exception (row {i}): {_t.exception()}"
+                        )
+
+        # Drain remaining tasks
+        if active:
+            await asyncio.gather(*active, return_exceptions=True)
+
     # Final flush and archival
     await asyncio.to_thread(save_results, rows, filepath, force=True)
     tracker.end_file_processing()

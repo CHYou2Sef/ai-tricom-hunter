@@ -20,13 +20,31 @@ services:
     init: true        # Properly cleans up zombie browser processes
     ipc: host         # Zero-copy memory access for faster rendering
 
-    # ── Resource caps (Windows 8 GB host, 2 workers max) ───────────────
+    # ── Resource caps (Linux 8 GB host, 2 workers max) ─────────────────
     # Supervisor + 2 Chrome instances ≈ 3.5–4 GB peak
-    # Leaving ~4 GB for the Windows host OS + Ollama
+    # Leaving ~4 GB for the host OS + other processes
     mem_limit: 4g
     mem_reservation: 1g
-    # Limit to 4 CPU cores (leave headroom for Windows OS)
+    # Limit to 4 CPU cores (leave headroom for host OS)
     cpus: "4.0"
+    # Hard cap on OS-level processes/threads to prevent runaway Chrome forks.
+    # Without this, tier-switching spawns zombie PIDs until the kernel OOMs.
+    # 512 = 2 workers × (1 Python + 1 chromedriver + ~50 Chrome helpers) × 4x safety
+    pids_limit: 512
+
+    # ── Open-file descriptor limit ───────────────────────────────────────
+    # Chrome + Playwright hold many sockets. Default Docker limit (1024)
+    # causes silent crashes when Chromium exhausts the file handle table.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    # ── Kernel tunables ─────────────────────────────────────────────────
+    # Disable swap-out of Chrome's working set to prevent 10–20s hangs
+    # under memory pressure (swapping browser pages to disk = freeze).
+    sysctls:
+      vm.swappiness: 0
 
     environment:
       # CHROMIUM_BINARY_PATH: leave unset — config.find_chrome_executable() resolves
@@ -55,6 +73,19 @@ services:
       - HYBRID_DEFAULT_TIER=2
       # Fail fast if any browser tier hangs during startup (safety net)
       - BROWSER_STARTUP_TIMEOUT_SEC=60
+      # ── Stability / Resource-Management guards ──────────────────────────
+      # Force-recycle each browser worker after N rows (prevents Chromium
+      # memory fragmentation from accumulating over long runs).
+      - WORKER_RECYCLE_EVERY=40
+      # Back-pressure: pause new row dispatch when container RAM ≥ 82%.
+      # The supervisor-level watchdog triggers a graceful restart at 90%.
+      - RAM_HIGHWATER_PCT=82
+      - SUPERVISOR_RAM_RESTART_PCT=90
+      # Log RAM/CPU telemetry every 60 s from the supervisor watchdog.
+      - SUPERVISOR_WATCHDOG_INTERVAL_SEC=60
+      # Kill any single file that takes longer than 60 min to protect
+      # against infinite hangs (e.g. massive Excel with blocked tiers).
+      - FILE_PROCESSING_TIMEOUT_SEC=3600
 
     env_file:
       - .env.prod

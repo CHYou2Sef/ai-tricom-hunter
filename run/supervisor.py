@@ -12,6 +12,7 @@
 
 import sys
 import os
+import gc
 from pathlib import Path
 
 # ── CRITICAL: Set up sys.path BEFORE any heavy imports (uvicorn/numpy/pandas) ──
@@ -42,7 +43,12 @@ import uvicorn  # noqa — imported AFTER bootstrap path sanitization
 from core import config
 from core.logger import get_logger
 from core.singleton import ensure_singleton
-from app.orchestrator import process_file_async, init_agent_pool, close_agent_pool
+from app.orchestrator import (
+    process_file_async,
+    init_agent_pool,
+    close_agent_pool,
+    FILE_PROCESSING_TIMEOUT_SEC,
+)
 from agents.layer0 import process_incoming_file, set_l1_queue
 from app.monitoring.app import app as monitoring_app
 
@@ -53,6 +59,13 @@ except ImportError:
     raise SystemExit("❌ Missing dependency: pip install watchdog")
 
 logger = get_logger("supervisor")
+
+# ── Memory watchdog thresholds ──────────────────────────────────────────────────
+# WARNING: this triggers a graceful self-restart via os.execv.
+# Must stay ABOVE the orchestrator's RAM_HIGHWATER_PCT (82%) so the
+# orchestrator has a chance to back-pressure before the supervisor restarts.
+SUPERVISOR_RAM_RESTART_PCT: float = float(os.getenv("SUPERVISOR_RAM_RESTART_PCT", "90"))
+SUPERVISOR_WATCHDOG_INTERVAL_SEC: int = int(os.getenv("SUPERVISOR_WATCHDOG_INTERVAL_SEC", "60"))
 
 
 def check_internet(host: str = "www.google.com", port: int = 443, timeout: int = 5) -> bool:
@@ -103,6 +116,44 @@ class IngestHandler(FileSystemEventHandler):
         )
 
 
+async def _memory_watchdog() -> None:
+    """
+    Background task that monitors system RAM and CPU every
+    SUPERVISOR_WATCHDOG_INTERVAL_SEC seconds.
+
+    If RAM ≥ SUPERVISOR_RAM_RESTART_PCT the supervisor performs a graceful
+    self-restart via os.execv so the container orchestrator can respawn it
+    from the last checkpoint.  This is the final safety net — the orchestrator
+    already back-pressures at 82%; we should rarely reach 90%.
+    """
+    while True:
+        await asyncio.sleep(SUPERVISOR_WATCHDOG_INTERVAL_SEC)
+        try:
+            import psutil
+            mem = psutil.virtual_memory()
+            cpu = psutil.cpu_percent(interval=1)
+            ram_pct = mem.percent
+            logger.info(
+                f"[Supervisor|Watchdog] 📊 RAM={ram_pct:.1f}% "
+                f"({mem.used // 1024 // 1024} MB / {mem.total // 1024 // 1024} MB) "
+                f"CPU={cpu:.1f}%"
+            )
+            if ram_pct >= SUPERVISOR_RAM_RESTART_PCT:
+                logger.critical(
+                    f"[Supervisor|Watchdog] 🚨 RAM CRITICAL at {ram_pct:.1f}% "
+                    f"(≥{SUPERVISOR_RAM_RESTART_PCT}%) — initiating graceful restart "
+                    "so container can respawn from last checkpoint..."
+                )
+                # Give in-flight rows 15s to flush their checkpoints before restart.
+                await asyncio.sleep(15)
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+        except ImportError:
+            # psutil not installed — watchdog still runs but without metrics
+            await asyncio.sleep(SUPERVISOR_WATCHDOG_INTERVAL_SEC)
+        except Exception as exc:
+            logger.warning(f"[Supervisor|Watchdog] Watchdog error (ignored): {exc}")
+
+
 async def layer1_consumer(file_queue: asyncio.Queue) -> None:
     while True:
         if not check_internet():
@@ -116,9 +167,29 @@ async def layer1_consumer(file_queue: asyncio.Queue) -> None:
             continue
 
         try:
-            await process_file_async(filepath)
+            logger.info(
+                f"[Supervisor|L1] 📦 Processing '{Path(filepath).name}' "
+                f"(timeout={FILE_PROCESSING_TIMEOUT_SEC:.0f}s)..."
+            )
+            await asyncio.wait_for(
+                process_file_async(filepath),
+                timeout=FILE_PROCESSING_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"[Supervisor|L1] ⏰ File '{Path(filepath).name}' exceeded "
+                f"{FILE_PROCESSING_TIMEOUT_SEC:.0f}s timeout — "
+                "forcing checkpoint flush and moving to next file."
+            )
         except Exception as exc:
-            logger.error(f"[Supervisor|L1] ❌ Error on '{Path(filepath).name}': {exc}", exc_info=True)
+            logger.error(
+                f"[Supervisor|L1] ❌ Error on '{Path(filepath).name}': {exc}",
+                exc_info=True,
+            )
+        finally:
+            # Explicit GC pass after each file: forces Python to return
+            # Chromium/Playwright heap segments back to the OS between batches.
+            gc.collect()
 
         file_queue.task_done()
         if file_queue.empty():
@@ -164,6 +235,14 @@ async def main() -> None:
 
     # 2. Init browser pool for Layer 1
     await init_agent_pool(config.MAX_CONCURRENT_WORKERS)
+
+    # 2b. Start memory watchdog in background
+    watchdog_task = asyncio.create_task(_memory_watchdog())
+    logger.info(
+        f"[Supervisor] 👁️  Memory watchdog started "
+        f"(interval={SUPERVISOR_WATCHDOG_INTERVAL_SEC}s, "
+        f"restart_at={SUPERVISOR_RAM_RESTART_PCT}%)"
+    )
 
     # 3. Process orphaned files in INCOMING_DIR
     from common.fs import safe_mkdir
@@ -226,6 +305,13 @@ async def main() -> None:
     except asyncio.CancelledError:
         logger.info("[Supervisor] 🛑 Shutdown signal received.")
     finally:
+        # Cancel memory watchdog
+        watchdog_task.cancel()
+        try:
+            await watchdog_task
+        except asyncio.CancelledError:
+            pass
+
         observer.stop()
         observer.join()
         # Uvicorn shutdown can crash if dependency versions mismatch (uvicorn/websockets).
