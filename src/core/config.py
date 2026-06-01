@@ -9,8 +9,18 @@
 
 from typing import Any, Optional
 
+import logging
 import os
 from pathlib import Path
+
+# Deferred: logger is created after LOG_DIR is defined (to avoid circular import)
+_logger: Optional[logging.Logger] = None
+
+def _get_config_logger() -> logging.Logger:
+    global _logger
+    if _logger is None:
+        _logger = logging.getLogger("config")
+    return _logger
 
 try:
     from dotenv import load_dotenv
@@ -142,7 +152,7 @@ BROWSER_USE_SANDBOX = os.getenv("BROWSER_USE_SANDBOX", "true").lower() == "true"
 # ── HDD OPTIMIZATION ──
 # How often (in rows) the agent saves the Excel file back to disk.
 # High values (50-100) are recommended for HDDs to reduce write operations.
-SAVE_INTERVAL = int(os.getenv("SAVE_INTERVAL", "10"))
+SAVE_INTERVAL = int(os.getenv("SAVE_INTERVAL", "50"))
 
 # ── ENRICHMENT ENGINE (Phase 4) ──
 # If True, the agent will attempt to extract secondary data (Email, Siren, Director, Social)
@@ -301,6 +311,26 @@ BROWSER_STARTUP_TIMEOUT_SEC = float(os.getenv("BROWSER_STARTUP_TIMEOUT_SEC", "90
 # Network speed multiplier for timeouts and delays (1.0 = normal, 2.0 = 2x slower internet, etc.)
 NETWORK_SPEED_MULTIPLIER = float(os.getenv("NETWORK_SPEED_MULTIPLIER", "1.0"))
 
+# ── NETWORK SPEED DIAL ──────────────────────────────────────────────
+# Optional user-facing speed preset — overrides NETWORK_SPEED_MULTIPLIER.
+# "fast"     : multiplier 0.5 — use when internet is fast and Google responds quickly
+# "normal"   : multiplier 1.0 — default
+# "slow"     : multiplier 1.5 — use when network is unreliable or latency is high
+# "very_slow": multiplier 2.5 — use as last resort on very slow connections
+# Set via NETWORK_SPEED_MODE env var; falls back to NETWORK_SPEED_MULTIPLIER if unset.
+_SPEED_MODE_RAW = os.getenv("NETWORK_SPEED_MODE", "")
+if _sm := _SPEED_MODE_RAW.strip().lower():
+    _PRESET_MAP = {"fast": 0.5, "normal": 1.0, "slow": 1.5, "very_slow": 2.5}
+    if _sm in _PRESET_MAP:
+        NETWORK_SPEED_MULTIPLIER = _PRESET_MAP[_sm]
+        _get_config_logger().info(f"[Config] NETWORK_SPEED_MODE={_sm} → multiplier={NETWORK_SPEED_MULTIPLIER}")
+    else:
+        _get_config_logger().warning(f"[Config] Unknown NETWORK_SPEED_MODE={_sm!r}; ignoring.")
+
+# Probe the network immediately on startup (before first row) to avoid
+# paying the 30s lazy-probe penalty on the first call.
+NETWORK_SPEED_PROBE_ON_STARTUP = os.getenv("NETWORK_SPEED_PROBE_ON_STARTUP", "true").lower() in ("1", "true", "yes")
+
 # ═══════════════════════════════════════════════════════════════════
 # 🤖  CAPTCHA SOLVER  (optional — works without API keys)
 # ═══════════════════════════════════════════════════════════════════
@@ -337,8 +367,8 @@ HYBRID_TIER3_DOMAINS = [
     "cdiscount.com",
 ]
 # Engine to use when no explicit decision is made (fallback default)
-# Tier 1 (SeleniumBase UC) is the new primary entry point per docs/Gemini.md
-HYBRID_DEFAULT_TIER = int(os.getenv("HYBRID_DEFAULT_TIER", "1"))
+# Tier 2 (SeleniumBase UC) is the primary entry point in Golden mode
+HYBRID_DEFAULT_TIER = int(os.getenv("HYBRID_DEFAULT_TIER", "2"))
 
 # Tier 0 (legacy undetected-chromedriver) — kept for benchmark comparisons only
 SELENIUM_ENABLED = os.getenv("SELENIUM_ENABLED", "false").lower() == "true"
@@ -365,11 +395,12 @@ BOTASAURUS_CACHE_MAX_AGE_HOURS = int(os.getenv("BOTASAURUS_CACHE_MAX_AGE_HOURS",
 
 # ── Performance & Tier Complexity ──
 # PERFORMANCE_MODE:
-#   "simple"   → Tiers 1-2 (SeleniumBase + Patchright).
-#   "stealth"  → Tiers 1 + 3 ONLY (SeleniumBase + Nodriver). Skips Patchright.
-#   "balanced" → Tiers 1-3 (SeleniumBase + Patchright + Nodriver).
-#   "full"     → All 5 Tiers (includes Firecrawl if enabled).
-PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "full").lower()
+#   "simple"   → Tiers 2-3 (SeleniumBase + Botasaurus).
+#   "stealth"  → Tiers 2 + 5 ONLY (SeleniumBase + Nodriver).
+#   "balanced" → Tiers 2-3-4 (SeleniumBase + Botasaurus + CloakBrowser).
+#   "golden"   → Tiers 2 → 6 ONLY (SeleniumBase + Crawl4AI). FASTEST, lowest RAM.
+#   "full"     → Full waterfall through all enabled tiers.
+PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "golden").lower()
 
 # Strict cap on waterfall depth (10 allows full waterfall)
 MAX_WATERFALL_TIER = int(os.getenv("MAX_WATERFALL_TIER", "10"))

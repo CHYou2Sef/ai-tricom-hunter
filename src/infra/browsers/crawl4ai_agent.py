@@ -66,15 +66,42 @@ class Crawl4AIAgent(BaseBrowserAgent):
 
             logger.info("[Crawl4AI] Starting crawler...")
 
-            browser_args: list[str] = []
-            if os.getuid() == 0:
-                browser_args = ["--no-sandbox", "--disable-setuid-sandbox"]
+            # ── HIGH-PERFORMANCE FLAGS (Golden-Tiers mode) ─────────────────
+            # Minimize RAM/CPU: disable background processes, images, GPU.
+            browser_args: list[str] = [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-background-networking",
+                "--disable-default-apps",
+                "--disable-extensions",
+                "--disable-sync",
+                "--disable-translate",
+                "--disable-features=TranslateUI",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-background-timer-throttling",
+                "--disable-background-timer-rendering",
+                "--disable-compare-cursor",
+                "--no-first-run",
+                "--metrics-recording-only",
+                "--mute-audio",
+                "--blink-settings=imagesEnabled=false",
+                "--disable-image-extension",
+                "--hide-scrollbars",
+                "--disable-logging",
+                "--no-zygote",
+            ]
 
             _proxy = {"server": self.current_proxy} if self.current_proxy else None
             browser_cfg = BrowserConfig(
                 headless=True,
+                headless_screenless=True,      # Faster: no Xvfb/X11 at all
                 extra_args=browser_args,
                 proxy_config=_proxy,
+                # ── Performance tunables ──────────────────────────────────────
+                page_timeout=30,               # Max wait for page load (ms)
+                browser_type="chromium",
             )
 
             self._crawler = AsyncWebCrawler(config=browser_cfg)
@@ -123,11 +150,15 @@ class Crawl4AIAgent(BaseBrowserAgent):
         sys.setrecursionlimit(max(old_limit, 3000))
 
         try:
+            # ── HIGH-PERFORMANCE arun params (Golden-Tiers) ───────────────────
             result = await self._crawler.arun(
                 url=url,
-                word_count_threshold=10,
+                word_count_threshold=5,         # Lower threshold → faster return
                 remove_overlay_elements=True,
                 bypass_cache=True,
+                cache_mode="bypass",             # Always fresh fetch for contact pages
+                page_timeout=20,                 # Max 20s per page
+                delay_before_return_html=0.0,    # No delay — speed first
             )
 
             if result.success and result.markdown:
@@ -196,11 +227,15 @@ class Crawl4AIAgent(BaseBrowserAgent):
                 if not self._crawler:
                     return None
 
+                # ── HIGH-PERFORMANCE arun params (Golden-Tiers) ───────────────────
                 result = await self._crawler.arun(
                     url=ai_mode_url,
-                    word_count_threshold=10,
+                    word_count_threshold=5,         # Lower threshold → faster return
                     remove_overlay_elements=True,
                     bypass_cache=True,
+                    cache_mode="bypass",
+                    page_timeout=20,                  # Max 20s per page
+                    delay_before_return_html=0.0,     # Speed first
                 )
 
                 if result.success and result.markdown:

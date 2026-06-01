@@ -15,16 +15,21 @@ class NetworkSpeedProbe:
     _probe_interval_sec = 30.0  # Re-probe every 30s to avoid overhead
 
     @classmethod
-    async def probe(cls) -> tuple[str, float]:
+    async def probe(cls, force_refresh: bool = False) -> tuple[str, float]:
         """
         Run a quick network quality check.
+
+        Args:
+            force_refresh: if True, bypasses the 30s cache and re-measures now.
+                           Use this at startup so the first row doesn't pay the
+                           lazy-probe penalty.
 
         Returns:
             tuple of (score, latency_ms)
             score: "good" (< 100ms), "medium" (100-300ms), "bad" (> 300ms)
         """
         now = time.time()
-        if now - cls._last_check_time < cls._probe_interval_sec:
+        if not force_refresh and (now - cls._last_check_time < cls._probe_interval_sec):
             return cls._last_score, cls._last_latency_ms
 
         cls._last_check_time = now

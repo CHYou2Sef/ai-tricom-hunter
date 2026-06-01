@@ -549,8 +549,11 @@ class HybridAutomationEngine:
             tier_sequence = [2, 5]  # SeleniumBase + Nodriver
         elif p_mode == "balanced":
             tier_sequence = [2, 3, 4]  # SeleniumBase + Botasaurus + CloakBrowser
+        elif p_mode == "golden":
+            # 🚀 GOLDEN-TIERS: SeleniumBase + Crawl4AI only — fastest, lowest RAM
+            tier_sequence = [2, 6]
         else:
-            # "full" mode or custom Golden Path sequence
+            # "full" mode or custom Full Path sequence
             tier_sequence = [2, 5, 4, 6]
 
             # Additional tiers if explicitly configured to run beyond the Golden Path
@@ -676,6 +679,12 @@ class HybridAutomationEngine:
                     "extract_universal_data": 15.0,  # Fast DOM extraction
                     "get_page_source": 10.0,  # Instant snapshot
                 }
+                # Golden mode uses tighter budgets — only 2 tiers, fast escalation path
+                if p_mode == "golden":
+                    _TIMEOUT_MAP["search_google_ai_mode"] = 40.0
+                    _TIMEOUT_MAP["search_google_ai"] = 40.0
+                    _TIMEOUT_MAP["search_google_ai_interactive"] = 40.0
+                    _TIMEOUT_MAP["crawl_website"] = 20.0
                 _timeout = _TIMEOUT_MAP.get(method_name, 30.0) * getattr(
                     config, "NETWORK_SPEED_MULTIPLIER", 1.0
                 ) * NetworkSpeedProbe.get_timeout_multiplier()

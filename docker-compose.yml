@@ -1,7 +1,7 @@
 # ╔══════════════════════════════════════════════════════════════════════╗
 # ║  docker-compose.yml — AI Tricom Hunter Industrial Stack              ║
 # ║  Optimized for: Windows Host 8 GB RAM + HDD                         ║
-# ║  Golden Path: SeleniumBase ► Nodriver ► CloakBrowser ► Crawl4AI     ║
+# ║  Golden-Tiers: SeleniumBase (Tier2) ► Crawl4AI (Tier6)              ║
 # ╚══════════════════════════════════════════════════════════════════════╝
 
 services:
@@ -53,14 +53,18 @@ services:
       # /app/src before site-packages. Path is managed by bootstrap.py.
       - LAYER0_ENABLED=true
       - LAYER2_ENABLED=true
-      # Golden path explicit overrides (belt-and-suspenders with .env.prod)
-      - PERFORMANCE_MODE=full
+      # Golden-Tiers explicit overrides (belt-and-suspenders with .env.prod)
+      - PERFORMANCE_MODE=golden
+      # Docker containers typically have fast, stable connections
+      - NETWORK_SPEED_MODE=fast
+      - NETWORK_SPEED_PROBE_ON_STARTUP=true
       - SELENIUM_ENABLED=false
       - CAMOUFOX_ENABLED=false
       - FIRECRAWL_ENABLED=false
       - JINA_ENABLED=false
       - CRAWLEE_ENABLED=false
       - BOTASAURUS_ENABLED=false
+      - CLOAKBROWSER_ENABLED=false
       # ── Tier 2 (SeleniumBase) temporary bypass ─────────────────────────
       # Chrome 147 hangs on UC-driver attach in this container image.
       # Boot directly on Tier 5 (Nodriver/CDP — no chromedriver needed).

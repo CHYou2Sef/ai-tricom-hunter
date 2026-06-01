@@ -1,8 +1,8 @@
 # ╔═══════════════════════════════════════════════════════════════════════╗
 # ║  Dockerfile — AI Phone Hunter (v1.1.0-golden)                         ║
 # ║  Base  : Python 3.10-slim-bookworm · Multi-Stage · UV package manager ║
-# ║  Path  : Tier2-SeleniumBase ► Tier5-Nodriver ► Tier4-Cloak ► Tier6-  ║
-# ║          Crawl4AI  +  Scrapy Sniper  +  LangGraph 3-Layer             ║
+# ║  Path  : Tier2-SeleniumBase ► Tier6-Crawl4AI  +  Scrapy Sniper  +    ║
+# ║          LangGraph 3-Layer  (NO intermediate tiers)                   ║
 # ║  Target: < 2 GB final image · Windows HDD-host compatible             ║
 # ║  Observability: Prometheus/Grafana via --profile monitoring (dev only) ║
 # ╚═══════════════════════════════════════════════════════════════════════╝
@@ -46,17 +46,15 @@ COPY requirements-prod-golden.txt .
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && /root/.local/bin/uv pip install --system --no-cache -r requirements-prod-golden.txt
 
-# ── Install browsers for the 4 ACTIVE Golden Path tiers ───────────────────
+# ── Install browsers for the 2 ACTIVE Golden-Tiers ──────────────────────
 # Tier 2 (SeleniumBase): needs chromedriver managed by seleniumbase
-# Tier 4 (CloakBrowser): needs its own C++-patched Chromium binary
-# Tier 5 (Nodriver):     uses existing Chromium via CDP — no extra install
 # Tier 6 (Crawl4AI):     uses patchright Chromium (installed below)
 #
 # NOTE: patchright installs to /opt/ms-playwright — shared by Crawl4AI.
 #       crawl4ai-setup configures the crawl4ai environment beyond the browser.
+#       We do NOT install CloakBrowser (Tier 4) — CLOAKBROWSER_ENABLED=false.
 #       We do NOT install Camoufox (Firefox) — CAMOUFOX_ENABLED=false.
 RUN patchright install chromium \
-    && python3 -m cloakbrowser install \
     && crawl4ai-setup \
     && seleniumbase install chromedriver \
     && seleniumbase install uc_driver

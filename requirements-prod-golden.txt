@@ -1,21 +1,21 @@
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  requirements-prod-golden.txt                                            ║
-# ║  GOLDEN PATH — PERFORMANCE_MODE=full → [Tier2, Tier5, Tier4, Tier6]     ║
+# ║  GOLDEN-TIERS — PERFORMANCE_MODE=golden → [Tier2, Tier6]                ║
 # ║                                                                          ║
 # ║  Active Engines:                                                         ║
 # ║    Tier 2  (SeleniumBase UC)   ⭐ PRIMARY stealth browser               ║
-# ║    Tier 4  (CloakBrowser)      🕵️  Supreme Stealth, C++ patched         ║
-# ║    Tier 5  (Nodriver)          🟢 CDP-only, no WebDriver fingerprint     ║
 # ║    Tier 6  (Crawl4AI)          🟡 Managed JS render (via patchright)    ║
 # ║    Scrapy  (Sniper bonus)      ⚡ Fast HTTP post-discovery extraction   ║
 # ║                                                                          ║
 # ║  Intentionally EXCLUDED (disabled via .env.prod):                        ║
 # ║    Tier 0  (Legacy Selenium / undetected-chromedriver) SELENIUM_ENABLED=false   ║
-# ║    Tier 3  (Botasaurus)        NOT in full-mode waterfall [2,5,4,6]     ║
-# ║    Tier 7  (Camoufox)         CAMOUFOX_ENABLED=false                    ║
-# ║    Tier 8  (Firecrawl)        FIRECRAWL_ENABLED=false                   ║
-# ║    Tier 9  (Jina Reader)      JINA_ENABLED=false                        ║
-# ║    Tier 10 (Crawlee)          CRAWLEE_ENABLED=false                     ║
+# ║    Tier 3  (Botasaurus)        BOTASAURUS_ENABLED=false                  ║
+# ║    Tier 4  (CloakBrowser)      CLOAKBROWSER_ENABLED=false                ║
+# ║    Tier 5  (Nodriver)          NODRIVER_ENABLED=false                    ║
+# ║    Tier 7  (Camoufox)          CAMOUFOX_ENABLED=false                    ║
+# ║    Tier 8  (Firecrawl)          FIRECRAWL_ENABLED=false                   ║
+# ║    Tier 9  (Jina Reader)       JINA_ENABLED=false                       ║
+# ║    Tier 10 (Crawlee)           CRAWLEE_ENABLED=false                    ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
 # ── Core Data Processing & Excel ──────────────────────────────────────────
@@ -27,18 +27,6 @@ xlsxwriter>=3.1.9
 # selenium is a transitive dependency — pinned here for stability
 selenium>=4.18.0
 seleniumbase>=4.24.0
-
-# ── Tier 4: CloakBrowser (Supreme Stealth, C++ patched Chromium) ──────────
-cloakbrowser>=0.1.0
-
-# ── Tier 5: Nodriver (Chrome CDP-only, zero WebDriver fingerprint) ─────────
-nodriver>=0.34
-# FIX: websockets >=13.0 removed CONNECTING/OPEN/CLOSING/CLOSED from
-# websockets.legacy.protocol — uvicorn[standard] imports these by name at startup.
-# Prefer 12.x to avoid the breakage entirely. bootstrap.py Shim 3 handles
-# the case where pip resolves to 13.x despite this constraint.
-# nodriver requires >=10; staying at 12.x satisfies both nodriver and uvicorn.
-websockets>=12.0,<13.0
 
 # ── Tier 6: Crawl4AI (managed JS rendering, uses patchright internally) ────
 patchright==1.49.0

@@ -11,6 +11,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 from pathlib import Path
 from typing import Dict, Any, Optional, Set
 
@@ -38,8 +39,14 @@ class FileProgressTracker:
         self._global_set_path = config.CHECKPOINTS_DIR / self.GLOBAL_PHONE_SET_FILE
         # Counter: how many rows have been processed since the last phone-set flush
         self._phone_set_dirty_count: int = 0
+        # Protects self.data writes from concurrent workers
+        self._save_lock = threading.Lock()
         self.load()
         self._sync_global_from_checkpoints()
+        # Force-create the checkpoint file immediately so it exists
+        # before any async workers start calling mark_row_done().
+        with self._save_lock:
+            self.save()
 
     def load(self):
         """Load checkpoint + global PHONE_SET."""
@@ -153,6 +160,7 @@ class FileProgressTracker:
             self._atomic_write(self.checkpoint_path, payload)
         except Exception as e:
             logger.error(f"[Progress] Failed to save checkpoint: {e}")
+            raise
 
     def flush_global_phone_set(self) -> None:
         """
@@ -199,22 +207,23 @@ class FileProgressTracker:
           to amortise I/O cost over long runs.  Call flush_global_phone_set()
           explicitly on graceful shutdown.
         """
-        entry: dict = {"phone": phone, "agent_phone": agent_phone, "status": status}
-        if extra:
-            entry.update(extra)
-        self.data[str(row_index)] = entry
-        phone_added = False
-        if phone:
-            self.register_phone(phone)
-            phone_added = True
-        if agent_phone:
-            self.register_phone(agent_phone)
-            phone_added = True
-        # Always save the per-row checkpoint atomically
-        self.save()
-        # Throttled phone-set flush (only writes every N rows with new phones)
-        if phone_added:
-            self._save_global_phone_set_if_due()
+        with self._save_lock:
+            entry: dict = {"phone": phone, "agent_phone": agent_phone, "status": status}
+            if extra:
+                entry.update(extra)
+            self.data[str(row_index)] = entry
+            phone_added = False
+            if phone:
+                self.register_phone(phone)
+                phone_added = True
+            if agent_phone:
+                self.register_phone(agent_phone)
+                phone_added = True
+            # Always save the per-row checkpoint atomically
+            self.save()
+            # Throttled phone-set flush (only writes every N rows with new phones)
+            if phone_added:
+                self._save_global_phone_set_if_due()
 
     def get_row_data(self, row_index: int) -> Optional[dict]:
         return self.data.get(str(row_index))

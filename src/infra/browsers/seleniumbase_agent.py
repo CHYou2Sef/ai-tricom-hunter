@@ -221,9 +221,40 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
         # ── Suppression of automation alerts & Sandbox handling ──
         # Docker runs Chrome as root without /dev/shm sizing → needs classic flags.
-        extra_args = "--disable-infobars --disable-notifications"
+        # ── HIGH-PERFORMANCE FLAGS (Golden-Tiers mode) ───────────────────────
+        # Disable background processes, images, GPU, prefetch to minimize RAM/CPU.
+        extra_args = (
+            "--disable-infobars "
+            "--disable-notifications "
+            "--disable-background-networking "
+            "--disable-default-apps "
+            "--disable-extensions "
+            "--disable-sync "
+            "--disable-translate "
+            "--no-sandbox "
+            "--disable-dev-shm-usage "
+            "--disable-gpu "
+            "--blink-settings=imagesEnabled=false "
+            "--disable-image-extension "
+            "--disable-features=TranslateUI "
+            "--disable-backgrounding-occluded-windows "
+            "--disable-renderer-backgrounding "
+            "--disable-background-timer-throttling "
+            "--disable-background-timer-rendering "
+            "--disable-compare-cursor "
+            "--disable-crash-recovery "
+            "--disable-resize-debugger "
+            "--no-first-run "
+            "--disable-settings-refresh "
+            "--safebrowsing-disable-auto-update "
+            "--metrics-recording-only "
+            "--mute-audio "
+            "--hide-scrollbars "
+            "--disable-logging "
+            "--no-zygote"
+        )
         if getattr(config, "DOCKER_ENV", False):
-            extra_args += " --no-sandbox --disable-dev-shm-usage"
+            pass  # Flags above already include --no-sandbox --disable-dev-shm-usage
 
         # ── Persistent Profile Handling ──
         profile_path = config.get_worker_profile_path(self.worker_id, "seleniumbase")
@@ -256,15 +287,20 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         except Exception:
             pass
 
+        # ── HIGH-PERFORMANCE: Docker → headless, avoid Xvfb overhead ──────────
+        _is_docker = getattr(config, "DOCKER_ENV", False)
+        _use_headless = _is_docker  # Headless in Docker is faster (no Xvfb overhead)
+
         driver = Driver(
             uc=True,
-            headless=False,
+            headless=_use_headless,
             user_data_dir=profile_path,
             ad_block=True,
             proxy=proxy_str,
             binary_location=config.CHROMIUM_BINARY_PATH or None,
             locale_code="fr",
             chromium_arg=extra_args,
+            page_load_strategy="normal",
         )
 
 
@@ -309,7 +345,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
         logger.info(
             f"[SeleniumBase] ✅ UC Driver ready — "
-            f"uc=True, headless=False, "
+            f"uc=True, headless={_use_headless}, "
             f"viewport={vp['width']}×{vp['height']}, "
             f"worker={self.worker_id}"
         )

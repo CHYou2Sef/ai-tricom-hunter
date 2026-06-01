@@ -44,7 +44,12 @@ echo "🔍 [$(date)] Starting Infrastructure Health Check..." > "$STARTUP_LOG"
 
 {
     echo "--- Agent Definitions ---"
-    python3 scripts/validator.py
+    # Skip validator.py in golden-mode (saves ~3-5s per startup; agents are pre-validated)
+    if [ "$PERFORMANCE_MODE" != "golden" ]; then
+        python3 scripts/validator.py
+    else
+        echo "⏭️  [Golden-Tiers] Skipping validator.py — agent definitions trust-established."
+    fi
     
     echo -e "\n--- Browser Binaries ---"
     
@@ -95,15 +100,18 @@ echo "🔍 [$(date)] Starting Infrastructure Health Check..." > "$STARTUP_LOG"
 
 echo "✅ Startup checks complete. See logs/startup_infra.log for details."
 
-# ── 3. Virtual Display (Xvfb) ───────────────────────────────────────
-# Starts a fake, invisible monitor. This takes near-zero resources
-# but allows Chrome to run in "Headed" mode to bypass bot detectors.
-echo "🖥️ Starting Xvfb on Display :99 (Invisible Headed Mode)..."
-Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
-export DISPLAY=:99
-
-# Give Xvfb short time to initialize
-sleep 1
+# ── 3. Virtual Display (Xvfb) — ONLY when needed ─────────────────────
+# Golden-Tiers: headless=True in Docker means SeleniumBase Chrome does NOT
+# need Xvfb. Xvfb adds ~50-100 MB RAM overhead for zero benefit in golden mode.
+# Skip it if PERFORMANCE_MODE=golden (DOCKER_ENV is set in docker-compose).
+if [ "$PERFORMANCE_MODE" != "golden" ] && [ "$DOCKER_ENV" != "true" ]; then
+    echo "🖥️ Starting Xvfb on Display :99 (Headed Mode for non-docker)..."
+    Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
+    export DISPLAY=:99
+    sleep 1
+else
+    echo "🖥️ [Golden-Tiers] Skipping Xvfb — headless=True handles display internally."
+fi
 
 # ── 3.5 SeleniumBase UC driver (image should bake this via Dockerfile) ───
 # Runtime evidence: missing uc_driver forces a mid-start download and makes

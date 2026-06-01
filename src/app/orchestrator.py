@@ -35,8 +35,8 @@ logger = get_logger(__name__)
 # How many rows a single HybridAutomationEngine instance processes before
 # being force-recycled (closed + re-created).  Prevents Chromium memory
 # fragmentation from accumulating across hundreds of rows.
-# Override via env: WORKER_RECYCLE_EVERY=50
-WORKER_RECYCLE_EVERY: int = int(os.getenv("WORKER_RECYCLE_EVERY", "40"))
+# Override via env: WORKER_RECYCLE_EVERY=60 (golden mode: lower fragmentation)
+WORKER_RECYCLE_EVERY: int = int(os.getenv("WORKER_RECYCLE_EVERY", "60"))
 
 # RAM high-water mark (%). If container RSS exceeds this, the next row
 # acquisition will pause until GC brings it below the threshold.
@@ -420,6 +420,13 @@ async def process_file_async(filepath: str) -> None:
     Flow: read → resume → filter → parallel worker dispatch → save → archive.
     """
     logger.info(f"[Agent] Starting file: {os.path.basename(filepath)}")
+
+    # ── Startup network probe — skip the 30s cache penalty on first row ───
+    if getattr(config, "NETWORK_SPEED_PROBE_ON_STARTUP", True):
+        from infra.browsers.network_probe import NetworkSpeedProbe
+        net_score, net_latency = await NetworkSpeedProbe.probe(force_refresh=True)
+        logger.info(f"[Agent] 🌐 Network: {net_score} ({net_latency:.0f}ms)")
+
     rows, _ = await asyncio.to_thread(read_excel, filepath)
     if not rows: return
 
