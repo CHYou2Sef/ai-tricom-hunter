@@ -29,8 +29,10 @@ services:
     cpus: "4.0"
     # Hard cap on OS-level processes/threads to prevent runaway Chrome forks.
     # Without this, tier-switching spawns zombie PIDs until the kernel OOMs.
-    # 512 = 2 workers × (1 Python + 1 chromedriver + ~50 Chrome helpers) × 4x safety
-    pids_limit: 2048
+    # 4096 = 2 workers × (1 Python + 1 chromedriver + ~50 Chrome helpers) × 4x safety
+    # (was 2048 — raised because PID table saturated at row ~452 after 3400s,
+    #  triggering BlockingIOError Errno 11 on every subsequent browser fork)
+    pids_limit: 4096
 
     # ── Open-file descriptor limit ───────────────────────────────────────
     # Chrome + Playwright hold many sockets. Default Docker limit (1024)

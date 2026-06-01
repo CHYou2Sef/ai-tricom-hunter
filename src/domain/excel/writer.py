@@ -23,6 +23,7 @@ from typing import Any
 pd: Any = None  # lazy pandas import
 np: Any = None  # lazy numpy import (optional)
 
+
 def _safe_import_pandas():
     import os as _os, sys as _sys
 
@@ -33,7 +34,9 @@ def _safe_import_pandas():
             if p in ("", cwd, _os.path.abspath(cwd)):
                 to_remove.add(p)
         if cwd:
-            repo_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", ".."))
+            repo_root = _os.path.abspath(
+                _os.path.join(_os.path.dirname(__file__), "..", "..", "..")
+            )
             to_remove.add(repo_root)
         if to_remove:
             _sys.path = [p for p in _sys.path if p not in to_remove]
@@ -42,6 +45,7 @@ def _safe_import_pandas():
 
     try:
         import pandas as _pd  # type: ignore
+
         return _pd
     except Exception as e:
         raise ImportError(
@@ -60,7 +64,9 @@ def _safe_import_numpy():
             if p in ("", cwd, _os.path.abspath(cwd)):
                 to_remove.add(p)
         if cwd:
-            repo_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", ".."))
+            repo_root = _os.path.abspath(
+                _os.path.join(_os.path.dirname(__file__), "..", "..", "..")
+            )
             to_remove.add(repo_root)
         if to_remove:
             _sys.path = [p for p in _sys.path if p not in to_remove]
@@ -69,6 +75,7 @@ def _safe_import_numpy():
 
     try:
         import numpy as _np  # type: ignore
+
         return _np
     except Exception:
         # numpy is only used for optional operations; allow writer to run if pandas works.
@@ -84,6 +91,7 @@ from domain.json.jsonl_handler import JSONLWriter, JSONLReader
 
 logger = get_logger(__name__)
 
+
 def _apply_pro_formatting(writer, df, rows: List, sheet_name="Results"):
     # Lazy pandas import for container safety
     global pd
@@ -91,33 +99,41 @@ def _apply_pro_formatting(writer, df, rows: List, sheet_name="Results"):
         pd = _safe_import_pandas()
 
     """Apply professional XlsxWriter formatting to the output."""
-    workbook  = writer.book
+    workbook = writer.book
     worksheet = writer.sheets[sheet_name]
 
     # --- 1. Formats ---
-    header_fmt = workbook.add_format({
-        'bold': True,
-        'text_wrap': False,
-        'valign': 'top',
-        'fg_color': '#2F5597',  # Dark Blue
-        'font_color': 'white',
-        'border': 1
-    })
+    header_fmt = workbook.add_format(
+        {
+            "bold": True,
+            "text_wrap": False,
+            "valign": "top",
+            "fg_color": "#2F5597",  # Dark Blue
+            "font_color": "white",
+            "border": 1,
+        }
+    )
 
-    ai_col_fmt = workbook.add_format({
-        'bg_color': '#DDEBF7',  # Light Blue
-        'border': 1
-    })
+    ai_col_fmt = workbook.add_format(
+        {
+            "bg_color": "#DDEBF7",  # Light Blue
+            "border": 1,
+        }
+    )
 
-    filled_fmt = workbook.add_format({
-        'bg_color': '#E2EFDA',  # Light Green (Filled from Empty)
-        'border': 1
-    })
+    filled_fmt = workbook.add_format(
+        {
+            "bg_color": "#E2EFDA",  # Light Green (Filled from Empty)
+            "border": 1,
+        }
+    )
 
-    clone_fmt = workbook.add_format({
-        'bg_color': '#FFF2CC',  # Light Yellow (New Row/Clone)
-        'border': 1
-    })
+    clone_fmt = workbook.add_format(
+        {
+            "bg_color": "#FFF2CC",  # Light Yellow (New Row/Clone)
+            "border": 1,
+        }
+    )
 
     # --- 2. Freeze Panes (Header row) ---
     worksheet.freeze_panes(1, 0)
@@ -129,28 +145,29 @@ def _apply_pro_formatting(writer, df, rows: List, sheet_name="Results"):
     for i, col_name in enumerate(df.columns):
         # Handle duplicate column names: df.iloc[:, i] ensures we get a single Series
         col_data = df.iloc[:, i]
-        
+
         try:
             # Flatten data to strings and find max length
             max_data_len = col_data.astype(str).map(len).max()
-            if pd.isna(max_data_len): max_data_len = 0
+            if pd.isna(max_data_len):
+                max_data_len = 0
         except:
             max_data_len = 0
-            
+
         max_len = max(float(max_data_len), len(str(col_name))) + 2
         width = min(max_len, 50)
-        
+
         # Write header with format
         worksheet.write(0, i, str(col_name), header_fmt)
 
     # --- 5. Conditional Row/Cell Highlighting ---
     for row_idx in range(len(df)):
         row_num = row_idx + 1  # Offset by 1 for headers
-        
+
         # Get the original ExcelRow object if available for deep inspection (filled_fmt, is_clone)
         excel_row = rows[row_idx] if row_idx < len(rows) else None
-        is_clone = getattr(excel_row, 'is_clone', False) if excel_row else False
-        
+        is_clone = getattr(excel_row, "is_clone", False) if excel_row else False
+
         for col_idx, col_name in enumerate(df.columns):
             # Check if this specific field was enriched from an EMPTY state
             is_filled = False
@@ -162,7 +179,7 @@ def _apply_pro_formatting(writer, df, rows: List, sheet_name="Results"):
                     if isinstance(data, dict):
                         if data.get("was_empty"):
                             is_filled = True
-            
+
             # Special case: Status column highlights
             if col_name == config.STATUS_COLUMN_NAME:
                 val = str(df.iloc[row_idx, col_idx]).upper()
@@ -186,52 +203,97 @@ def _apply_pro_formatting(writer, df, rows: List, sheet_name="Results"):
             elif str(col_name).startswith("AI_"):
                 # All columns added by AI (Phone, Email, Score, Latency...) get light blue
                 target_fmt = ai_col_fmt
-                
+
             if target_fmt:
                 val = df.iloc[row_idx, col_idx]
                 # Handle NaNs for Excel
-                if pd.isna(val): val = ""
+                if pd.isna(val):
+                    val = ""
                 worksheet.write(row_num, col_idx, val, target_fmt)
 
-def _deduplicate_columns(df):
 
+def _deduplicate_columns(df):
     """Ensure all column names are unique, keeping the last occurrence (the newest data)."""
     if df.columns.duplicated().any():
         # Logic: ~df.columns.duplicated(keep='last') returns True for the last occurrence
         # and for unique columns.
-        df = df.loc[:, ~df.columns.duplicated(keep='last')]
+        df = df.loc[:, ~df.columns.duplicated(keep="last")]
     return df
+
 
 def _drop_unwanted_ai_columns(df):
     """
-    Keep all AI columns. 
+    Keep all AI columns.
     Previously pruned for 'clean look', but users want all enriched data.
     """
     return df
+
 
 def save_subset_to_excel(rows: list, target_path: Path) -> None:
     """Save a list of ExcelRow objects using Pandas with Pro formatting."""
     global pd
     if pd is None:
         pd = _safe_import_pandas()
-        
-    if not rows: return
-    
+
+    if not rows:
+        return
+
     # 1. Prepare Data
-    data = [r.to_dict() if hasattr(r, 'to_dict') else r for r in rows]
+    data = [r.to_dict() if hasattr(r, "to_dict") else r for r in rows]
     df = pd.DataFrame(data)
-    
+
     # 2. Drop technical internal columns (starting with __)
-    # We keep the dataframe clean. to_dict already provided the user-facing columns.
     internal_cols = [c for c in df.columns if str(c).startswith("__") and c != "__fingerprint"]
     if internal_cols:
         df = df.drop(columns=internal_cols)
-    
+
     # 3. Protection against duplicate columns
+    # Always keep the last occurrence to match the newest enrichment.
     df = _deduplicate_columns(df)
-    
+
     # 4. Drop non-essential AI columns for a clean Excel layout
     df = _drop_unwanted_ai_columns(df)
+
+    # 5. Hard guard: never persist search/social/aggregator domains as company website
+    # Prevents cases where AI/Web enrichment produced an aggregator URL.
+    if "AI_Website" in df.columns:
+
+        def _is_noise_site(v: Any) -> bool:
+            if v is None:
+                return False
+            s = str(v).strip().lower()
+            if not s:
+                return False
+            noise_substrings = [
+                "google.",
+                "bing.",
+                "duckduckgo.",
+                "duckduckgo.com",
+                "duckgo.",
+                "yahoo.",
+                "yandex.",
+                "wikipedia.",
+                "w3.org",
+                "github.",
+                "gitlab.",
+                "reddit.",
+                "pages.jaunes",
+                "pagesjaunes",
+                "yellowpages",
+                "infogreffe",
+                "facebook.",
+                "linkedin.",
+                "twitter.",
+                "x.com",
+                "instagram.",
+                "tiktok.",
+                "youtube.",
+                "pinterest.",
+                "schema.org",
+            ]
+            return any(ns in s for ns in noise_substrings)
+
+        df.loc[df["AI_Website"].apply(_is_noise_site), "AI_Website"] = ""
 
     safe_mkdir(target_path.parent)
     suffix = target_path.suffix.lower()
@@ -240,12 +302,13 @@ def save_subset_to_excel(rows: list, target_path: Path) -> None:
         df.to_csv(target_path, sep=";", index=False, encoding="utf-8-sig")
         logger.info(f"[Writer] Subset saved as CSV: {target_path}")
     else:
-        with pd.ExcelWriter(target_path, engine='xlsxwriter') as writer:
+        with pd.ExcelWriter(target_path, engine="xlsxwriter") as writer:
             df.to_excel(writer, sheet_name="Results", index=False)
             _apply_pro_formatting(writer, df, rows)
         logger.info(f"[Writer] Subset saved as Pro Excel: {target_path}")
-    
+
     safe_touch(target_path)
+
 
 def save_jsonl_to_excel(jsonl_path: Path, excel_path: Path) -> None:
     """Post-processing: Convert a JSONL stream to a formatted Excel file."""
@@ -256,16 +319,18 @@ def save_jsonl_to_excel(jsonl_path: Path, excel_path: Path) -> None:
         return
     save_subset_to_excel(rows, excel_path)
 
+
 def save_results(rows: list, original_filepath: str, force: bool = False) -> None:
     """Daily Fusion Handler + Local File Synchronizer."""
     global pd
     if pd is None:
         pd = _safe_import_pandas()
-        
-    if not rows: return
-    
+
+    if not rows:
+        return
+
     orig_path = Path(original_filepath)
-    
+
     # ── Part A: Save back to the ORIGINAL WORKING FILE ──
     # [Phase 2] We now skip the heavy Excel rewrite during the loop.
     # The real persistence is handled by FileProgressTracker (JSON).
@@ -290,27 +355,29 @@ def save_results(rows: list, original_filepath: str, force: bool = False) -> Non
         # DONE = confirmed data. LOW_CONF = SIREN mismatch — include for operator review.
         if r.status not in ("DONE", "LOW_CONF"):
             continue
-            
+
         d = r.to_dict()
         d["__fingerprint"] = r.get_fingerprint()
         new_data.append(d)
-    
+
     if not new_data:
         logger.info("[Writer] No new enriched rows to add to fusion file.")
         return
-        
+
     new_df = pd.DataFrame(new_data)
-    
+
     # Standardize column names
-    new_df = new_df.rename(columns={
-        "__status": config.STATUS_COLUMN_NAME, 
-        "__phone": "AI_Phone", 
-        "__agent_phone": "AI_Phone_Responsable"
-    })
-    
+    new_df = new_df.rename(
+        columns={
+            "__status": config.STATUS_COLUMN_NAME,
+            "__phone": "AI_Phone",
+            "__agent_phone": "AI_Phone_Responsable",
+        }
+    )
+
     # Deduplicate columns in new_df
     new_df = _deduplicate_columns(new_df)
-    
+
     # Drop non-essential AI columns
     new_df = _drop_unwanted_ai_columns(new_df)
 
@@ -318,12 +385,14 @@ def save_results(rows: list, original_filepath: str, force: bool = False) -> Non
     if fusion_path.exists():
         try:
             old_df = pd.read_excel(fusion_path, dtype=str)
-            
+
             # Combine and deduplicate rows by (fingerprint + phone) to allow one-to-many
             final_df = pd.concat([old_df, new_df], ignore_index=True, sort=False)
             if "__fingerprint" in final_df.columns and "AI_Phone" in final_df.columns:
-                final_df = final_df.drop_duplicates(subset=["__fingerprint", "AI_Phone"], keep='last')
-            
+                final_df = final_df.drop_duplicates(
+                    subset=["__fingerprint", "AI_Phone"], keep="last"
+                )
+
             # Final protection for columns
             final_df = _deduplicate_columns(final_df)
             final_df = final_df.reset_index(drop=True)
@@ -335,15 +404,17 @@ def save_results(rows: list, original_filepath: str, force: bool = False) -> Non
 
     # 3. Final Save with Pro Formatting
     try:
-        with pd.ExcelWriter(fusion_path, engine='xlsxwriter') as writer:
+        with pd.ExcelWriter(fusion_path, engine="xlsxwriter") as writer:
             final_df.to_excel(writer, sheet_name="Results", index=False)
             # Re-read rows matching the final_df logic if needed, but for simplicity
             # we pass a placeholder or we use the data we have.
-            # NOTE: Daily fusion doesn't have the original 'rows' objects anymore 
+            # NOTE: Daily fusion doesn't have the original 'rows' objects anymore
             # for the entire file, but for the 'new_data' it does.
             # To keep it perfect, we use the original objects for the whole df.
             # However, for now, we'll just apply standard formatting to the fusion file.
-            _apply_pro_formatting(writer, final_df, []) # No individual highlighting in fusion for now
+            _apply_pro_formatting(
+                writer, final_df, []
+            )  # No individual highlighting in fusion for now
         safe_touch(fusion_path)
         logger.info(f"[Writer] Daily fusion updated: {fusion_path.name}")
     except Exception as e:

@@ -82,7 +82,28 @@ _CITY_NOISE_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# ── Known noise domains that must NEVER be stored as AI_Website ────────────
+# These are search engines, social networks, or aggregators — never a company
+# site. The list intentionally overlaps with field_extractor.extract_website
+# so the guard is applied at both extraction time AND enrichment write-back.
+_WEBSITE_NOISE: frozenset = frozenset([
+    'google.', 'bing.', 'duckduckgo.', 'duckgo.', 'yahoo.', 'yandex.',
+    'facebook.', 'linkedin.', 'twitter.', 'x.com', 'instagram.', 'tiktok.',
+    'youtube.', 'pinterest.', 'reddit.',
+    'pages.jaunes', 'pagesjaunes', 'yellowpages',
+    'societe.com', 'pappers.fr', 'infogreffe',
+    'schema.org', 'gstatic.com', 'googletagmanager', 'googleapis.',
+    'wikipedia.', 'w3.org',
+    'github.', 'gitlab.',
+])
 
+
+def _is_noise_website(url: str) -> bool:
+    """Return True when *url* matches a known noise / aggregator domain."""
+    if not url:
+        return False
+    url_lower = url.lower()
+    return any(noise in url_lower for noise in _WEBSITE_NOISE)
 def _sanitize_field_value(field_name: str, value: str) -> str:
     """
     Post-clean a raw enriched value before writing it to the row.
@@ -165,6 +186,17 @@ def enrich_row(row: "ExcelRow") -> None:
             new_value = _sanitize_field_value(field_name, str(new_value))
             if not new_value:
                 continue   # Sanitisation reduced it to empty string
+
+            # ── Website noise guard ──────────────────────────────────────────
+            # Reject known search engines / aggregators before they reach the
+            # row or checkpoint.  Mirrors field_extractor.extract_website but
+            # catches values that arrive via JSON AI responses (not regex).
+            if field_name == "website" and _is_noise_website(new_value):
+                logger.warning(
+                    f"[Enricher] 🚫 Row #{row.row_index} — Rejected noise website "
+                    f"'{new_value}' (source={winner['source']}). Skipping."
+                )
+                continue
 
             # IMPORTANT: SET THE ATTRIBUTE SO IT'S SAVED IN THE FINAL EXCEL
             setattr(row, attr, new_value)

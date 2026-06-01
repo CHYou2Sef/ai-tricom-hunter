@@ -584,11 +584,30 @@ class HybridAutomationEngine:
             f"(consecutive_failures={self._consecutive_failures})"
         )
 
+        # ── Resource-Exhaustion Guard (Errno 11 / PID table full) ───────────
+        # Set to True when a BlockingIOError with errno=EAGAIN is caught below.
+        # Browser-spawn tiers (0,2,3,4,5,6,7,10) will all fail with the same
+        # error — skip them immediately; only API-only tiers (8=Firecrawl,
+        # 9=Jina) have a chance of succeeding without forking a process.
+        _resource_exhausted: bool = False
+        # Tiers that spawn a browser process and will fail under PID pressure
+        _BROWSER_SPAWN_TIERS: set = {0, 2, 3, 4, 5, 6, 7, 10}
+
         for tier in tier_sequence:
             # Always reset per-tier failure accumulation to avoid runaway loops
             # across tiers/rows.
             self._last_failure_reason = None
             self._current_tier = tier
+
+            # ── Errno-11 short-circuit: skip every browser tier when OS PID
+            # table is saturated; only API tiers (8, 9) can still proceed.
+            if _resource_exhausted and tier in _BROWSER_SPAWN_TIERS:
+                logger.warning(
+                    f"[HybridEngine] ⏭️ Skipping browser Tier {tier} "
+                    f"(resource exhausted — OS PID table full; only API tiers can run)"
+                )
+                continue
+
             started = await self.start_tier(tier)
             if not started:
                 logger.info(f"    ⚠️  [HybridEngine] Tier {tier} unavailable. Falling back...")
@@ -753,6 +772,67 @@ class HybridAutomationEngine:
                     method_name=method_name,
                 )
                 get_telemetry().save()  # Persist real-time metrics
+            except BlockingIOError as exc:
+                # ── ERRNO 11 / EAGAIN: OS PID table is full ──────────────────
+                # This is NOT a network failure, WAF block, or code bug.
+                # Every subsequent browser fork will fail identically — there
+                # is zero benefit in soft-retrying or incrementing the circuit
+                # breaker. Strategy:
+                #   1. Log at CRITICAL level so it is unmissable in the log.
+                #   2. Set the resource-exhausted flag so remaining browser
+                #      tiers are skipped at the top of the loop.
+                #   3. Sleep 20 s to let the kernel reap zombie PIDs.
+                #   4. continue → let API tiers (8, 9) attempt the request
+                #      without spawning any browser process.
+                import errno as _errno_mod
+
+                if hasattr(exc, "errno") and exc.errno == _errno_mod.EAGAIN:
+                    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                    self._stats[tier]["total_ms"] += elapsed_ms
+
+                    logger.critical(
+                        f"[HybridEngine] 🚨 RESOURCE_EXHAUSTED (BlockingIOError errno=EAGAIN) "
+                        f"on Tier {tier} '{method_name}' — OS PID table full. "
+                        f"Disabling all browser-spawn tiers for this row. "
+                        f"Sleeping 20s for PID reap, then falling back to API tiers …"
+                    )
+                    _resource_exhausted = True
+
+                    # Prometheus + persistent telemetry (tag separately so we
+                    # can distinguish from network failures in dashboards)
+                    SCRAPING_RESULTS.labels(
+                        tier=str(tier),
+                        scrap_method=method_name,
+                        status="RESOURCE_EXHAUSTED",
+                    ).inc()
+                    get_telemetry().record(
+                        engine_name=TIER_NAMES.get(tier, f"Tier {tier}"),
+                        row_index=self.current_row_index,
+                        status="RESOURCE_EXHAUSTED",
+                        latency_sec=elapsed_ms / 1000.0,
+                        interruption_reason="errno_11_pid_full",
+                        method_name=method_name,
+                    )
+                    get_telemetry().save()
+
+                    # Best-effort browser cleanup (may itself fail under PID
+                    # pressure, so swallow any error).
+                    try:
+                        await self.stop_tier(tier)
+                    except Exception as _stop_err:
+                        logger.debug(
+                            f"[HybridEngine] stop_tier({tier}) under PID pressure: {_stop_err}"
+                        )
+
+                    # Give the kernel time to reap zombies before hitting
+                    # the next tier (API tiers don't fork, so they're safe).
+                    await asyncio.sleep(20)
+                    continue  # → next tier in sequence (browser tiers skipped above)
+                else:
+                    # Unexpected BlockingIOError (not errno 11) — fall through
+                    # to the standard exception handler below.
+                    raise
+
             except Exception as exc:
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 self._stats[tier]["total_ms"] += elapsed_ms

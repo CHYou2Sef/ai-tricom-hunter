@@ -36,7 +36,12 @@ class MockRow:
         self.status    = "DONE"
         self.phone     = None
         self.agent_phone = None
-        
+        # Required by writer._apply_pro_formatting
+        self.enriched_fields: dict = {}
+        self.is_clone: bool = False
+        self.raw_ai_responses: list = []
+        self.search_queries_used: list = []
+
         self.raw = raw or {}
         if nom and "nom" not in self.raw:
             self.raw["nom"] = nom

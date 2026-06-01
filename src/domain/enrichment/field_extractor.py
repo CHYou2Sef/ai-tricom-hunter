@@ -104,7 +104,9 @@ def extract_website(text: str) -> Optional[tuple]:
         noise = [
             'google.', 'bing.', 'facebook.', 'linkedin.', 'twitter.', 'x.com',
             'youtube.', 'instagram.', 'pages.jaunes', 'societe.com', 'pappers.fr', 
-            'infogreffe', 'schema.org', 'gstatic.com', 'googletagmanager'
+            'infogreffe', 'schema.org', 'gstatic.com', 'googletagmanager',
+            'duckduckgo.', 'duckgo.', 'yahoo.', 'yandex.', 'wikipedia.', 'w3.org',
+            'pinterest.', 'tiktok.', 'github.', 'gitlab.', 'reddit.', 'pagesjaunes', 'yellowpages'
         ]
         if not any(n in url.lower() for n in noise):
             # Clean trailing punctuation from URL

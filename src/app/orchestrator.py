@@ -536,56 +536,65 @@ async def finalize_file_processing(
     logger.info(f"   ✅ DONE: {len(success_rows)} | ⚠️  LOW_CONF: {len(low_conf_rows)} | 🔁 Retry: {len(retry_rows)}")
     logger.info(f"{'━' * 60}")
 
-    if success_rows or low_conf_rows:
-        target = config.OUTPUT_SUCCEED_DIR / orig_path.name
-        folder_name = "SUCCEED"
-    else:
-        target = config.OUTPUT_FAILED_DIR / orig_path.name
-        folder_name = "FAILED"
+    import json as _json
+    import datetime as _dt
 
-    import shutil
+    # Helper to export telemetry metadata
+    def export_meta(folder_name: str, dest_path: Path):
+        try:
+            perf_summary = tracker.get_metrics_summary() if tracker else {}
+            telemetry_snapshot = get_telemetry().save()
+            meta_payload = {
+                "file": orig_path.name,
+                "processed_at": _dt.datetime.now().isoformat(),
+                "folder": folder_name,
+                "stats": {
+                    "total_rows":    total,
+                    "done":          len(success_rows),
+                    "low_conf":      len(low_conf_rows),
+                    "retry":         len(retry_rows),
+                    "success_rate":  round(len(success_rows) / total * 100, 1) if total else 0.0,
+                },
+                "performance": perf_summary,
+                "engines": telemetry_snapshot.get("engines", []),
+                "ranking":  telemetry_snapshot.get("ranking", []),
+            }
+            meta_path = dest_path.parent / (dest_path.name + ".meta.json")
+            with open(meta_path, "w", encoding="utf-8") as f:
+                _json.dump(meta_payload, f, indent=2, ensure_ascii=False)
+            logger.info(f"   📊 Telemetry exported → {meta_path.name}")
+        except Exception as meta_err:
+            logger.warning(f"   ⚠️  .meta.json export failed for {folder_name}: {meta_err}")
+
+    # 1. Save successful rows to SUCCEED/
+    has_success = bool(success_rows or low_conf_rows)
+    if has_success:
+        succeed_target = config.OUTPUT_SUCCEED_DIR / orig_path.name
+        try:
+            save_subset_to_excel(success_rows + low_conf_rows, succeed_target)
+            logger.info(f"   💾 Saved {len(success_rows) + len(low_conf_rows)} successful rows to SUCCEED/{orig_path.name}")
+            export_meta("SUCCEED", succeed_target)
+        except Exception as e:
+            logger.error(f"   ❌ Failed to save successful rows to SUCCEED: {e}")
+
+    # 2. Save failed/retry rows to FAILED/
+    has_retry = bool(retry_rows)
+    if has_retry:
+        failed_target = config.OUTPUT_FAILED_DIR / orig_path.name
+        try:
+            save_subset_to_excel(retry_rows, failed_target)
+            logger.info(f"   💾 Saved {len(retry_rows)} failed/retry rows to FAILED/{orig_path.name}")
+            export_meta("FAILED", failed_target)
+        except Exception as e:
+            logger.error(f"   ❌ Failed to save failed/retry rows to FAILED: {e}")
+
+    # 3. Clean up the original working file
     try:
-        shutil.move(original_filepath, str(target))
-        logger.info(f"   💾 Moved entire file to {folder_name}/ folder")
+        if orig_path.exists():
+            orig_path.unlink()
+            logger.info(f"   🗑️ Removed original working file {orig_path.name} from active workspace")
     except Exception as e:
-        logger.error(f"   ❌ Failed to move file to {folder_name}: {e}")
-
-    # ── Export per-file telemetry to .meta.json ──────────────────────────────────
-    # Written alongside the moved file so every batch has a self-contained
-    # audit record: stats + performance summary + engine-level telemetry.
-    try:
-        import json as _json
-        import datetime as _dt
-
-        # Safely retrieve tracker metrics
-        perf_summary = tracker.get_metrics_summary() if tracker else {}
-
-        # Pull the current BenchmarkTelemetry snapshot (non-destructive save)
-        telemetry_snapshot = get_telemetry().save()
-
-        meta_payload = {
-            "file": orig_path.name,
-            "processed_at": _dt.datetime.now().isoformat(),
-            "folder": folder_name,
-            "stats": {
-                "total_rows":    total,
-                "done":          len(success_rows),
-                "low_conf":      len(low_conf_rows),
-                "retry":         len(retry_rows),
-                "success_rate":  round(len(success_rows) / total * 100, 1) if total else 0.0,
-            },
-            "performance": perf_summary,
-            "engines": telemetry_snapshot.get("engines", []),
-            "ranking":  telemetry_snapshot.get("ranking", []),
-        }
-
-        # Write next to the destination file (e.g. SUCCEED/myfile.xlsx.meta.json)
-        meta_path = target.parent / (target.name + ".meta.json")
-        with open(meta_path, "w", encoding="utf-8") as f:
-            _json.dump(meta_payload, f, indent=2, ensure_ascii=False)
-        logger.info(f"   📊 Telemetry exported → {meta_path.name}")
-    except Exception as meta_err:
-        logger.warning(f"   ⚠️  .meta.json export failed: {meta_err}")
+        logger.error(f"   ❌ Failed to clean up original working file: {e}")
 
     if progress:
         progress.archive()

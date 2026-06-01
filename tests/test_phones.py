@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 sys.path.append(str(Path(__file__).parent))
 
 from src.domain.search.phone_extractor import normalize_phone, get_phone_metadata
@@ -23,7 +24,19 @@ def test_phones():
         print(f"Input: {p:15s} | Normalized: {str(norm):15s} | Type: {meta.get('type')}")
 
     print("\n=== Confidence Scoring ===")
-    row = ExcelRow(row_index=1, nom="Test Company", adresse="Paris", siren="123456789", url="", phone="", category="", raw_context="", processing_start_ts=0.0, processing_end_ts=0.0, search_queries_used=[], raw_ai_responses=[], enriched_fields={}, status="")
+    # ExcelRow ctor takes (raw, row_index, mapping) — use a MagicMock to
+    # avoid coupling this unit test to internal construction details.
+    row = MagicMock(spec=ExcelRow)
+    row.row_index = 1
+    row.nom = "Test Company"
+    row.adresse = "Paris"
+    row.siren = "123456789"
+    row.phone = ""
+    row.agent_phone = None
+    row.enriched_fields = {}
+    row.raw_ai_responses = []
+    row.search_queries_used = []
+    row.status = ""
     
     # Simulate a good match
     row.phone = "01 40 20 50 50"
