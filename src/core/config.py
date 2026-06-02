@@ -152,7 +152,12 @@ BROWSER_USE_SANDBOX = os.getenv("BROWSER_USE_SANDBOX", "true").lower() == "true"
 # ── HDD OPTIMIZATION ──
 # How often (in rows) the agent saves the Excel file back to disk.
 # High values (50-100) are recommended for HDDs to reduce write operations.
+# IMPORTANT: in golden mode, NETWORK is the bottleneck — not HDD I/O.
+# SAVE_INTERVAL=1 guarantees every row is flushed immediately, so zero
+# rows are lost if the process is interrupted mid-batch.
 SAVE_INTERVAL = int(os.getenv("SAVE_INTERVAL", "50"))
+if os.getenv("PERFORMANCE_MODE", "").lower() == "golden":
+    SAVE_INTERVAL = 1
 
 # ── ENRICHMENT ENGINE (Phase 4) ──
 # If True, the agent will attempt to extract secondary data (Email, Siren, Director, Social)

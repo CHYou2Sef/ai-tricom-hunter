@@ -145,6 +145,10 @@ class FileProgressTracker:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(payload)
             os.replace(tmp_path, path)  # atomic on POSIX
+            try:
+                os.chmod(path, 0o644)
+            except OSError:
+                pass  # Non-root env
         except Exception:
             # Clean up orphan temp file on failure
             try:

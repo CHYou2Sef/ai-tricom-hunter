@@ -96,7 +96,6 @@ class Crawl4AIAgent(BaseBrowserAgent):
             _proxy = {"server": self.current_proxy} if self.current_proxy else None
             browser_cfg = BrowserConfig(
                 headless=True,
-                headless_screenless=True,      # Faster: no Xvfb/X11 at all
                 extra_args=browser_args,
                 proxy_config=_proxy,
                 # ── Performance tunables ──────────────────────────────────────
