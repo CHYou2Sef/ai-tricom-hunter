@@ -98,3 +98,4 @@ WORK/.crawl4ai
 # ── OS ──
 .DS_Store
 Thumbs.db
+.supervisor.lock

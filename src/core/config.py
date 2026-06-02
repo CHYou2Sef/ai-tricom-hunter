@@ -148,7 +148,7 @@ def get_output_dir(input_folder_name: str) -> Path:
 
 # ── Parallelism & Professional Throttling ──
 # MAX_CONCURRENT_WORKERS = number of simultaneous browser windows
-MAX_CONCURRENT_WORKERS = int(os.getenv("MAX_CONCURRENT_WORKERS", "2"))
+MAX_CONCURRENT_WORKERS = int(os.getenv("MAX_CONCURRENT_WORKERS", "1"))
 BROWSER_USE_SANDBOX = os.getenv("BROWSER_USE_SANDBOX", "true").lower() == "true"
 
 # ── HDD OPTIMIZATION ──

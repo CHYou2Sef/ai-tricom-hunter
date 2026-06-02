@@ -157,7 +157,6 @@ class Crawl4AIAgent(BaseBrowserAgent):
                 remove_overlay_elements=True,
                 bypass_cache=True,
                 cache_mode="bypass",
-                page_timeout=20,
                 delay_before_return_html=0.0,
             )
 
@@ -239,7 +238,6 @@ class Crawl4AIAgent(BaseBrowserAgent):
                     remove_overlay_elements=True,
                     bypass_cache=True,
                     cache_mode="bypass",
-                    page_timeout=20,
                     delay_before_return_html=0.0,
                 )
 
