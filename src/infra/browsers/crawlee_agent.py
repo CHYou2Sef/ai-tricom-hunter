@@ -1,33 +1,38 @@
 """
- ╔══════════════════════════════════════════════════════════════════════════╗
- ║  infra/browsers/crawlee_agent.py                                          ║
- ║                                                                          ║
- ║  TIER 8 — Crawlee (Adaptive / Playwright Crawler)                        ║
- ║                                                                          ║
- ║  Role: Industrial-grade crawling and extraction using the Crawlee        ║
- ║  framework. Handles dynamic content and complex navigation.             ║
- ╚══════════════════════════════════════════════════════════════════════════╝
- """
+╔══════════════════════════════════════════════════════════════════════════╗
+║  infra/browsers/crawlee_agent.py                                          ║
+║                                                                          ║
+║  TIER 8 — Crawlee (Adaptive / Playwright Crawler)                        ║
+║                                                                          ║
+║  Role: Industrial-grade crawling and extraction using the Crawlee        ║
+║  framework. Handles dynamic content and complex navigation.             ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
 from __future__ import annotations
 import asyncio
-from typing import Optional, Any
-from crawlee.crawlers import PlaywrightCrawler, PlaywrightCrawlingContext
+from typing import Optional, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from crawlee.crawlers import PlaywrightCrawler, PlaywrightCrawlingContext
 
 from agents.base_agent import BaseBrowserAgent
 from core.logger import get_logger
 from core import config
- 
+
 logger = get_logger(__name__)
- 
+
+
 class CrawleeAgent(BaseBrowserAgent):
     """
     Agent using the Crawlee framework for robust, scalable scraping.
     Uses PlaywrightCrawler internally for full JS rendering support.
     """
+
     def __init__(self, worker_id: int = 0):
         super().__init__(worker_id)
         self._last_content: str = ""
-        self._crawler: Optional[PlaywrightCrawler] = None
+        self._crawler: Optional["PlaywrightCrawler"] = None
         self._proxy: Optional[str] = None
         self._lock = asyncio.Lock()
 
@@ -36,13 +41,16 @@ class CrawleeAgent(BaseBrowserAgent):
         async with self._lock:
             if self._crawler:
                 return
-             
+
             if not self._proxy and config.PROXY_ENABLED:
                 from common.proxy_manager import get_next_proxy
+
                 self._proxy = await get_next_proxy()
 
             logger.info(f"[Crawlee] 🚀 Initializing PlaywrightCrawler (worker={self.worker_id})...")
-            
+
+            from crawlee.crawlers import PlaywrightCrawler
+
             proxy_config = None
             if self._proxy:
                 proxy_config = {"server": self._proxy}
@@ -51,15 +59,14 @@ class CrawleeAgent(BaseBrowserAgent):
                 max_requests_per_crawl=1,
                 request_handler=self._handle_request,
                 headless=True,
-                browser_type='chromium',
-                proxy_configuration=proxy_config,
+                browser_type="chromium",
             )
 
     async def is_alive(self) -> bool:
         """Check if the agent is ready to crawl."""
         return self._crawler is not None
 
-    async def _handle_request(self, context: PlaywrightCrawlingContext) -> None:
+    async def _handle_request(self, context: "PlaywrightCrawlingContext") -> None:
         """
         Request handler for Crawlee.
         Captures the page source for our agent and detects blocks.
@@ -67,7 +74,7 @@ class CrawleeAgent(BaseBrowserAgent):
         try:
             url = context.request.url
             logger.debug(f"[Crawlee] Processing: {url}")
-            
+
             # Check status code
             if context.response:
                 status = context.response.status
@@ -78,13 +85,13 @@ class CrawleeAgent(BaseBrowserAgent):
                     logger.warning(f"[Crawlee] HTTP Error {status} for {url}")
 
             self._last_content = await context.page.content()
-            
+
             # Proactive Block Detection via Base Class logic
             if self.is_block_response(self._last_content):
                 logger.warning(f"[Crawlee] 🛡️ Block detected in page content for {url}")
                 await self.report_proxy_error(self._proxy, 403)
                 # Note: rotation is handled in goto_url if this returns False/empty
-                    
+
         except Exception as e:
             logger.error(f"[Crawlee] Error in request handler: {e}")
             self._last_content = ""
@@ -104,18 +111,18 @@ class CrawleeAgent(BaseBrowserAgent):
         # Ensure started first
         if not self._crawler:
             await self.start()
-            
+
         async with self._lock:
             if not self._crawler:
                 logger.error("[Crawlee] Crawler not initialized.")
                 return False
-                
+
             logger.info(f"[Crawlee] Navigating to: {url}")
             self._last_content = ""
-                
+
             try:
                 await self._crawler.run([url])
-                
+
                 # Check for block after run
                 if self.is_block_response(self._last_content):
                     await self.report_proxy_error(self._proxy, 403)
@@ -137,7 +144,7 @@ class CrawleeAgent(BaseBrowserAgent):
         return ""
 
     # ── Stub methods for BaseBrowserAgent contract ─────────────────────────
-    
+
     async def search_google_ai_mode(self, prompt: str, **kwargs) -> Optional[str]:
         """
         Implémentation de la recherche pour Crawlee (Tier 8).
@@ -146,17 +153,18 @@ class CrawleeAgent(BaseBrowserAgent):
         ai_mode_url = kwargs.get("ai_mode_url")
         row = kwargs.get("row")
         from common.search_engine import generate_google_ai_url, extract_search_terms
-            
+
         # Extract essential search terms
         search_query = extract_search_terms(prompt)
-        
+
         if ai_mode_url:
             import urllib.parse
+
             url = ai_mode_url + urllib.parse.quote_plus(search_query)
         else:
             url = generate_google_ai_url(search_query)
         logger.info(f"[Crawlee] 🔍 Recherche Google pour: {search_query}")
-        
+
         if await self.goto_url(url):
             return self._last_content
         return None
@@ -174,6 +182,7 @@ class CrawleeAgent(BaseBrowserAgent):
         """Fetch a new proxy and re-init crawler."""
         async with self._lock:
             from common.proxy_manager import get_next_proxy
+
             new_proxy = await get_next_proxy()
             if new_proxy:
                 logger.info(f"[Crawlee] ♻️ Rotating proxy to: {new_proxy}")

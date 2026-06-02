@@ -112,27 +112,35 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: Fi
     # 1. Load Fusion Data for real-value synchronization
     # pandas/numpy are heavy optional deps; make this resilient in minimal Docker images.
     existing_data = {}
-    pd = None
-    try:
-        import pandas as pd  # noqa: F401
-    except Exception as e:
-        logger.warning(f"[Agent] pandas import failed; skipping fusion sync. Details: {e}")
-
-    if fusion_path.exists() and pd is not None:
+    if fusion_path.exists():
         try:
-            df_sync = pd.read_excel(fusion_path, dtype=str)
-            if "__fingerprint" in df_sync.columns:
-                # Create a lookup map: fingerprint -> (phone, agent_phone)
-                for _, row_data in df_sync.iterrows():
-                    fp = row_data["__fingerprint"]
-                    if pd.notna(fp):
+            import openpyxl
+            # Use read_only=True for memory efficiency since we only need to read data
+            wb = openpyxl.load_workbook(fusion_path, data_only=True, read_only=True)
+            if wb.sheetnames:
+                ws = wb.active
+                headers = []
+                fingerprint_idx = -1
+                for idx, row in enumerate(ws.iter_rows(values_only=True)):
+                    if idx == 0:
+                        headers = [str(c) if c is not None else "" for c in row]
+                        try:
+                            fingerprint_idx = headers.index("__fingerprint")
+                        except ValueError:
+                            pass
+                        continue
+                    
+                    if fingerprint_idx == -1:
+                        break  # No __fingerprint column
+                    
+                    fp = row[fingerprint_idx]
+                    if fp is not None and str(fp).strip() != "":
                         entry = {}
-                        # Capture all AI_ and standard phone columns for the merge
-                        for col in df_sync.columns:
-                            val = row_data[col]
-                            if pd.isna(val) or str(val).lower() in config.NULL_VALUE_STRINGS:
+                        for c_idx, val in enumerate(row):
+                            if val is None or str(val).lower() in config.NULL_VALUE_STRINGS:
                                 continue
-                                
+                            col = headers[c_idx]
+                            
                             if col == "AI_Phone":
                                 entry["phone"] = val
                             elif col in ["AI_Phone_Responsable", "AI_Agent_Phone"]:
@@ -143,6 +151,7 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: Fi
                                 field_name = col[3:].lower()
                                 entry[field_name] = val
                         existing_data[fp] = entry
+                wb.close()
         except Exception as e:
             logger.warning(f"[Agent] Failed to read fusion file for sync: {e}")
 

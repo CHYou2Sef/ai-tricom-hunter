@@ -83,3 +83,5 @@ langchain-core>=0.2.0
 # ── Layer 2 Social Tools ──────────────────────────────────────────────────
 # Public Facebook page scraping (no login, no API key required)
 facebook-scraper>=0.2.59
+
+greenlet>=3.0.3

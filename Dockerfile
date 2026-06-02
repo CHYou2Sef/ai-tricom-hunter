@@ -1,8 +1,8 @@
 # ╔═══════════════════════════════════════════════════════════════════════╗
 # ║  Dockerfile — AI Phone Hunter (v1.1.0-golden)                         ║
 # ║  Base  : Python 3.10-slim-bookworm · Multi-Stage · UV package manager ║
-# ║  Path  : Tier2-SeleniumBase ► Tier6-Crawl4AI  +  Scrapy Sniper  +    ║
-# ║          LangGraph 3-Layer  (NO intermediate tiers)                   ║
+# ║  Path  : Tier6-Crawl4AI ► Tier5-Nodriver ► Tier2-SeleniumBase UC     ║
+# ║          +  Scrapy Sniper  +  NO intermediate tiers in golden mode  ║
 # ║  Target: < 2 GB final image · Windows HDD-host compatible             ║
 # ║  Observability: Prometheus/Grafana via --profile monitoring (dev only) ║
 # ╚═══════════════════════════════════════════════════════════════════════╝
@@ -63,22 +63,22 @@ RUN patchright install chromium \
 RUN \
     # 1. Remove unused browser engines (Firefox / WebKit / zip archives)
     rm -rf /opt/ms-playwright/firefox-* \
-           /opt/ms-playwright/webkit-* \
-           /opt/ms-playwright/zips && \
+    /opt/ms-playwright/webkit-* \
+    /opt/ms-playwright/zips && \
     # 2. Keep only EN + FR locales to slim locale packs
     find /opt/ms-playwright -name "locales" -type d \
-        -exec sh -c 'cd "{}" && ls | grep -v -E "en-US|en-GB|fr" | xargs rm -f' \; \
-        || true && \
+    -exec sh -c 'cd "{}" && ls | grep -v -E "en-US|en-GB|fr" | xargs rm -f' \; \
+    || true && \
     find /root/.cloakbrowser -name "locales" -type d \
-        -exec sh -c 'cd "{}" && ls | grep -v -E "en-US|en-GB|fr" | xargs rm -f' \; \
-        || true && \
+    -exec sh -c 'cd "{}" && ls | grep -v -E "en-US|en-GB|fr" | xargs rm -f' \; \
+    || true && \
     find /root/.cache/cloakbrowser -name "locales" -type d \
-        -exec sh -c 'cd "{}" && ls | grep -v -E "en-US|en-GB|fr" | xargs rm -f' \; \
-        || true && \
+    -exec sh -c 'cd "{}" && ls | grep -v -E "en-US|en-GB|fr" | xargs rm -f' \; \
+    || true && \
     # 3. Remove debug symbols and DRM stub (unneeded in our scraping context)
     find /opt/ms-playwright -name "*.debug" -delete && \
     find /opt/ms-playwright -name "WidevineCdm" -type d -exec rm -rf {} + \
-        2>/dev/null || true && \
+    2>/dev/null || true && \
     find /root/.cache/cloakbrowser -name "*.debug" -delete && \
     find /root/.cloakbrowser -name "*.debug" -delete
 
@@ -99,17 +99,17 @@ RUN \
     #    strip breaks their ELF LOAD segments → "page-aligned" ImportError and a misleading
     #    numpy "source directory" message from numpy.__config__ re-raise logic.
     find "$SITE" -name "*.so" \
-        ! -path "*/numpy/*" \
-        ! -path "*/numpy.libs/*" \
-        ! -path "*/pandas/*" \
-        ! -path "*/pandas.libs/*" \
-        ! -path "*/scipy.libs/*" \
-        ! -path "*/lxml/*" \
-        ! -path "*/cryptography/*" \
-        ! -path "*/aiohttp/*" \
-        ! -path "*/pydantic/*" \
-        ! -path "*/grpc/*" \
-        -exec strip --strip-unneeded {} + 2>/dev/null || true
+    ! -path "*/numpy/*" \
+    ! -path "*/numpy.libs/*" \
+    ! -path "*/pandas/*" \
+    ! -path "*/pandas.libs/*" \
+    ! -path "*/scipy.libs/*" \
+    ! -path "*/lxml/*" \
+    ! -path "*/cryptography/*" \
+    ! -path "*/aiohttp/*" \
+    ! -path "*/pydantic/*" \
+    ! -path "*/grpc/*" \
+    -exec strip --strip-unneeded {} + 2>/dev/null || true
 
 # Guarantee existence of browser dirs before COPY in runtime stage
 RUN mkdir -p \
@@ -159,7 +159,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ── Copy pruned artefacts from builder ───────────────────────────────────
 COPY --from=builder /usr/local/lib/python3.10/site-packages \
-                    /usr/local/lib/python3.10/site-packages
+    /usr/local/lib/python3.10/site-packages
 COPY --from=builder /usr/local/bin                /usr/local/bin
 COPY --from=builder /opt/ms-playwright            /opt/ms-playwright
 COPY --from=builder /root/.cache/cloakbrowser     /root/.cache/cloakbrowser
@@ -170,11 +170,11 @@ COPY --from=builder /root/.cache/seleniumbase     /root/.cache/seleniumbase
 # ── Symlink patchright Chromium to /usr/bin (used by SeleniumBase / Scrapy) ─
 # Playwright ships chrome under chrome-linux64/ (new) or chrome-linux/ (legacy).
 RUN CHROMIUM_BIN=$(find /opt/ms-playwright -name "chrome" \( \
-        -path "*/chrome-linux64/chrome" -o -path "*/chrome-linux/chrome" \) \
-        -type f 2>/dev/null | head -n 1) && \
+    -path "*/chrome-linux64/chrome" -o -path "*/chrome-linux/chrome" \) \
+    -type f 2>/dev/null | head -n 1) && \
     if [ -n "$CHROMIUM_BIN" ]; then \
-        ln -sf "$CHROMIUM_BIN" /usr/bin/google-chrome && \
-        ln -sf /usr/bin/google-chrome /usr/bin/google-chrome-stable || true; \
+    ln -sf "$CHROMIUM_BIN" /usr/bin/google-chrome && \
+    ln -sf /usr/bin/google-chrome /usr/bin/google-chrome-stable || true; \
     fi
 
 # ── Copy application source (filtered by .dockerignore) ──────────────────
@@ -182,13 +182,13 @@ COPY . .
 
 # ── Final clean-up: remove dev-only directories & fix permissions ─────────
 RUN rm -rf \
-        /app/tests \
-        /app/docs \
-        /app/k8s \
-        /app/.github \
-        /app/.agents \
-        /app/.claude \
-        /app/scratch && \
+    /app/tests \
+    /app/docs \
+    /app/k8s \
+    /app/.github \
+    /app/.agents \
+    /app/.claude \
+    /app/scratch && \
     find /app/scripts -name "*.sh" -exec dos2unix {} + && \
     chmod +x /app/scripts/entrypoint.sh
 

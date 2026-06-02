@@ -1,105 +1,78 @@
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║  requirements.txt  —  All Python dependencies                    ║
-# ║                                                                  ║
-# ║  Install everything with one command:                            ║
-# ║      pip install -r requirements.txt                             ║
-# ║                                                                  ║
-# ║  After installing, also run:                                     ║
-# ║      seleniumbase install chromedriver  (Tier 1 — UC Driver)    ║
-# ║      patchright install chromium        (Tier 2 — Chrome)       ║
-# ║      python -m camoufox fetch           (Tier 5 — Firefox)      ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  requirements-prod-golden.txt                                            ║
+# ║  GOLDEN-TIERS — PERFORMANCE_MODE=golden → [Tier2, Tier6]                ║
+# ║                                                                          ║
+# ║  Active Engines:                                                         ║
+# ║    Tier 2  (SeleniumBase UC)   ⭐ PRIMARY stealth browser               ║
+# ║    Tier 6  (Crawl4AI)          🟡 Managed JS render (via patchright)    ║
+# ║    Scrapy  (Sniper bonus)      ⚡ Fast HTTP post-discovery extraction   ║
+# ║                                                                          ║
+# ║  Intentionally EXCLUDED (disabled via .env.prod):                        ║
+# ║    Tier 0  (Legacy Selenium / undetected-chromedriver) SELENIUM_ENABLED=false   ║
+# ║    Tier 3  (Botasaurus)        BOTASAURUS_ENABLED=false                  ║
+# ║    Tier 4  (CloakBrowser)      CLOAKBROWSER_ENABLED=false                ║
+# ║    Tier 5  (Nodriver)          NODRIVER_ENABLED=false                    ║
+# ║    Tier 7  (Camoufox)          CAMOUFOX_ENABLED=false                    ║
+# ║    Tier 8  (Firecrawl)          FIRECRAWL_ENABLED=false                   ║
+# ║    Tier 9  (Jina Reader)       JINA_ENABLED=false                       ║
+# ║    Tier 10 (Crawlee)           CRAWLEE_ENABLED=false                    ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
 
-# ── Browser Automation (The Hybrid Engines) ───────────────────────────
-# Tier 0: Legacy Selenium + Undetected-ChromeDriver (Benchmark Arena)
+# ── Core Data Processing & Excel ──────────────────────────────────────────
+pandas>=2.2.0
+openpyxl>=3.1.2
+xlsxwriter>=3.1.9
+
+# ── Tier 2: SeleniumBase UC Driver (PRIMARY ⭐) ────────────────────────────
+# selenium is a transitive dependency — pinned here for stability
 selenium>=4.18.0
-webdriver-manager>=4.0.1
-undetected-chromedriver>=3.5.5
-setuptools>=69.0.0  # Required for undetected-chromedriver in Python 3.12+
+seleniumbase>=4.24.0
 
-# Tier 1: SeleniumBase UC Driver — PRIMARY entry point (docs/Gemini.md)
-#   Driver(uc=True, headless=False) — stealth binary renaming + CDP
-#   After install: seleniumbase install chromedriver  (auto-managed)
-seleniumbase>=4.29.0
-botasaurus>=3.2.0
-botasaurus-driver
-firecrawl-py>=1.0.0
-crawlee[all]>=0.4.0
-# Tier 2: Patchright — Drop-in replacement for Playwright, patched for stealth.
-#   Passes: Cloudflare, Kasada, Akamai, Datadome, Fingerprint.com, Sannysoft.
-#   API: 100% identical to Playwright — only the import line changed.
+# ── Tier 6: Crawl4AI (managed JS rendering, uses patchright internally) ────
 patchright==1.49.0
-
-# Tier 2.5: CloakBrowser — Source-level C++ patched Chromium.
-#   Supreme stealth, bypasses Turnstile and reCAPTCHA v3.
-cloakbrowser
-
-# Tier 3: Nodriver (Stealth CDP-only agent, zero WebDriver fingerprints)
-nodriver>=0.34
-# Uvicorn[websockets] requires websockets module symbols compatible with its websocket implementation.
-# Keep websockets pinned to a version that avoids `cannot import name 'SERVER'` and legacy.protocol state mismatches.
-websockets>=12.0,<14.0
-
-
-# Tier 4: Crawl4AI (Managed scraper, bypasses WAF, markdown support)
 crawl4ai>=0.4.0
 
-# Tier 5: Camoufox — Patched Firefox anti-detect browser (last resort, Firefox engine)
-#   After install: python -m camoufox fetch  (downloads the custom Firefox binary ~200MB)
-# camoufox (Removed for light version)
-
-
-# ── Data Extraction & Parsing ──────────────────────────────────────────
-# Fast HTML parsing
-selectolax>=0.3.21
-beautifulsoup4>=4.13.2
-lxml>=5.1.0
-
-# Phone Validation
-phonenumbers>=8.13.0
-
-# Scrapy Agent Fast-Path
+# ── Scrapy Sniper (post-discovery bonus — fast HTTP phone extraction) ───────
 scrapy>=2.11.0
 crochet>=2.1.1
 
-# Excel File Handling
-openpyxl>=3.1.2
-pandas>=2.2.0
-xlsxwriter>=3.1.9
+# ── Text Extraction & Parsing ─────────────────────────────────────────────
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+selectolax>=0.3.21
+phonenumbers>=8.13.0
 
+# ── Async HTTP (used by Nodriver, Jina fallback, Layer 2) ─────────────────
+httpx[http2]>=0.27.0
 
-# ── System & Utilities ────────────────────────────────────────────────
-# 24/7 Filesystem Monitoring
+# ── 24/7 Surveillance & Async I/O ─────────────────────────────────────────
 watchdog>=4.0.0
-
-# Async HTTP/Network
-httpx>=0.27.0
 aiofiles>=23.2.1
 
-# Environment and Config
+# ── AI & LLM (Google Gemini extraction engine) ────────────────────────────
+google-generativeai>=0.4.0
+
+# ── Utility & Config ──────────────────────────────────────────────────────
 python-dotenv>=1.0.0
+colorama>=0.4.6
 
-
-# ── Quality Assurance ─────────────────────────────────────────────────
-# Testing Framework
-pytest>=8.0.0
-pytest-asyncio>=0.24.0
-pytest-mock>=3.10.0
-
-
-# ── Quick Setup Commands ──────────────────────────────────────────────
-# Step 1: pip install -r requirements.txt
-# Step 2: seleniumbase install chromedriver  ← Tier 1 (SeleniumBase UC)
-# Step 3: patchright install chromium        ← Tier 2 (Chrome stealth)
-# Step 4: python -m cloakbrowser install     ← Tier 4 (Supreme stealth)
-# Step 5: python -m camoufox fetch           ← Tier 7 (Firefox anti-detect)
-# ──────────────────────────────────────────────────────────────────────
-
-# ollama (Removed for light version)
-# code-review-graph (Removed for light version)
-httpx[http2]
-fastapi
-uvicorn
+# ── REST API & Observability Stack ────────────────────────────────────────
+# NOTE: prometheus-fastapi-instrumentator stays even though Prometheus is
+# now opt-in (--profile monitoring). The supervisor exposes /metrics at :8000
+# at all times; in prod it is simply not scraped. Removing it would break
+# the supervisor import. structlog + opentelemetry-api/sdk provide in-process
+# tracing and structured logs which are valuable regardless of whether an
+# external collector is running.
+#
+# REMOVED: opentelemetry-exporter-otlp — requires a live OTLP collector
+# (Jaeger / Grafana Tempo). No such collector runs in prod-only mode.
+fastapi>=0.110.0
+uvicorn[standard]>=0.35.0
+prometheus-fastapi-instrumentator>=7.0.0
+structlog>=24.1.0
+opentelemetry-api>=1.24.0
+opentelemetry-sdk>=1.24.0
+opentelemetry-instrumentation-fastapi>=0.45b0
 
 # ── LangGraph / LangChain — 3-Layer Autonomous Pipeline ──────────────────
 # Layer 0 (Ingest LangGraph) + Layer 2 (Social URL Fallback LangGraph)
@@ -107,7 +80,6 @@ langgraph>=0.2.0
 langchain>=0.2.0
 langchain-core>=0.2.0
 
-# Layer 2 Tools
+# ── Layer 2 Social Tools ──────────────────────────────────────────────────
 # Public Facebook page scraping (no login, no API key required)
 facebook-scraper>=0.2.59
-# Note: httpx and beautifulsoup4 already listed above (website + linkedin tools)

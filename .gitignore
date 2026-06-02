@@ -24,6 +24,8 @@ error_logs/
 storage/
 WORK/browser_profiles/
 WORK/cloakbrowser
+WORK
+WORK/*
 
 
 # ── Project Specific ──

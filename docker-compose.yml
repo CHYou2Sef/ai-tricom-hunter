@@ -1,7 +1,7 @@
 # ╔══════════════════════════════════════════════════════════════════════╗
 # ║  docker-compose.yml — AI Tricom Hunter Industrial Stack              ║
 # ║  Optimized for: Windows Host 8 GB RAM + HDD                         ║
-# ║  Golden-Tiers: SeleniumBase (Tier2) ► Crawl4AI (Tier6)              ║
+# ║  Golden-Tiers: Crawl4AI (Tier6) ► Nodriver (Tier5) ► SeleniumBase UC (Tier2)  ║
 # ╚══════════════════════════════════════════════════════════════════════╝
 
 services:

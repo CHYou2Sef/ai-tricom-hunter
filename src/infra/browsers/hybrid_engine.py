@@ -485,7 +485,7 @@ class HybridAutomationEngine:
 
         # Strip internal parameters that should not propagate to tier methods
         kwargs.pop("row", None)
-        
+
         has_network_failure = False
 
         # ── 0.1 DISK SPACE GUARD (Bug #5 — proactive auto-cleanup) ──────────
@@ -550,8 +550,8 @@ class HybridAutomationEngine:
         elif p_mode == "balanced":
             tier_sequence = [2, 3, 4]  # SeleniumBase + Botasaurus + CloakBrowser
         elif p_mode == "golden":
-            # 🚀 GOLDEN-TIERS: SeleniumBase + Crawl4AI only — fastest, lowest RAM
-            tier_sequence = [2, 6]
+            # 🚀 GOLDEN-TIERS (updated): Crawl4AI → Nodriver → SeleniumBase UC
+            tier_sequence = [6, 5, 2]
         else:
             # "full" mode or custom Full Path sequence
             tier_sequence = [2, 5, 4, 6]
@@ -685,9 +685,11 @@ class HybridAutomationEngine:
                     _TIMEOUT_MAP["search_google_ai"] = 40.0
                     _TIMEOUT_MAP["search_google_ai_interactive"] = 40.0
                     _TIMEOUT_MAP["crawl_website"] = 20.0
-                _timeout = _TIMEOUT_MAP.get(method_name, 30.0) * getattr(
-                    config, "NETWORK_SPEED_MULTIPLIER", 1.0
-                ) * NetworkSpeedProbe.get_timeout_multiplier()
+                _timeout = (
+                    _TIMEOUT_MAP.get(method_name, 30.0)
+                    * getattr(config, "NETWORK_SPEED_MULTIPLIER", 1.0)
+                    * NetworkSpeedProbe.get_timeout_multiplier()
+                )
                 try:
                     result = await asyncio.wait_for(method(*args, **kwargs), timeout=_timeout)
                 except asyncio.TimeoutError:
@@ -950,7 +952,9 @@ class HybridAutomationEngine:
             try:
                 await self.stop_tier(tier)
             except Exception as stop_exc:
-                logger.warning(f"[HybridEngine] stop_tier({tier}) escalated cleanup failed: {stop_exc}")
+                logger.warning(
+                    f"[HybridEngine] stop_tier({tier}) escalated cleanup failed: {stop_exc}"
+                )
 
             # ── Smart cool-down: only pause for genuine network/WAF failures ──
             # Empty results or code bugs do NOT need a WAF cooldown period.
@@ -979,7 +983,10 @@ class HybridAutomationEngine:
         # Conservative approach: increment CB counter only for network-type runs.
         # (Code-bug tiers `continue` before reaching this point, so reaching
         # here means at least one genuine network-level attempt was made.)
-        if has_network_failure or getattr(self, "_last_failure_reason", None) in ("network", "captcha_waf"):
+        if has_network_failure or getattr(self, "_last_failure_reason", None) in (
+            "network",
+            "captcha_waf",
+        ):
             self._consecutive_failures += 1
 
         alert(

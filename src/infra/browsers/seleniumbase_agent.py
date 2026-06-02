@@ -826,41 +826,28 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             time.sleep(delay)
 
     async def _wait_for_stable_response_locked(self, timeout_sec: int = 15) -> Optional[str]:
-        """Poll the page until text stops changing (locked)."""
-        deadline = time.monotonic() + timeout_sec
-        prev_text = ""
-        stable_count = 0
-        while time.monotonic() < deadline:
-            await asyncio.sleep(1.0)
-            if not self._driver: break
+        """Poll the page until text contains JSON or stops changing (locked)."""
+        from common.smart_wait import wait_for_json_in_text
+
+        async def get_text():
+            if not self._driver: return None
             current = await self._extract_first_selector_locked(AI_RESPONSE_SELECTORS)
             if not current:
                 try: current = await asyncio.to_thread(lambda: self._driver.get_text("body"))
                 except Exception: pass
-            if current and current == prev_text:
-                stable_count += 1
-                if stable_count >= 2: return current
-            else:
-                prev_text = current or ""
-                stable_count = 0
-        return prev_text if prev_text else None
+            return current
+
+        return await wait_for_json_in_text(get_text, timeout=timeout_sec, poll_interval=1.0)
 
     async def _wait_for_stable_element_text_locked(self, selectors: list, timeout_sec: int = 60) -> Optional[str]:
-        """Wait for selectors to produce stable text output (locked)."""
-        deadline = time.monotonic() + timeout_sec
-        last_text = ""
-        stable_count = 0
-        while time.monotonic() < deadline:
-            await asyncio.sleep(1)
-            if not self._driver: break
-            current = await self._extract_first_selector_locked(selectors) or ""
-            if current and current == last_text:
-                stable_count += 1
-                if stable_count >= 4: return current
-            else:
-                stable_count = 0
-                last_text = current
-        return last_text if last_text else None
+        """Wait for selectors to produce JSON text output (locked)."""
+        from common.smart_wait import wait_for_json_in_text
+
+        async def get_text():
+            if not self._driver: return None
+            return await self._extract_first_selector_locked(selectors)
+
+        return await wait_for_json_in_text(get_text, timeout=timeout_sec, poll_interval=1.0)
 
     async def _extract_first_selector_locked(self, selectors: list) -> Optional[str]:
         if not self._driver: return None

@@ -16,11 +16,13 @@ from pathlib import Path
 # Deferred: logger is created after LOG_DIR is defined (to avoid circular import)
 _logger: Optional[logging.Logger] = None
 
+
 def _get_config_logger() -> logging.Logger:
     global _logger
     if _logger is None:
         _logger = logging.getLogger("config")
     return _logger
+
 
 try:
     from dotenv import load_dotenv
@@ -153,11 +155,11 @@ BROWSER_USE_SANDBOX = os.getenv("BROWSER_USE_SANDBOX", "true").lower() == "true"
 # How often (in rows) the agent saves the Excel file back to disk.
 # High values (50-100) are recommended for HDDs to reduce write operations.
 # IMPORTANT: in golden mode, NETWORK is the bottleneck — not HDD I/O.
-# SAVE_INTERVAL=1 guarantees every row is flushed immediately, so zero
-# rows are lost if the process is interrupted mid-batch.
+# SAVE_INTERVAL=100 ensures we don't thrash the HDD by writing the full Excel file on every row.
+# We will rely on JSONL streaming (Phase 8) for crash-safety.
 SAVE_INTERVAL = int(os.getenv("SAVE_INTERVAL", "50"))
 if os.getenv("PERFORMANCE_MODE", "").lower() == "golden":
-    SAVE_INTERVAL = 1
+    SAVE_INTERVAL = 100
 
 # ── ENRICHMENT ENGINE (Phase 4) ──
 # If True, the agent will attempt to extract secondary data (Email, Siren, Director, Social)
@@ -234,11 +236,13 @@ RESUME_FROM_CHECKPOINT = os.getenv("RESUME_FROM_CHECKPOINT", "true").lower() == 
 
 # The canonical set of statuses that are 100% terminal.
 # Used by the orchestrator to build the "rows_to_process" list.
-TERMINAL_STATUSES: frozenset = frozenset({"DONE", "NO TEL", "NO_TEL", "LOW_CONF", "SKIP", "DUPLICATE"})
+TERMINAL_STATUSES: frozenset = frozenset(
+    {"DONE", "NO TEL", "NO_TEL", "LOW_CONF", "SKIP", "DUPLICATE"}
+)
 
 # ── Proxy Rotation (Anti-Ban) ──
 PROXY_ENABLED = (
-    os.getenv("PROXY_ENABLED", "true").lower() == "true"
+    os.getenv("PROXY_ENABLED", "false").lower() == "true"
 )  # ON by default to solve CAPTCHA problems immediately
 PROXY_ROTATE_EVERY_N = 5  # Rotate every 5 rows to stay fresh
 PROXY_PREEMPTIVE_ROTATE_ON_WARN = (
@@ -328,13 +332,19 @@ if _sm := _SPEED_MODE_RAW.strip().lower():
     _PRESET_MAP = {"fast": 0.5, "normal": 1.0, "slow": 1.5, "very_slow": 2.5}
     if _sm in _PRESET_MAP:
         NETWORK_SPEED_MULTIPLIER = _PRESET_MAP[_sm]
-        _get_config_logger().info(f"[Config] NETWORK_SPEED_MODE={_sm} → multiplier={NETWORK_SPEED_MULTIPLIER}")
+        _get_config_logger().info(
+            f"[Config] NETWORK_SPEED_MODE={_sm} → multiplier={NETWORK_SPEED_MULTIPLIER}"
+        )
     else:
         _get_config_logger().warning(f"[Config] Unknown NETWORK_SPEED_MODE={_sm!r}; ignoring.")
 
 # Probe the network immediately on startup (before first row) to avoid
 # paying the 30s lazy-probe penalty on the first call.
-NETWORK_SPEED_PROBE_ON_STARTUP = os.getenv("NETWORK_SPEED_PROBE_ON_STARTUP", "true").lower() in ("1", "true", "yes")
+NETWORK_SPEED_PROBE_ON_STARTUP = os.getenv("NETWORK_SPEED_PROBE_ON_STARTUP", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 # ═══════════════════════════════════════════════════════════════════
 # 🤖  CAPTCHA SOLVER  (optional — works without API keys)
@@ -384,7 +394,7 @@ SELENIUM_ENABLED = os.getenv("SELENIUM_ENABLED", "false").lower() == "true"
 SELENIUMBASE_ENABLED = os.getenv("SELENIUMBASE_ENABLED", "true").lower() == "true"
 
 # ── Tier 4: CloakBrowser (Supreme Stealth — C++ patched) ────────────────
-CLOAKBROWSER_ENABLED = os.getenv("CLOAKBROWSER_ENABLED", "true").lower() == "true"
+CLOAKBROWSER_ENABLED = os.getenv("CLOAKBROWSER_ENABLED", "false").lower() == "true"
 
 # Reconnect-time (seconds) after a Turnstile/Cloudflare challenge.
 # Gemini.md §2: "Toujours inclure reconnect_time si un défi Turnstile est suspecte."
@@ -403,7 +413,7 @@ BOTASAURUS_CACHE_MAX_AGE_HOURS = int(os.getenv("BOTASAURUS_CACHE_MAX_AGE_HOURS",
 #   "simple"   → Tiers 2-3 (SeleniumBase + Botasaurus).
 #   "stealth"  → Tiers 2 + 5 ONLY (SeleniumBase + Nodriver).
 #   "balanced" → Tiers 2-3-4 (SeleniumBase + Botasaurus + CloakBrowser).
-#   "golden"   → Tiers 2 → 6 ONLY (SeleniumBase + Crawl4AI). FASTEST, lowest RAM.
+#   "golden"   → Tiers 6 → 5 → 2 ONLY (Crawl4AI → Nodriver → SeleniumBase UC). FASTEST, lowest RAM.
 #   "full"     → Full waterfall through all enabled tiers.
 PERFORMANCE_MODE = os.getenv("PERFORMANCE_MODE", "golden").lower()
 
@@ -707,12 +717,12 @@ def _opt(prompt: str) -> str:
 # {nom}     → replaced by company name (Raison Sociale) or SIREN
 # {adresse} → replaced by the company address
 SEARCH_PROMPT_TEMPLATE = _opt(
-    "En tant qu'expert en recherche B2B, identifiez les informations de contact les plus fiables et récentes pour l'entreprise '{nom}' à '{adresse}' (Secteur/Activité: {category}). Suivez les principes EEAT : priorisez les sources officielles (site web, Infogreffe, LinkedIn). Trouvez le numéro de téléphone exact, l'adresse postale complète et le SIREN/SIRET. Si plusieurs numéros existent, donnez le plus crédible. Output in json format."
+    "En tant qu'expert en recherche B2B, identifiez les informations de contact les plus fiables et récentes pour l'entreprise '{nom}' à '{adresse}' (Secteur/Activité: {category}). Suivez les principes EEAT : priorisez les sources officielles (site web officielle, Infogreffe,PagesJaunes,Facebook, LinkedIn). Trouvez le numéro de téléphone exact, l'adresse postale complète et le SIREN/SIRET. Si plusieurs numéros existent, donnez le plus crédible ou une list des nombres valide . Output in json format."
 )
 
 # Template for SIREN-based search (Expertise-focused)
 SIREN_SEARCH_TEMPLATE = _opt(
-    "En tant qu'expert B2B, identifiez la Raison Sociale, l'adresse complète et le téléphone officiel pour le SIREN {siren} (Activité: {category}). Priorisez les bases de données d'autorité (INSEE, Infogreffe, Pappers). Output in json format."
+    "En tant qu'expert B2B, identifiez la Raison Sociale, l'adresse complète et le téléphone officiel pour le SIREN {siren} (Activité: {category}). Priorisez les bases de données d'autorité (INSEE, Infogreffe, Pappers) puis les réseaux sociaux . Output in json format."
 )
 
 # Specific prompt for agent phone number (Experience-focused)
@@ -729,27 +739,20 @@ SQO_CONTACT_KEYWORDS = '("téléphone" OR "contact" OR "siège social")'
 
 # ══════════════════════════════════════════════════════════════════
 # 🤖  TIER 0: GOOGLE AI MODE — PRIMARY PROMPT (JSON STRICT)
-AI_MODE_SEARCH_PROMPT = _opt("""
-### ROLE
-Expert B2B Intelligence Researcher specialized in industrial OSINT.
-
-### TASK
+AI_MODE_SEARCH_PROMPT = _opt("""As an Expert B2B Intelligence Researcher specialized in industrial OSINT.
 Identify critical contact and identification data for the following entity:
 - NAME: {nom}
 - ADDRESS: {adresse}
 - SIREN: {siren}
 - CATEGORY: {category}
-
-### CONTEXT
+CONTEXT
 Raw source data: {extra}
-
-### CONSTRAINTS
+CONSTRAINTS
 1. Prioritize direct phone numbers for the Director/CEO or Management.
 2. If direct phone is missing, provide the general company phone.
 3. Ensure the address matches the provided city/locality.
 4. ABSOLUTELY NO conversational text.
-
-### OUTPUT FORMAT (JSON ONLY)
+OUTPUT FORMAT (JSON ONLY)
 {{
   "company_name": "...",
   "phone_numbers": ["..."],
@@ -759,7 +762,8 @@ Raw source data: {extra}
   "siren": "...",
   "legal_form": "...",
   "social_media": {{ "facebook": "...", "linkedin": "...", "instagram": "..." }},
-  "website": "..."
+  "website": "...",
+  ... (other info)
 }}
 """)
 
@@ -767,19 +771,15 @@ Raw source data: {extra}
 AI_MODE_EXPERT_PROMPT = _opt("""
 ### IDENTITY
 Advanced Data Forensic Agent for the French B2B Market.
-
 ### MISSION
 The standard search failed. Conduct a deep-dive investigation on '{nom}' at '{adresse}' (SIREN: {siren}, CATEGORY: {category}).
 Target Activity: {category}
-
 ### STEPS
 1. Verify legal existence and current operational status.
 2. Locate professional contact details (Email, Phone) via official records or social profiles.
 3. Identify the current 'Dirigeant' (Manager/CEO).
-
 ### OUTPUT
-Provide a complete JSON object. If a field is missing, use "NOT_FOUND".
-NO CHATTER. NO PREAMBLE.
+Provide a complete JSON object. If a field is missing, use "". NO CHATTER. NO PREAMBLE.
 """)
 
 # ── GEO (Generative Engine Optimization) — RAG PROMPT ──
