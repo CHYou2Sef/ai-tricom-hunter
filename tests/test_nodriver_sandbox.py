@@ -17,5 +17,6 @@ async def test_sandbox_false():
     )
     print("SUCCESS: Started with sandbox=False")
     browser.stop()
+if __name__ == "__main__":
+    asyncio.run(test_sandbox_false())
 
-asyncio.run(test_sandbox_false())

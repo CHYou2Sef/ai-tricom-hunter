@@ -550,8 +550,10 @@ class HybridAutomationEngine:
         elif p_mode == "balanced":
             tier_sequence = [2, 3, 4]  # SeleniumBase + Botasaurus + CloakBrowser
         elif p_mode == "golden":
-            # 🚀 GOLDEN-TIERS (updated): Crawl4AI → Nodriver → SeleniumBase UC
-            tier_sequence = [6, 5, 2]
+            # 🚀 GOLDEN-TIERS: SeleniumBase UC primary (no proxy),
+            # Crawl4AI fallback for heavy JS pages.
+            # NOTE: Nodriver (Tier 5) skipped — not installed in this environment.
+            tier_sequence = [2, 6]
         else:
             # "full" mode or custom Full Path sequence
             tier_sequence = [2, 5, 4, 6]

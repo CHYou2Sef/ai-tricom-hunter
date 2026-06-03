@@ -54,9 +54,14 @@ class FileChunker:
             return [p]
 
     def _split_tabular(self, p: Path, chunk_size: int) -> List[Path]:
-        """Splits CSV/Excel into smaller CSV chunks."""
+        """Splits CSV/Excel into smaller CSV chunks. Skips files already marked DONE."""
+        stem_upper = p.stem.upper()
+        if "_DONE" in stem_upper or stem_upper.endswith("DONE"):
+            logger.warning(f"[Chunker] SKIP — already-processed file: {p.name}")
+            return []
+
         logger.info(f"[Chunker] Decomposing tabular file: {p.name}")
-        
+
         try:
             # 1. Read the file using the project's native reader
             rows, mapping = read_excel(str(p))

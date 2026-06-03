@@ -83,11 +83,19 @@ def chunk_node(state: Layer0State) -> Layer0State:
     """
     Split large files using the existing FileChunker.
     If the file is small enough, FileChunker returns the original path.
+    Skips files whose name contains 'DONE' — those have already been processed.
     """
     from common.chunker import FileChunker
 
+    raw_path = state["raw_file_path"]
+    stem = Path(raw_path).stem.upper()
+
+    if "_DONE" in stem or stem.endswith("DONE"):
+        logger.warning(f"[L0|chunk] SKIP — already-processed file: {raw_path}")
+        return {**state, "chunk_paths": []}
+
     chunker = FileChunker()
-    chunks  = chunker.split_file(state["raw_file_path"])
+    chunks  = chunker.split_file(raw_path)
     paths   = [str(c) for c in chunks if Path(c).exists()]
     logger.info(f"[L0|chunk] {len(paths)} chunk(s) produced")
     return {**state, "chunk_paths": paths}

@@ -61,17 +61,19 @@ async def _wait_for_ram_headroom(threshold: float = RAM_HIGHWATER_PCT) -> None:
     """
     Block the calling coroutine until RAM drops below *threshold* %.
     Called before each agent checkout so we shed load early instead of OOM.
+
+    NOTE: With MAX_CONCURRENT_WORKERS=1, only ONE browser runs at a time, so RAM
+    is driven by the supervisor watchdog (restart at 90%). This function now only
+    logs a warning and returns — it no longer blocks in a tight sleep loop.
+    The real safety net is _memory_watchdog() in supervisor.py (90% restart).
     """
     ram = _get_ram_pct()
     if ram < threshold:
         return
     logger.warning(
         f"[AgentPool] 🔴 RAM at {ram:.1f}% (≥{threshold}%) — "
-        "pausing row dispatch until headroom recovers..."
+        "dispatching anyway (supervisor watchdog handles restarts at 90%)..."
     )
-    while _get_ram_pct() >= threshold:
-        await asyncio.sleep(5)
-    logger.info(f"[AgentPool] 🟢 RAM recovered to {_get_ram_pct():.1f}% — resuming.")
 
 # ── Agent Pool ───────────────────────────────────────────────────────────
 # asyncio.Queue gives us a cheap semaphore-like pool of pre-warmed browsers.
@@ -242,7 +244,7 @@ def sync_with_previous_results(rows: List[ExcelRow], filepath: str, progress: Fi
 
 from dataclasses import dataclass
 
-@dataclass
+@dataclass(frozen=True)
 class WorkerContext:
     """
     Immutable-ish bag of dependencies for one row.

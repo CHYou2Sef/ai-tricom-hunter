@@ -61,9 +61,10 @@ class Crawl4AIAgent(BaseBrowserAgent):
         return await self._start_crawler()
 
     async def _start_crawler(self) -> bool:
-        """Start Crawl4AI crawler with RecursionError mitigation."""
+        """Start Crawl4AI crawler with RecursionError mitigation and version-safe BrowserConfig."""
         try:
             from crawl4ai import AsyncWebCrawler, BrowserConfig
+            import inspect
 
             # CRITICAL FIX: Increase recursion limit for Docker/Crawl4AI
             old_limit = sys.getrecursionlimit()
@@ -98,13 +99,39 @@ class Crawl4AIAgent(BaseBrowserAgent):
                 "--no-zygote",
             ]
 
-            _proxy = {"server": self.current_proxy} if self.current_proxy else None
-            browser_cfg = BrowserConfig(
-                headless=True,
-                extra_args=browser_args,
-                proxy_config=_proxy,
-                browser_type="chromium",
-            )
+            # Build BrowserConfig using only params that exist in THIS version.
+            # This prevents "unexpected keyword argument" errors when the installed
+            # crawl4ai version differs from what the code was written against.
+            sig = inspect.signature(BrowserConfig.__init__)
+            accepted = set(sig.parameters.keys())
+
+            kwargs: dict[str, Any] = {
+                "headless": True,
+                "extra_args": browser_args,
+                "browser_type": "chromium",
+            }
+
+            # proxy: accepted in all recent versions (plain string or None)
+            if "proxy" in accepted and self.current_proxy:
+                kwargs["proxy"] = self.current_proxy
+
+            # text_mode / light_mode / memory_saving_mode: reduce RAM
+            for opt in (
+                "text_mode",
+                "light_mode",
+                "memory_saving_mode",
+                "max_pages_before_recycle",
+            ):
+                if opt in accepted:
+                    kwargs[opt] = True if opt != "max_pages_before_recycle" else 5
+
+            # viewport dict
+            if "viewport" in accepted:
+                kwargs["viewport"] = {"width": 1280, "height": 800}
+
+            # No page_timeout — that was an old API that doesn't exist in current versions
+
+            browser_cfg = BrowserConfig(**kwargs)
 
             self._crawler = AsyncWebCrawler(config=browser_cfg)
             await self._crawler.__aenter__()
@@ -153,7 +180,7 @@ class Crawl4AIAgent(BaseBrowserAgent):
         try:
             result = await self._crawler.arun(
                 url=url,
-                word_count_threshold=5,  # Lower threshold → faster return
+                word_count_threshold=3,  # Lower threshold → faster return
                 remove_overlay_elements=True,
                 bypass_cache=True,
                 cache_mode="bypass",

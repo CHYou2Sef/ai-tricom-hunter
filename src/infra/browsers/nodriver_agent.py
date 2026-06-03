@@ -59,27 +59,30 @@ class NodriverAgent(BaseBrowserAgent):
 
             logger.info("[Nodriver] Starting browser...")
 
-            # FIX 1: sandbox=False is required when running as root (Docker)
+            # sandbox=False is required when running as root (Docker)
             running_as_root = os.getuid() == 0
             browser_args: list[str] = []
             if running_as_root:
                 browser_args += ["--no-sandbox", "--disable-setuid-sandbox"]
 
-            # FIX 2: nodriver does NOT accept a `proxy` kwarg in nd.start().
-            # Proxy must be injected as a Chrome CLI argument.
+            # Proxy injected as Chrome CLI argument (nodriver does NOT accept proxy kwarg)
             if self.current_proxy:
                 browser_args.append(f"--proxy-server={self.current_proxy}")
 
-            # FIX 3: correct parameter name is `browser_args`, not `args`
             self._browser = await nd.start(
                 headless=True,
                 browser_args=browser_args,
-                sandbox=not running_as_root,
+                sandbox=False,  # force False for reliability in containerised environments
                 user_data_dir=None,
             )
 
-            # FIX 4: nodriver has NO `contexts` or `launch_context` (Playwright API).
-            # After launch the browser is already on its main tab — grab it directly.
+            # Guard against nd.start() returning None silently (CDP connection failure)
+            if self._browser is None:
+                logger.error("[Nodriver] Failed to start: nd.start() returned None (CDP connection failed)")
+                self._browser = None
+                self._page = None
+                return False
+
             self._page = self._browser.main_tab
 
             alert("INFO", "Nodriver session started", {"proxy": self.current_proxy or "direct"})

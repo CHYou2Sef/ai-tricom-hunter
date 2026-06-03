@@ -68,13 +68,14 @@ GEMINI_RESPONSE_SELECTORS = [
 # ── AI Mode response containers (same as patchright_agent) ───────────────────
 # Merged list of AI overview / SGE specific selectors + standard ones
 AI_RESPONSE_SELECTORS = GOOGLE_AI_RESPONSE_SELECTORS + [
-    "div.XpoqFe",           # SGE main container
-    "div.iv_7C",            # SGE alternate
+    "div.XpoqFe",  # SGE main container
+    "div.iv_7C",  # SGE alternate
     "div[role='main'] div.VwiC3b",
     "div[class*='osrp']",
 ]
-class SeleniumBaseAgent(BaseBrowserAgent):
 
+
+class SeleniumBaseAgent(BaseBrowserAgent):
     """
     Tier 1 browser agent powered by SeleniumBase UC Driver.
 
@@ -96,7 +97,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
     def __init__(self, worker_id: int = 0):
         super().__init__(worker_id)
-        self._driver = None                         # seleniumbase.Driver instance
+        self._driver = None  # seleniumbase.Driver instance
         self.current_proxy: Optional[str] = None
         self._session_start_ts: float = 0.0
         self._last_content: str = ""
@@ -109,7 +110,8 @@ class SeleniumBaseAgent(BaseBrowserAgent):
     async def is_alive(self) -> bool:
         """Public health check with lock protection."""
         async with self._lock:
-            if not self._driver: return False
+            if not self._driver:
+                return False
             try:
                 # Confirm JS execution is alive
                 await asyncio.to_thread(lambda: self._driver.execute_script("return 1+1"))
@@ -124,11 +126,12 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         """
         now = time.monotonic()
         if self._driver and (now - self._last_health_check < 5.0):
-            return True # Don't spam health checks
+            return True  # Don't spam health checks
 
         if not self._driver:
             await self._start_locked()
-            if not self._driver: return False
+            if not self._driver:
+                return False
 
         # Use the same logic as is_alive but inside existing lock
         try:
@@ -160,7 +163,9 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             if details is not None:
                 # Store as a plain attribute to avoid changing the runtime contract elsewhere.
                 self._last_interruption_details = details  # type: ignore[attr-defined]
-            logger.warning(f"[SeleniumBase] Interruption recorded: {reason}{(' - ' + details) if details else ''}")
+            logger.warning(
+                f"[SeleniumBase] Interruption recorded: {reason}{(' - ' + details) if details else ''}"
+            )
         except Exception:
             # Absolute safety: never let interruption recording break scraping.
             pass
@@ -173,13 +178,16 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
         if not self.current_proxy and config.PROXY_ENABLED:
             from common.proxy_manager import get_next_proxy
+
             self.current_proxy = await get_next_proxy()
 
         logger.info(
             f"[SeleniumBase] 🚀 Starting UC Driver "
             f"(worker={self.worker_id}, proxy={self.current_proxy or 'direct'})..."
         )
-        _timeout = self.get_adaptive_timeout_sec(int(getattr(config, "BROWSER_STARTUP_TIMEOUT_SEC", 90.0)))
+        _timeout = self.get_adaptive_timeout_sec(
+            int(getattr(config, "BROWSER_STARTUP_TIMEOUT_SEC", 90.0))
+        )
         try:
             await asyncio.wait_for(
                 asyncio.to_thread(self._sync_start),
@@ -282,6 +290,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             # Delete persistent profile dir to avoid poisoned options.
             # Failures are non-fatal; start attempt will still proceed.
             import shutil
+
             if os.path.isdir(profile_path):
                 shutil.rmtree(profile_path, ignore_errors=True)
         except Exception:
@@ -291,8 +300,9 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         _is_docker = getattr(config, "DOCKER_ENV", False)
         _use_headless = _is_docker  # Headless in Docker is faster (no Xvfb overhead)
 
-        driver = Driver(
-            uc=True,
+        driver = Driver(uc=True, headless=False)
+
+        """
             headless=_use_headless,
             user_data_dir=profile_path,
             ad_block=True,
@@ -301,8 +311,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             locale_code="fr",
             chromium_arg=extra_args,
             page_load_strategy="normal",
-        )
-
+        """
 
         # If uc_driver keeps a poisoned options object from a previous failed
         # attempt, it will throw on first navigation. Fail fast here so
@@ -320,7 +329,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         except Exception:
             pass
         logger.info("[SeleniumBase] Driver() constructor returned; finishing session setup…")
-        
+
         # Inject fingerprint bundle via execute_script for enhanced stealth
         # Guard: _driver may be None if Driver() constructor returned None
         if self._driver:
@@ -381,6 +390,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
     async def _rotate_proxy_locked(self) -> None:
         """Internal lock-free proxy rotation."""
         from common.proxy_manager import get_next_proxy
+
         new_proxy = await get_next_proxy()
         if new_proxy:
             logger.info(f"[SeleniumBase-Worker-{self.worker_id}] ♻️ Rotating proxy to: {new_proxy}")
@@ -423,23 +433,25 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         try:
             logger.info(f"[SeleniumBase] Navigating to: {url}")
             await asyncio.to_thread(self._sync_goto_with_driver, self._driver, url)
-            
+
             # Check for blocks immediately after navigation
             if await self._handle_captcha_if_present_locked():
                 # If it detected a block and rotated or failed, we consider this navigation failed
                 # to trigger HybridEngine escalation.
                 return False
-                
+
             return True
         except Exception as exc:
             if self.is_block_response(exc):
-                logger.error("[SeleniumBase] 🛑 Session/Proxy FAILED (Block detected). Reporting...")
+                logger.error(
+                    "[SeleniumBase] 🛑 Session/Proxy FAILED (Block detected). Reporting..."
+                )
                 if self.current_proxy:
                     await self.report_proxy_error(self.current_proxy, 403)
-                
+
                 await self._rotate_proxy_locked()
                 return False
-            
+
             logger.error(f"[SeleniumBase] _goto_url_locked error: {exc}")
             return False
 
@@ -449,7 +461,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         try:
             driver.wait_for_ready_state_complete(timeout=self.get_adaptive_timeout_sec(20))
         except Exception:
-            pass 
+            pass
 
     # ── Search methods ────────────────────────────────────────────────────────
 
@@ -467,8 +479,10 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
         # ── URL construction ─────────────────────────────────────────────
         from common.search_engine import generate_google_ai_url, extract_search_terms
+
         if ai_mode_url:
             import urllib.parse
+
             clean_query = extract_search_terms(prompt)
             url = ai_mode_url + urllib.parse.quote_plus(clean_query)
             provider_label = "AI-Mode"
@@ -477,15 +491,20 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             provider_label = "Google-AI-Mode"
 
         try:
-            logger.info(f"🤖 [SeleniumBase-{provider_label}] Navigating for prompt ({len(prompt)} chars)...")
+            logger.info(
+                f"🤖 [SeleniumBase-{provider_label}] Navigating for prompt ({len(prompt)} chars)..."
+            )
             await asyncio.to_thread(self._sync_goto_with_driver, self._driver, url)
-            
+
             # ── 1. Handle Turnstile / CAPTCHA / Blocks ────────────────────
             if await self._handle_captcha_if_present_locked():
-                logger.warning(f"[SeleniumBase] 🛡️ Search blocked or interrupted on {provider_label}")
+                logger.warning(
+                    f"[SeleniumBase] 🛡️ Search blocked or interrupted on {provider_label}"
+                )
                 return None
 
-            if not self._driver: return None
+            if not self._driver:
+                return None
 
             # ── 2. Handle Cookies ────────────────────────────────────────
             await self._accept_cookies_locked()
@@ -494,17 +513,22 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             source = await self._get_page_source_locked()
             if not source or self.is_block_response(source):
                 if source and self.is_block_response(source):
-                    logger.warning(f"[SeleniumBase] 🛡️ Block detected in page source after navigation.")
+                    logger.warning(
+                        f"[SeleniumBase] 🛡️ Block detected in page source after navigation."
+                    )
                     if self.current_proxy:
                         await self.report_proxy_error(self.current_proxy, 403)
                     await self._rotate_proxy_locked()
                 return None
-            
+
             from common.universal_extractor import UniversalExtractor
+
             self.last_metadata = UniversalExtractor.extract_all(source)
 
             # Wait for AI response to fully render
-            text = await self._wait_for_stable_response_locked(timeout_sec=self.get_adaptive_timeout_sec(25))
+            text = await self._wait_for_stable_response_locked(
+                timeout_sec=self.get_adaptive_timeout_sec(25)
+            )
             if text:
                 logger.info(f"✨ [SeleniumBase-{provider_label}] Got response ({len(text)} chars)")
                 # Final block check on text
@@ -515,7 +539,9 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
         except Exception as exc:
             if self.is_block_response(exc):
-                logger.error(f"[SeleniumBase] 🛑 Block/WAF detected during {provider_label} search.")
+                logger.error(
+                    f"[SeleniumBase] 🛑 Block/WAF detected during {provider_label} search."
+                )
                 if self.current_proxy:
                     await self.report_proxy_error(self.current_proxy, 403)
                 await self._rotate_proxy_locked()
@@ -541,9 +567,10 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         logger.info("🎭 [Human-Like] Starting interactive search cycle...")
         if not await self._goto_url_locked(config.GOOGLE_URL):
             return None
-        
+
         await self._accept_cookies_locked()
-        if not self._driver: return None
+        if not self._driver:
+            return None
 
         # ── 2. Construct Query ─────────────────────────────────────────────
         if row:
@@ -555,7 +582,11 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         try:
             logger.info(f"⌨️ [Human-Like] Typing query: {query}")
             for sel in [GOOGLE_SEARCH_INPUT]:
-                await asyncio.to_thread(self._driver.wait_for_element_visible, sel, timeout=self.get_adaptive_timeout_sec(5))
+                await asyncio.to_thread(
+                    self._driver.wait_for_element_visible,
+                    sel,
+                    timeout=self.get_adaptive_timeout_sec(5),
+                )
                 await asyncio.to_thread(self._sync_human_type_locked, self._driver, sel, query)
                 await asyncio.to_thread(self._driver.send_keys, sel, "\n")
                 break
@@ -568,46 +599,62 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         # ── 4. Immediate Check (Phone in SERP) ─────────────────────────────
         source = await self._get_page_source_locked()
         if source:
-            phone_match = re.search(r'0[1-9](?:[\s.-]?\d{2}){4}', source)
+            phone_match = re.search(r"0[1-9](?:[\s.-]?\d{2}){4}", source)
             if phone_match:
                 logger.info(f"✨ [Human-Like] Phone found DIRECTLY on SERP: {phone_match.group(0)}")
-                return source 
+                return source
 
         # ── 5. Trigger AI Mode ─────────────────────────────────────────────
         ai_buttons = [
-            "button[aria-label*='Générer']", "button[aria-label*='Generate']",
-            "button:contains('AI Overview')", "div[role='button']:contains('AI Overview')",
-            "button:contains('Conversation')", "button:contains('Ask a follow up')",
+            "button[aria-label*='Générer']",
+            "button[aria-label*='Generate']",
+            "button:contains('AI Overview')",
+            "div[role='button']:contains('AI Overview')",
+            "button:contains('Conversation')",
+            "button:contains('Ask a follow up')",
         ]
-        
+
         logger.info("[Human-Like] No phone on SERP. Attempting to trigger AI Overview...")
         for btn in ai_buttons:
-            if not self._driver: break
+            if not self._driver:
+                break
             try:
-                await asyncio.to_thread(self._driver.click, btn, timeout=self.get_adaptive_timeout_sec(3))
+                await asyncio.to_thread(
+                    self._driver.click, btn, timeout=self.get_adaptive_timeout_sec(3)
+                )
                 logger.info(f"✅ [Human-Like] Clicked AI button: {btn}")
                 break
-            except Exception: continue
-        
+            except Exception:
+                continue
+
         await asyncio.sleep(4)
-        if not self._driver: return None
+        if not self._driver:
+            return None
 
         # ── 6. Type Prompt (if follow-up input exists) ─────────────────────
         follow_up_input = "textarea[placeholder*='follow-up'], textarea[placeholder*='Préciser']"
         try:
-            await asyncio.to_thread(self._driver.wait_for_element_visible, follow_up_input, timeout=self.get_adaptive_timeout_sec(5))
-            await asyncio.to_thread(self._sync_human_type_locked, self._driver, follow_up_input, prompt)
+            await asyncio.to_thread(
+                self._driver.wait_for_element_visible,
+                follow_up_input,
+                timeout=self.get_adaptive_timeout_sec(5),
+            )
+            await asyncio.to_thread(
+                self._sync_human_type_locked, self._driver, follow_up_input, prompt
+            )
             await asyncio.to_thread(self._driver.send_keys, follow_up_input, "\n")
             logger.info("🤖 [Human-Like] Prompt typed in AI follow-up.")
-        except Exception: pass
+        except Exception:
+            pass
 
         # ── 7. Wait for stable response ────────────────────────────────────
-        return await self._wait_for_stable_response_locked(timeout_sec=self.get_adaptive_timeout_sec(30))
+        return await self._wait_for_stable_response_locked(
+            timeout_sec=self.get_adaptive_timeout_sec(30)
+        )
 
     async def search_google_ai(self, prompt: str, **kwargs) -> Optional[str]:
         """Alias maintaining full HybridEngine / benchmark compatibility."""
         return await self.search_google_ai_mode(prompt, **kwargs)
-
 
     async def submit_google_search(self, prompt: str) -> bool:
         """Navigate to Google, dismiss cookies, type prompt, press Enter."""
@@ -625,19 +672,26 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             await asyncio.sleep(1)
 
             await self._handle_captcha_if_present_locked()
-            if not self._driver: return False
+            if not self._driver:
+                return False
 
             await self._accept_cookies_locked()
-            if not self._driver: return False
+            if not self._driver:
+                return False
 
             for sel in ["textarea[name='q']", "input[name='q']"]:
                 try:
-                    await asyncio.to_thread(self._driver.wait_for_element_visible, sel, timeout=self.get_adaptive_timeout_sec(5))
+                    await asyncio.to_thread(
+                        self._driver.wait_for_element_visible,
+                        sel,
+                        timeout=self.get_adaptive_timeout_sec(5),
+                    )
                     await asyncio.to_thread(self._sync_human_type_locked, self._driver, sel, prompt)
                     await asyncio.to_thread(self._driver.send_keys, sel, "\n")
                     await asyncio.sleep(2)
                     return True
-                except Exception: continue
+                except Exception:
+                    continue
 
             logger.warning("[SeleniumBase] _submit_google_search_locked: search box not found.")
             return False
@@ -663,15 +717,21 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             logger.info(f"🚀 [SeleniumBase-Gemini] DeepSearch: {prompt}")
             await asyncio.to_thread(self._driver.get, config.GEMINI_URL)
             await asyncio.sleep(3)
-            if not self._driver: return None
+            if not self._driver:
+                return None
 
             input_sel = None
             for sel in GEMINI_INPUT_SELECTORS:
                 try:
-                    await asyncio.to_thread(self._driver.wait_for_element_visible, sel, timeout=self.get_adaptive_timeout_sec(4))
+                    await asyncio.to_thread(
+                        self._driver.wait_for_element_visible,
+                        sel,
+                        timeout=self.get_adaptive_timeout_sec(4),
+                    )
                     input_sel = sel
                     break
-                except Exception: continue
+                except Exception:
+                    continue
 
             if not input_sel:
                 logger.warning("[SeleniumBase-Gemini] Input area not found.")
@@ -681,7 +741,9 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             await asyncio.to_thread(self._driver.send_keys, input_sel, "\n")
             await asyncio.sleep(1)
 
-            return await self._wait_for_stable_element_text_locked(GEMINI_RESPONSE_SELECTORS, timeout_sec=self.get_adaptive_timeout_sec(60))
+            return await self._wait_for_stable_element_text_locked(
+                GEMINI_RESPONSE_SELECTORS, timeout_sec=self.get_adaptive_timeout_sec(60)
+            )
         except Exception as exc:
             logger.error(f"[SeleniumBase] _search_gemini_ai_locked error: {exc}")
             if self.is_block_response(exc):
@@ -698,7 +760,8 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         """Internal locked deep crawl."""
         if not await self._goto_url_locked(url):
             return ""
-        if not self._driver: return ""
+        if not self._driver:
+            return ""
 
         try:
             all_text: list[str] = []
@@ -721,13 +784,18 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                                 sublinks.append(full_href)
                             elif full_href.startswith("/"):
                                 from urllib.parse import urljoin
+
                                 sublinks.append(urljoin(url, full_href))
-                        if len(sublinks) >= 2: break
-                    except Exception: continue
-            except Exception: pass
+                        if len(sublinks) >= 2:
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
 
             for sub in list(set(sublinks)):
-                if not self._driver: break
+                if not self._driver:
+                    break
                 try:
                     logger.info(f"   ∟ [SeleniumBase] Visiting subpage: {sub}")
                     await asyncio.to_thread(self._sync_goto_with_driver, self._driver, sub)
@@ -736,7 +804,8 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                     sub_text = re.sub(r"<[^>]+>", " ", sub_src)
                     sub_text = re.sub(r"\s+", " ", sub_text).strip()
                     all_text.append(f"\n--- PAGE: {sub} ---\n{sub_text}")
-                except Exception: continue
+                except Exception:
+                    continue
 
             combined = "\n".join(all_text)
             return combined[:12000]
@@ -746,9 +815,11 @@ class SeleniumBaseAgent(BaseBrowserAgent):
 
     async def _handle_captcha_if_present_locked(self) -> bool:
         """Multi-layer CAPTCHA detection and resolution (locked version)."""
-        if not self._driver: return False
+        if not self._driver:
+            return False
         source = await self._get_page_source_locked()
-        if not source: return False
+        if not source:
+            return False
 
         if self.is_block_response(source):
             logger.error("[SeleniumBase] 🚨 HARD IP BAN DETECTED (via is_block_response).")
@@ -760,7 +831,9 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             return True
 
         try:
-            has_turnstile = await asyncio.to_thread(self._driver.is_element_visible, 'iframe[src*="turnstile"]')
+            has_turnstile = await asyncio.to_thread(
+                self._driver.is_element_visible, 'iframe[src*="turnstile"]'
+            )
             if has_turnstile:
                 logger.warning("[SeleniumBase] ⚠️  Turnstile challenge detected.")
                 await self._record_interruption("turnstile", "CF Turnstile challenge")
@@ -769,24 +842,28 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                 # Returning True tells the caller to treat this as an interruption.
                 await asyncio.sleep(self._reconnect_time)
                 return True
-        except Exception: pass
-
+        except Exception:
+            pass
 
         if is_captcha_page(source):
             logger.warning("[SeleniumBase] ⚠️  SOFT CAPTCHA / WAF detected.")
             await self._record_interruption("captcha_waf", "CAPTCHA challenge")
-            if config.PROXY_ENABLED: await self._rotate_proxy_locked()
-            else: await asyncio.to_thread(wait_for_human_captcha_solve)
+            if config.PROXY_ENABLED:
+                await self._rotate_proxy_locked()
+            else:
+                await asyncio.to_thread(wait_for_human_captcha_solve)
             return True
         return False
 
     async def _accept_cookies_locked(self) -> None:
         """Accept Google cookie consent banners if present (locked)."""
-        if not self._driver: return
+        if not self._driver:
+            return
         try:
             selectors = GOOGLE_COOKIE_ACCEPT_SELECTORS
             for s in selectors:
-                if not self._driver: break
+                if not self._driver:
+                    break
                 try:
                     visible = await asyncio.to_thread(self._driver.is_element_visible, s)
                     if visible:
@@ -794,33 +871,44 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                         logger.info("[SeleniumBase] Cookie consent accepted.")
                         await asyncio.sleep(1)
                         break
-                except Exception: continue
-        except Exception: pass
+                except Exception:
+                    continue
+        except Exception:
+            pass
 
     def _sync_human_type_locked(self, driver: Any, selector: str, text: str) -> None:
         """Character-by-character typing with Gaussian delays."""
         if not driver or not self._driver:
             return
-            
+
         import numpy as np  # type: ignore
-        profile = config.ACTION_DELAY_PROFILES.get("type_char", {"mean": 0.08, "std": 0.03, "min": 0.04, "max": 0.20})
-        try: 
+
+        profile = config.ACTION_DELAY_PROFILES.get(
+            "type_char", {"mean": 0.08, "std": 0.03, "min": 0.04, "max": 0.20}
+        )
+        try:
             driver.click(selector)
-        except Exception: 
+        except Exception:
             pass
 
         for char in text:
-            if not self._driver: 
+            if not self._driver:
                 break
-            try: 
+            try:
                 self._driver.send_keys(selector, char)
             except Exception:
-                try: 
+                try:
                     self._driver.type(selector, char)
-                except Exception: 
+                except Exception:
                     pass
             try:
-                delay = float(np.clip(np.random.normal(profile["mean"], profile["std"]), profile["min"], profile["max"]))
+                delay = float(
+                    np.clip(
+                        np.random.normal(profile["mean"], profile["std"]),
+                        profile["min"],
+                        profile["max"],
+                    )
+                )
             except Exception:
                 delay = random.uniform(config.TYPING_MIN_DELAY_SEC, config.TYPING_MAX_DELAY_SEC)
             time.sleep(delay)
@@ -830,34 +918,43 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         from common.smart_wait import wait_for_json_in_text
 
         async def get_text():
-            if not self._driver: return None
+            if not self._driver:
+                return None
             current = await self._extract_first_selector_locked(AI_RESPONSE_SELECTORS)
             if not current:
-                try: current = await asyncio.to_thread(lambda: self._driver.get_text("body"))
-                except Exception: pass
+                try:
+                    current = await asyncio.to_thread(lambda: self._driver.get_text("body"))
+                except Exception:
+                    pass
             return current
 
         return await wait_for_json_in_text(get_text, timeout=timeout_sec, poll_interval=1.0)
 
-    async def _wait_for_stable_element_text_locked(self, selectors: list, timeout_sec: int = 60) -> Optional[str]:
+    async def _wait_for_stable_element_text_locked(
+        self, selectors: list, timeout_sec: int = 60
+    ) -> Optional[str]:
         """Wait for selectors to produce JSON text output (locked)."""
         from common.smart_wait import wait_for_json_in_text
 
         async def get_text():
-            if not self._driver: return None
+            if not self._driver:
+                return None
             return await self._extract_first_selector_locked(selectors)
 
         return await wait_for_json_in_text(get_text, timeout=timeout_sec, poll_interval=1.0)
 
     async def _extract_first_selector_locked(self, selectors: list) -> Optional[str]:
-        if not self._driver: return None
+        if not self._driver:
+            return None
         for sel in selectors:
             try:
                 visible = await asyncio.to_thread(self._driver.is_element_visible, sel)
                 if visible:
                     text = await asyncio.to_thread(self._driver.get_text, sel)
-                    if text and text.strip(): return text.strip()
-            except Exception: continue
+                    if text and text.strip():
+                        return text.strip()
+            except Exception:
+                continue
         return None
 
     async def generate_human_noise(self) -> None:
@@ -866,20 +963,28 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             await self._generate_human_noise_locked()
 
     async def _generate_human_noise_locked(self) -> None:
-        if not self._driver: return
+        if not self._driver:
+            return
         site = random.choice(config.HUMAN_NOISE_SITES)
         logger.info(f"🎭 [Human Noise] Simulating activity on: {site}")
         try:
-            await asyncio.to_thread(self._driver.execute_script, f"window.open('{site}', '_blank');")
+            await asyncio.to_thread(
+                self._driver.execute_script, f"window.open('{site}', '_blank');"
+            )
             await asyncio.to_thread(self._driver.switch_to.window, self._driver.window_handles[-1])
             await asyncio.sleep(random.uniform(5, 12))
             for _ in range(random.randint(2, 5)):
-                if not self._driver: break
-                await asyncio.to_thread(self._driver.execute_script, f"window.scrollBy(0, {random.randint(300, 800)});")
+                if not self._driver:
+                    break
+                await asyncio.to_thread(
+                    self._driver.execute_script, f"window.scrollBy(0, {random.randint(300, 800)});"
+                )
                 await asyncio.sleep(random.uniform(1, 3))
             if self._driver:
                 await asyncio.to_thread(self._driver.close)
-                await asyncio.to_thread(self._driver.switch_to.window, self._driver.window_handles[0])
+                await asyncio.to_thread(
+                    self._driver.switch_to.window, self._driver.window_handles[0]
+                )
             logger.info("🎭 [Human Noise] Simulation complete.")
         except Exception as exc:
             logger.debug(f"[Human Noise] Simulation error: {exc}")
@@ -887,5 +992,8 @@ class SeleniumBaseAgent(BaseBrowserAgent):
                 if self._driver and len(self._driver.window_handles) > 1:
                     await asyncio.to_thread(self._driver.close)
                 if self._driver:
-                    await asyncio.to_thread(self._driver.switch_to.window, self._driver.window_handles[0])
-            except Exception: pass
+                    await asyncio.to_thread(
+                        self._driver.switch_to.window, self._driver.window_handles[0]
+                    )
+            except Exception:
+                pass

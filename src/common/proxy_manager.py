@@ -281,6 +281,10 @@ class ProxyManager:
         fetched: set = set()
 
         # 1. 🌟 PREMIUM RESIDENTIAL PROXIES
+        # CRITICAL: No free proxy fallback — free proxies are instantly banned by Google
+        # and cause all searches to return NO TEL. If RESIDENTIAL_PROXIES_ENV is empty,
+        # the pool stays empty and the system runs direct (no proxy) rather than
+        # silently degrading with banned datacenter IPs.
         if RESIDENTIAL_PROXIES_ENV:
             logger.info("💎 [ProxyManager] Loading Premium Residential Proxies from .env...")
             for proxy_url in RESIDENTIAL_PROXIES_ENV.split(","):
@@ -288,37 +292,11 @@ class ProxyManager:
                 if clean_url and self._validate_proxy_url(clean_url):
                     fetched.add(clean_url)
         else:
-            # 2. 🏴‍☠️ FREE PROXIES
-            logger.info("⚠️ [ProxyManager] No RESIDENTIAL_PROXIES found in .env. Falling back to free public proxies...")
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                for url in FREE_PROXY_SOURCES:
-                    try:
-                        resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-                        if resp.status_code != 200: continue
-                        content = resp.text
-
-                        if "geonode.com" in url:
-                            try:
-                                data = resp.json()
-                                for item in data.get("data", []):
-                                    ip   = item.get("ip")
-                                    port = item.get("port")
-                                    if ip and port:
-                                        proxy_str = f"http://{ip}:{port}"
-                                        if self._validate_proxy_url(proxy_str):
-                                            fetched.add(proxy_str)
-                            except: continue
-
-                        else:  # proxyscrape or GitHub plain text
-                            for line in content.splitlines():
-                                line = line.strip()
-                                if line and ":" in line:
-                                    proxy_str = f"http://{line}" if "http" not in line else line
-                                    if self._validate_proxy_url(proxy_str):
-                                        fetched.add(proxy_str)
-
-                    except Exception as exc:
-                        logger.debug(f"[ProxyManager] Source failed ({url}): {exc}")
+            logger.warning(
+                "⚠️ [ProxyManager] RESIDENTIAL_PROXIES is empty — "
+                "no proxy will be used (running direct). "
+                "Free proxy fallback is DISABLED because datacenter IPs are banned by Google."
+            )
 
         # Register new proxies
         for addr in fetched:
