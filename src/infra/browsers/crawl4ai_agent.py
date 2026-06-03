@@ -7,16 +7,22 @@ Fixes applied:
 3. Null-guard added before `self._crawler.arun()` — Pyright NoneType dereference
 4. Type annotations modernised: `Optional[X]` → `X | None` (PEP 604)
 5. Import ordering corrected (isort)
+6. JSON enforcement: search_google_ai_mode now validates and returns ONLY JSON blobs.
+   Non-JSON raw text is dropped (returns None) so HybridEngine escalates correctly.
+7. Improved stub comments: submit_google_search / extract_universal_data return
+   False/{} deliberately so HybridEngine escalates to interactive tiers (2/5).
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import sys
 from typing import Any, Optional
 
+from common.json_parser import parse_ai_mode_json
 from core import config
 from core.logger import alert, get_logger
 
@@ -221,11 +227,25 @@ class Crawl4AIAgent(BaseBrowserAgent):
     # ── Search / AI-mode methods ───────────────────────────────────────────
 
     async def submit_google_search(self, query: str) -> bool:
-        """Not supported in Crawl4AI standalone."""
+        """Intentionally not implemented for Crawl4AI standalone.
+
+        Crawl4AI has no interactive browser control (no page.type() / page.click()).
+        Returning False signals HybridEngine to escalate this task to an interactive
+        tier (Tier 2 SeleniumBase or Tier 5 Nodriver) that can actually type a query
+        into Google and submit the form.
+        """
+        logger.debug("[Crawl4AI] submit_google_search: not supported — escalating to interactive tier.")
         return False
 
     async def extract_universal_data(self, use_browser: bool = False) -> dict:  # type: ignore[override]
-        """Not supported in Crawl4AI standalone."""
+        """Intentionally not implemented for Crawl4AI standalone.
+
+        Extracting structured DOM data requires a live browser session with JS
+        execution (Playwright/Selenium). Crawl4AI fetches static markdown via its
+        own managed browser; it cannot expose a generic DOM extraction API.
+        Returning {} signals HybridEngine to escalate to a tier that supports it.
+        """
+        logger.debug("[Crawl4AI] extract_universal_data: not supported — escalating to interactive tier.")
         return {}
 
     async def search_google_ai_mode(
@@ -235,18 +255,30 @@ class Crawl4AIAgent(BaseBrowserAgent):
         row: Any | None = None,
         **kwargs: Any,
     ) -> str | None:
-        """Use Crawl4AI to fetch content from an AI Mode URL.
+        """Fetch an AI-Mode Google URL with Crawl4AI and return a JSON-only string.
 
-        Golden-tier compliance:
-          - Crawl4AI for rendered content
-          - httpx+BeautifulSoup postprocessing for clean extraction
+        Architecture note:
+          - This tier (6) is a *content fetcher*, NOT a search conductor.
+          - The `prompt` parameter is logged for traceability but the actual
+            search is already encoded in `ai_mode_url` by the primary tier (2/5).
+          - Output is strictly validated: only a valid JSON blob is returned.
+            If the fetched content contains no parseable JSON, None is returned
+            so HybridEngine escalates to the next tier.
 
-        FIX 2: signature now includes **kwargs to match BaseBrowserAgent contract.
-        FIX 3: null-guard on self._crawler before arun() call.
-        RecursionError-safe implementation.
+        Fixes:
+          - **kwargs contract alignment with BaseBrowserAgent.
+          - Null-guard on self._crawler before arun().
+          - RecursionError-safe implementation.
+          - FIX 6: JSON enforcement — parse_ai_mode_json filters non-JSON noise.
         """
         if not ai_mode_url:
+            logger.debug("[Crawl4AI] search_google_ai_mode: no ai_mode_url provided — skipping.")
             return None
+
+        logger.debug(
+            f"[Crawl4AI] search_google_ai_mode called | url={ai_mode_url[:80]}... "
+            f"| prompt_len={len(prompt) if prompt else 0}"
+        )
 
         old_limit = sys.getrecursionlimit()
         sys.setrecursionlimit(max(old_limit, 3000))
@@ -277,10 +309,31 @@ class Crawl4AIAgent(BaseBrowserAgent):
                     crawl_md = str(result.markdown or "").strip()
 
                 merged = await self._golden_postprocess_url(ai_mode_url, crawl_md)
-                if merged:
-                    self._last_content = merged
-                    return merged
-                return None
+                if not merged:
+                    logger.debug("[Crawl4AI] search_google_ai_mode: empty merged content.")
+                    return None
+
+                # ── FIX 6: JSON-ONLY ENFORCEMENT ─────────────────────────────
+                # Crawl4AI returns raw markdown/HTML text. The caller (phone_hunter)
+                # expects either a JSON string or None. We run parse_ai_mode_json
+                # to validate and extract the JSON blob, then re-serialize it as
+                # a canonical JSON string for downstream consumers.
+                parsed = parse_ai_mode_json(merged)
+                if parsed is None:
+                    logger.warning(
+                        "[Crawl4AI] search_google_ai_mode: content fetched but contains NO "
+                        "parseable JSON — returning None to trigger tier escalation. "
+                        f"(url={ai_mode_url[:60]}..., content_len={len(merged)})"
+                    )
+                    return None
+
+                json_str = json.dumps(parsed, ensure_ascii=False)
+                self._last_content = json_str
+                logger.info(
+                    f"[Crawl4AI] ✅ search_google_ai_mode: JSON extracted "
+                    f"(keys={list(parsed.keys())[:5]}, url={ai_mode_url[:60]}...)"
+                )
+                return json_str
 
         except RecursionError as e:
             logger.error(f"[Crawl4AI] RecursionError in search_google_ai_mode: {e}")
