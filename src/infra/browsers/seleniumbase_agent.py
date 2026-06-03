@@ -300,9 +300,8 @@ class SeleniumBaseAgent(BaseBrowserAgent):
         _is_docker = getattr(config, "DOCKER_ENV", False)
         _use_headless = _is_docker  # Headless in Docker is faster (no Xvfb overhead)
 
-        driver = Driver(uc=True, headless=False)
-
-        """
+        driver = Driver(
+            uc=True,
             headless=_use_headless,
             user_data_dir=profile_path,
             ad_block=True,
@@ -311,7 +310,7 @@ class SeleniumBaseAgent(BaseBrowserAgent):
             locale_code="fr",
             chromium_arg=extra_args,
             page_load_strategy="normal",
-        """
+        )
 
         # If uc_driver keeps a poisoned options object from a previous failed
         # attempt, it will throw on first navigation. Fail fast here so
